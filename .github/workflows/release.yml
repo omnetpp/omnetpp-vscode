@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # Triggers the workflow when pushing a tag that matches the pattern, e.g., v1.0.0
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '20' # Or any other Node.js version your project requires
+
+    - name: Install dependencies
+      run: npm install
+
+    - name: Build VS Code extension package
+      run: npm run package
+
+    - name: Create GitHub release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        draft: false
+        prerelease: false
+
+    - name: Get version from package.json
+      id: get_version
+      run: echo "VERSION=$(jq -r '.version' package.json)" >> $GITHUB_ENV
+
+    - name: Upload VS Code extension package to release
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./omnetpp-ned-${{ env.VERSION }}.vsix
+        asset_name: omnetpp-ned-${{ env.VERSION }}.vsix
+        asset_content_type: application/vsix
