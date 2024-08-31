@@ -1,0 +1,6 @@
+[submodule "subprojects/omnetpp-textmate-ned"]
+	path = subprojects/omnetpp-textmate-ned
+	url = https://github.com/omnetpp/omnetpp-textmate-ned
+[submodule "subprojects/omnetpp-textmate-msg"]
+	path = subprojects/omnetpp-textmate-msg
+	url = https://github.com/omnetpp/omnetpp-textmate-msg

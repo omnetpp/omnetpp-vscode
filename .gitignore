@@ -1,0 +1,2 @@
+# local and generated files not to be committed
+node_modules/*

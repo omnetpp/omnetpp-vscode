@@ -1,0 +1,3 @@
+echo 'Refreshing submodules....'
+cd subprojects
+git submodule init && git submodule update
