@@ -1,4 +1,6 @@
-TextMate grammar and Visual Studio Code extension for the OMNeT++ NED and MSG languages.
+Visual Studio Code extension for the OMNeT++ NED and MSG languages.
+
+[Download latest release](https://github.com/omnetpp/omnetpp-vscode/releases/latest) or build locally.
 
 ## Features
 
@@ -22,4 +24,4 @@ To build the .vsix file, run:
 
 ## Installing
 
-In VSCode/Extensions, select 'Install from VSIX...' from the ... menu
+In VSCode/Extensions side panel, select 'Install from VSIX...' from the ... menu
