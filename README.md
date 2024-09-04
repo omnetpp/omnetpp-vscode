@@ -4,7 +4,7 @@ Visual Studio Code extension for the OMNeT++ NED and MSG languages.
 
 ## Features
 
-Syntax highlighting of .ned and .msg files.
+Syntax highlighting of .ned and .msg files. The extension uses the [NED](https://github.com/omnetpp/omnetpp-textmate-ned) and [MSG](https://github.com/omnetpp/omnetpp-textmate-msg) TextMate grammars.
 
 ## Requirements
 
