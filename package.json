@@ -1,10 +1,10 @@
 {
   "name": "omnetpp-vscode",
-  "displayName": "omnetpp-vscode",
+  "displayName": "OMNeT++ NED and MSG",
   "description": "Extension for the OMNeT++ NED and MSG languages",
   "version": "0.0.1",
   "publisher": "opensim",
-  "repository": "https://github.com/adamgeorge309/omnetpp-vscode",
+  "repository": "https://github.com/omnetpp/omnetpp-vscode",
   "icon": "logo128.png",
   "engines": {
     "vscode": "^1.92.0"
