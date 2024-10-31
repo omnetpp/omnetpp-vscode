@@ -1,6 +1,8 @@
 Visual Studio Code extension for the OMNeT++ NED and MSG languages.
 
-[Download latest release](https://github.com/omnetpp/omnetpp-vscode/releases/latest) or build locally.
+The extension is available in the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=opensim.omnetpp-vscode).
+
+Alternatively, [Download latest release](https://github.com/omnetpp/omnetpp-vscode/releases/latest) or build locally.
 
 ## Features
 
