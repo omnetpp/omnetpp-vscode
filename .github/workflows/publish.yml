@@ -1,25 +1,25 @@
 name: Publish
 
 on:
-  workflow_dispatch: # Allows manual triggering of the workflow
+  workflow_dispatch:  # Allows manual triggering of the workflow
 
 jobs:
   publish:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: "20" # Adjust the Node.js version if necessary
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '20'  # Adjust the Node.js version if necessary
 
-      - name: Install dependencies
-        run: npm install
+    - name: Install dependencies
+      run: npm install
 
-      - name: Publish VS Code extension
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_TOKEN }} # Use the PAT stored as a secret
-        run: npm run package deploy
+    - name: Publish VS Code extension
+      env:
+        VSCE_PAT: ${{ secrets.VSCE_TOKEN }}  # Use the PAT stored as a secret
+      run: npm run deploy
