@@ -1,8 +1,8 @@
 {
   "name": "omnetpp-vscode",
   "displayName": "OMNeT++ NED and MSG",
-  "description": "Extension for the OMNeT++ NED and MSG languages",
-  "version": "0.0.1",
+  "description": "Official extension for the OMNeT++ NED and MSG languages",
+  "version": "0.0.2",
   "publisher": "opensim",
   "repository": "https://github.com/omnetpp/omnetpp-vscode",
   "icon": "logo128.png",
@@ -15,7 +15,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\"",
     "package": "vsce package",
-    "deploy": "vsce publish --yarn"
+    "deploy": "vsce publish"
   },
   "contributes": {
     "languages": [
@@ -28,7 +28,9 @@
       },
       {
         "id": "omnetpp-msg",
-        "extensions": [".msg"],
+        "extensions": [
+          ".msg"
+        ],
         "configuration": "./language-configuration.json"
       }
     ],
