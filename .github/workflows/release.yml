@@ -45,6 +45,6 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./omnetpp-ned-${{ env.VERSION }}.vsix
-        asset_name: omnetpp-ned-${{ env.VERSION }}.vsix
+        asset_path: ./omnetpp-vscode-${{ env.VERSION }}.vsix
+        asset_name: omnetpp-vscode-${{ env.VERSION }}.vsix
         asset_content_type: application/vsix
