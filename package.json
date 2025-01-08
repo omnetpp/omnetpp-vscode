@@ -2,7 +2,7 @@
   "name": "omnetpp-vscode",
   "displayName": "OMNeT++ NED and MSG",
   "description": "Official extension for the OMNeT++ NED and MSG languages",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "publisher": "opensim",
   "repository": "https://github.com/omnetpp/omnetpp-vscode",
   "icon": "logo128.png",
@@ -20,14 +20,14 @@
   "contributes": {
     "languages": [
       {
-        "id": "omnetpp-ned",
+        "id": "OMNeT++ NED",
         "extensions": [
           ".ned"
         ],
         "configuration": "./language-configuration.json"
       },
       {
-        "id": "omnetpp-msg",
+        "id": "OMNeT++ MSG",
         "extensions": [
           ".msg"
         ],
@@ -36,12 +36,12 @@
     ],
     "grammars": [
       {
-        "language": "omnetpp-ned",
+        "language": "OMNeT++ NED",
         "scopeName": "source.ned",
         "path": "./syntaxes/ned.tmLanguage.json"
       },
       {
-        "language": "omnetpp-msg",
+        "language": "OMNeT++ MSG",
         "scopeName": "source.msg",
         "path": "./syntaxes/omnetpp-msg.tmLanguage.json"
       }
