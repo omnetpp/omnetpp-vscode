@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*.*.*'  # Triggers the workflow when pushing a tag that matches the pattern, e.g., v1.0.0
+      - '*.*.*'  # Triggers the workflow when pushing a tag that matches the pattern, e.g., 1.0.0
 
 permissions:
         contents: write
@@ -34,7 +34,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ github.ref_name }}
-        release_name: Release ${{ github.ref_name }}
+        release_name: ${{ github.ref_name }}
         draft: false
         prerelease: false
 
