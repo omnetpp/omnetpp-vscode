@@ -2,7 +2,7 @@
   "name": "omnetpp-vscode",
   "displayName": "OMNeT++ NED and MSG",
   "description": "Official extension for the OMNeT++ NED and MSG languages",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "opensim",
   "repository": "https://github.com/omnetpp/omnetpp-vscode",
   "icon": "logo128.png",
