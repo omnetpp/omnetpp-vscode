@@ -1,0 +1,19 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "npm",
+			"script": "dev:build",
+			"problemMatcher": [],
+			"label": "npm: dev:build",
+			"detail": "copy assets and bundle the extension"
+		},
+		{
+			"type": "npm",
+			"script": "compile",
+			"problemMatcher": ["$tsc"],
+			"label": "npm: compile",
+			"detail": "type-check the workspace"
+		}
+	]
+}

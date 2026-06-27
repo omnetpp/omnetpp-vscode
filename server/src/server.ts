@@ -1,0 +1,526 @@
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  createConnection,
+  ProposedFeatures,
+  TextDocuments,
+  TextDocumentSyncKind,
+  InitializeResult,
+  InitializeParams,
+  FileChangeType,
+  MarkupKind,
+  Diagnostic as LspDiagnostic,
+  DocumentSymbol as LspDocumentSymbol,
+  FoldingRange as LspFoldingRange,
+  TypeHierarchyItem,
+  SymbolKind,
+} from 'vscode-languageserver/node';
+import { TextDocument } from 'vscode-languageserver-textdocument';
+import { promises as fsp } from 'node:fs';
+import { ParserService, parseIni, configSummaries } from '@omnetpp/shared';
+import { DocumentModelStore } from './documentModel';
+import { NodeFileSystem } from './nodeFileSystem';
+import { ProjectIndex } from './projectIndex';
+import {
+  computeDiagnostics,
+  computeDocumentSymbols,
+  computeFoldingRanges,
+  computeDefinition,
+  computeHover,
+  computeReferences,
+  computeCompletion,
+  computePrepareRename,
+  computeRename,
+  computeFormatting,
+  computeDocumentHighlights,
+  computeCodeActions,
+  computePrepareTypeHierarchy,
+  computeTypeHierarchySupertypes,
+  computeTypeHierarchySubtypes,
+  computeInheritanceRoots,
+  computeInheritanceSpineByFq,
+  computeModuleHierarchy,
+  computeModuleHierarchyByFq,
+  computeModuleHierarchyChildren,
+  computeParamHierarchy,
+  computeParamHierarchyByFq,
+  computeParamHierarchyChildren,
+  computeConfigNetwork,
+  buildConfigCtx,
+} from './features/providers';
+import type { Position as LspPosition } from 'vscode-languageserver/node';
+import type { NedHierarchyItem, ParamAssign, IniDocument } from '@omnetpp/shared';
+
+const connection = createConnection(ProposedFeatures.all);
+const documents = new TextDocuments(TextDocument);
+
+let parsers: ParserService | undefined;
+let store: DocumentModelStore | undefined;
+let index: ProjectIndex | undefined;
+let workspaceFolders: string[] = [];
+let nedPathSetting = '';
+let installDir = '';
+
+connection.onInitialize(async (params: InitializeParams): Promise<InitializeResult> => {
+  workspaceFolders = (params.workspaceFolders ?? [])
+    .map((f) => safeFsPath(f.uri))
+    .filter((p): p is string => !!p);
+  if (!workspaceFolders.length && params.rootUri) {
+    const p = safeFsPath(params.rootUri);
+    if (p) workspaceFolders = [p];
+  }
+  nedPathSetting = (params.initializationOptions?.nedPath as string) ?? '';
+  installDir =
+    (params.initializationOptions?.installDir as string) || process.env.OMNETPP_ROOT || '';
+
+  const wasmDir = join(__dirname, 'wasm');
+  parsers = await ParserService.create({
+    runtimeWasmDir: wasmDir,
+    nedWasmPath: join(wasmDir, 'tree-sitter-ned.wasm'),
+    msgWasmPath: join(wasmDir, 'tree-sitter-msg.wasm'),
+  });
+  store = new DocumentModelStore(parsers);
+  index = new ProjectIndex(new NodeFileSystem(), parsers, join(__dirname, 'config'));
+  // open documents are owned by the store; protect them from the disk scanner
+  index.setOpenPredicate((uri) => documents.get(uri) !== undefined);
+
+  return {
+    capabilities: {
+      textDocumentSync: TextDocumentSyncKind.Full,
+      documentSymbolProvider: true,
+      foldingRangeProvider: true,
+      definitionProvider: true,
+      hoverProvider: true,
+      referencesProvider: true,
+      completionProvider: { triggerCharacters: ['.', ':', '>', ' ', '"', ';', ',', '=', '@'] },
+      renameProvider: { prepareProvider: true },
+      documentFormattingProvider: true,
+      documentHighlightProvider: true,
+      codeActionProvider: { codeActionKinds: ['source.organizeImports', 'source'] },
+      typeHierarchyProvider: true,
+    },
+  };
+});
+
+const NED_SYMBOL_KIND: Record<string, SymbolKind> = {
+  simple: SymbolKind.Class,
+  compound: SymbolKind.Class,
+  network: SymbolKind.Class,
+  channel: SymbolKind.Class,
+  moduleinterface: SymbolKind.Interface,
+  channelinterface: SymbolKind.Interface,
+};
+
+function toTypeHierarchyItem(it: NedHierarchyItem): TypeHierarchyItem {
+  return {
+    name: it.name,
+    kind: NED_SYMBOL_KIND[it.kind] ?? SymbolKind.Class,
+    detail: it.detail,
+    uri: it.uri,
+    range: it.range,
+    selectionRange: it.selectionRange,
+    data: { fqName: it.fqName },
+  };
+}
+
+function fqNameOf(item: TypeHierarchyItem): string | undefined {
+  const data = item.data as { fqName?: string } | undefined;
+  return data?.fqName;
+}
+
+function currentNedPathDirs(): string[] {
+  const dirs = nedPathSetting.split(/[;:]/).map((s) => s.trim()).filter(Boolean);
+  if (installDir) dirs.push(installDir);
+  return dirs;
+}
+
+connection.onInitialized(async () => {
+  if (!index) return;
+  const nedPathDirs = currentNedPathDirs();
+  if (installDir) connection.console.info(`OMNeT++ install detected: ${installDir}`);
+  try {
+    await index.initialize(workspaceFolders, nedPathDirs);
+    connection.console.info(
+      `OMNeT++ index ready: ${index.cache.allTypeNames().length} NED types.`,
+    );
+  } catch (e) {
+    connection.console.error(`OMNeT++ indexing failed: ${(e as Error).message}`);
+  }
+  // refresh diagnostics for any already-open documents
+  for (const doc of documents.all()) refresh(doc);
+});
+
+function ctx() {
+  return index
+    ? { nedCache: index.cache, msgCache: index.msgCache, registry: index.configRegistry }
+    : undefined;
+}
+
+function refresh(doc: TextDocument): void {
+  if (!store) return;
+  const parsed = store.update(doc);
+  if (index && parsed.tree) {
+    if (parsed.language === 'ned') index.updateOpenDocument(doc.uri, parsed.text);
+    else if (parsed.language === 'msg') index.updateOpenMsgDocument(doc.uri, parsed.text);
+  }
+  const diags = computeDiagnostics(parsed, ctx()) as LspDiagnostic[];
+  connection.sendDiagnostics({ uri: doc.uri, diagnostics: diags });
+}
+
+/** Recompute diagnostics for all open docs of a language (cross-file changed). */
+function refreshAll(language: 'ned' | 'msg', exceptUri?: string): void {
+  if (!store) return;
+  for (const doc of documents.all()) {
+    if (doc.uri === exceptUri) continue; // already refreshed by the caller
+    const parsed = store.get(doc.uri);
+    if (parsed?.language === language) {
+      const diags = computeDiagnostics(parsed, ctx()) as LspDiagnostic[];
+      connection.sendDiagnostics({ uri: doc.uri, diagnostics: diags });
+    }
+  }
+}
+
+const iniTimers = new Map<string, NodeJS.Timeout>();
+function scheduleIni(uri: string): void {
+  const prev = iniTimers.get(uri);
+  if (prev) clearTimeout(prev);
+  iniTimers.set(
+    uri,
+    setTimeout(() => {
+      iniTimers.delete(uri);
+      const parsed = store?.get(uri);
+      if (!parsed) return;
+      const diags = computeDiagnostics(parsed, ctx()) as LspDiagnostic[];
+      connection.sendDiagnostics({ uri, diagnostics: diags });
+    }, 300),
+  );
+}
+
+documents.onDidChangeContent((e) => {
+  const lang = languageOfDoc(e.document);
+  if (lang === 'ini') {
+    store?.update(e.document); // cheap parse now; defer (heavier) analysis
+    scheduleIni(e.document.uri);
+    return;
+  }
+  refresh(e.document);
+  if (lang === 'ned') refreshAll('ned', e.document.uri);
+  else if (lang === 'msg') refreshAll('msg', e.document.uri);
+});
+documents.onDidClose((e) => {
+  store?.remove(e.document.uri);
+  connection.sendDiagnostics({ uri: e.document.uri, diagnostics: [] });
+  // re-sync the index to the on-disk version of the now-closed file
+  const lang = languageOfDoc(e.document);
+  if (index && (lang === 'ned' || lang === 'msg')) {
+    void index.onFileChanged(e.document.uri, false);
+  }
+});
+
+function isProjectConfigFile(uri: string): boolean {
+  return /\/(\.nedfolders|\.nedexclusions|package\.ned)$/.test(uri);
+}
+
+let reindexTimer: NodeJS.Timeout | undefined;
+function scheduleReindex(): void {
+  if (reindexTimer) clearTimeout(reindexTimer);
+  reindexTimer = setTimeout(async () => {
+    reindexTimer = undefined;
+    if (!index) return;
+    try {
+      await index.reindex(workspaceFolders, currentNedPathDirs());
+      // re-apply open buffers (the scan skips them) then refresh everything
+      for (const doc of documents.all()) refresh(doc);
+    } catch (e) {
+      connection.console.error(`OMNeT++ reindex failed: ${(e as Error).message}`);
+    }
+  }, 400);
+}
+
+connection.onDidChangeWatchedFiles(async (params) => {
+  if (!index) return;
+  let nedChanged = false;
+  let msgChanged = false;
+  let layoutChanged = false;
+  for (const change of params.changes) {
+    if (isProjectConfigFile(change.uri)) {
+      layoutChanged = true;
+      continue;
+    }
+    const isNed = change.uri.endsWith('.ned');
+    const isMsg = change.uri.endsWith('.msg');
+    if (!isNed && !isMsg) continue;
+    // skip files that are open (their state comes from the editor)
+    if (documents.get(change.uri)) continue;
+    await index.onFileChanged(change.uri, change.type === FileChangeType.Deleted);
+    if (isNed) nedChanged = true;
+    else msgChanged = true;
+  }
+  if (layoutChanged) {
+    scheduleReindex(); // re-discovers .nedfolders/.nedexclusions/package.ned
+  } else {
+    if (nedChanged) refreshAll('ned');
+    if (msgChanged) refreshAll('msg');
+  }
+});
+
+connection.onDocumentSymbol((params) => {
+  const parsed = store?.get(params.textDocument.uri);
+  if (!parsed) return [];
+  return computeDocumentSymbols(parsed) as unknown as LspDocumentSymbol[];
+});
+
+connection.onFoldingRanges((params) => {
+  const parsed = store?.get(params.textDocument.uri);
+  if (!parsed) return [];
+  return computeFoldingRanges(parsed) as unknown as LspFoldingRange[];
+});
+
+connection.onDefinition((params) => {
+  const parsed = store?.get(params.textDocument.uri);
+  const c = ctx();
+  if (!parsed || !c) return null;
+  return computeDefinition(parsed, params.position, c);
+});
+
+connection.onHover((params) => {
+  const parsed = store?.get(params.textDocument.uri);
+  const c = ctx();
+  if (!parsed || !c) return null;
+  const h = computeHover(parsed, params.position, c);
+  if (!h) return null;
+  return { contents: { kind: MarkupKind.Markdown, value: h.markdown }, range: h.range };
+});
+
+connection.onReferences((params) => {
+  const parsed = store?.get(params.textDocument.uri);
+  const c = ctx();
+  if (!parsed || !c) return [];
+  return computeReferences(parsed, params.position, params.context.includeDeclaration, c);
+});
+
+connection.onCompletion((params) => {
+  const parsed = store?.get(params.textDocument.uri);
+  const c = ctx();
+  if (!parsed || !c) return [];
+  return computeCompletion(parsed, params.position, c);
+});
+
+connection.onPrepareRename((params) => {
+  const parsed = store?.get(params.textDocument.uri);
+  const c = ctx();
+  if (!parsed || !c) return null;
+  return computePrepareRename(parsed, params.position, c);
+});
+
+connection.onRenameRequest((params) => {
+  const parsed = store?.get(params.textDocument.uri);
+  const c = ctx();
+  if (!parsed || !c) return null;
+  return computeRename(parsed, params.position, params.newName, c);
+});
+
+connection.onDocumentHighlight((params) => {
+  const parsed = store?.get(params.textDocument.uri);
+  const c = ctx();
+  if (!parsed || !c) return [];
+  return computeDocumentHighlights(parsed, params.position, c);
+});
+
+connection.onCodeAction((params) => {
+  const parsed = store?.get(params.textDocument.uri);
+  const c = ctx();
+  if (!parsed || !c) return [];
+  return computeCodeActions(parsed, c).map((a) => ({
+    title: a.title,
+    kind: a.kind,
+    edit: a.edit,
+  }));
+});
+
+connection.languages.typeHierarchy.onPrepare((params) => {
+  const parsed = store?.get(params.textDocument.uri);
+  const c = ctx();
+  if (!parsed || !c) return null;
+  const item = computePrepareTypeHierarchy(parsed, params.position, c);
+  return item ? [toTypeHierarchyItem(item)] : null;
+});
+
+connection.languages.typeHierarchy.onSupertypes((params) => {
+  const c = ctx();
+  const fq = fqNameOf(params.item);
+  if (!c || !fq) return null;
+  return computeTypeHierarchySupertypes(fq, c).map(toTypeHierarchyItem);
+});
+
+connection.languages.typeHierarchy.onSubtypes((params) => {
+  const c = ctx();
+  const fq = fqNameOf(params.item);
+  if (!c || !fq) return null;
+  return computeTypeHierarchySubtypes(fq, c).map(toTypeHierarchyItem);
+});
+
+// ---- custom requests for the auxiliary tree views ----
+interface ViewParams {
+  uri: string;
+  position?: LspPosition;
+}
+
+connection.onRequest('omnetpp/inheritanceRoots', (params: ViewParams & { fqName?: string }) => {
+  const c = ctx();
+  if (!c) return [];
+  if (params.fqName) return computeInheritanceSpineByFq(params.fqName, c);
+  const parsed = params.uri ? store?.get(params.uri) : undefined;
+  if (!parsed) return [];
+  return computeInheritanceRoots(parsed, params.position, c);
+});
+
+connection.onRequest('omnetpp/moduleHierarchy', (params: ViewParams & { fqName?: string }) => {
+  const c = ctx();
+  if (!c) return [];
+  if (params.fqName) return computeModuleHierarchyByFq(params.fqName, c);
+  const parsed = params.uri ? store?.get(params.uri) : undefined;
+  if (!parsed) return [];
+  return computeModuleHierarchy(parsed, params.position, c);
+});
+
+connection.onRequest('omnetpp/moduleHierarchyChildren', (params: { fqName: string }) => {
+  const c = ctx();
+  if (!c) return [];
+  return computeModuleHierarchyChildren(params.fqName, c);
+});
+
+interface ActiveConfig {
+  uri: string;
+  name: string;
+}
+
+/** Build the active-configuration value overlay; reads the ini from the open
+ *  buffer or from disk (so it works even when the ini isn't open, e.g. on startup). */
+async function activeConfigCtx(cfg: ActiveConfig | undefined, c: ReturnType<typeof ctx>) {
+  if (!cfg || !c) return undefined;
+  const ini = await iniDocFor(cfg.uri);
+  return ini ? buildConfigCtx(ini, cfg.uri, cfg.name, c) : undefined;
+}
+
+connection.onRequest(
+  'omnetpp/paramHierarchy',
+  async (params: ViewParams & { fqName?: string; activeConfig?: ActiveConfig }) => {
+    const c = ctx();
+    if (!c) return [];
+    const cfg = await activeConfigCtx(params.activeConfig, c);
+    if (params.fqName) return computeParamHierarchyByFq(params.fqName, c, cfg);
+    const parsed = params.uri ? store?.get(params.uri) : undefined;
+    if (!parsed) return [];
+    return computeParamHierarchy(parsed, params.position, c, cfg);
+  },
+);
+
+connection.onRequest(
+  'omnetpp/paramHierarchyChildren',
+  async (params: {
+    fqName: string;
+    path?: string;
+    activeConfig?: ActiveConfig;
+    subAssign?: Record<string, ParamAssign>;
+  }) => {
+    const c = ctx();
+    if (!c) return [];
+    const cfg = await activeConfigCtx(params.activeConfig, c);
+    return computeParamHierarchyChildren(params.fqName, c, params.path, cfg, params.subAssign);
+  },
+);
+
+connection.onRequest('omnetpp/subtypes', (params: { fqName: string }) => {
+  const c = ctx();
+  if (!c) return [];
+  return computeTypeHierarchySubtypes(params.fqName, c);
+});
+
+// ---- configuration listing for the Configurations view ----
+/** Parse an ini either from its open buffer (authoritative) or from disk. */
+async function iniDocFor(uri: string): Promise<IniDocument | undefined> {
+  const open = store?.get(uri);
+  if (open?.ini) return open.ini;
+  const p = safeFsPath(uri);
+  if (!p) return undefined;
+  try {
+    return parseIni(await fsp.readFile(p, 'utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A conservative test that an `.ini` file is actually an OMNeT++ ini, so that
+ * unrelated `*.ini` files in the workspace (tox.ini, pytest.ini, ...) are not
+ * listed as configurations. Every real OMNeT++ ini has a `[General]` section or
+ * a `network`/`extends` key or module-path/wildcard parameter keys.
+ */
+function looksLikeOmnetppIni(doc: IniDocument): boolean {
+  return doc.sections.some(
+    (s) =>
+      s.type === 'general' ||
+      s.entries.some(
+        (e) => e.key === 'network' || e.key === 'extends' || e.key.includes('**') || e.key.includes('.'),
+      ),
+  );
+}
+
+connection.onRequest(
+  'omnetpp/configNetwork',
+  async (params: { uri: string; name: string }): Promise<string | undefined> => {
+    const c = ctx();
+    if (!c) return undefined;
+    const ini = await iniDocFor(params.uri);
+    return ini ? computeConfigNetwork(ini, params.name, c) : undefined;
+  },
+);
+
+connection.onRequest(
+  'omnetpp/listConfigurations',
+  async (params: { uris?: string[] }): Promise<{ uri: string; configs: ReturnType<typeof configSummaries> }[]> => {
+    // The client supplies the candidate ini uris (found via workspace.findFiles);
+    // union in any open ini buffers so freshly-created/unsaved files appear too.
+    const uris = new Set<string>(params.uris ?? []);
+    for (const doc of documents.all()) if (languageOfDoc(doc) === 'ini') uris.add(doc.uri);
+
+    const result: { uri: string; configs: ReturnType<typeof configSummaries> }[] = [];
+    for (const uri of uris) {
+      const doc = await iniDocFor(uri);
+      if (!doc || !looksLikeOmnetppIni(doc)) continue;
+      const configs = configSummaries(doc);
+      if (configs.length) result.push({ uri, configs });
+    }
+    result.sort((a, b) => a.uri.localeCompare(b.uri));
+    return result;
+  },
+);
+
+connection.onDocumentFormatting((params) => {
+  const parsed = store?.get(params.textDocument.uri);
+  if (!parsed) return [];
+  return computeFormatting(parsed, {
+    tabSize: params.options.tabSize,
+    insertSpaces: params.options.insertSpaces,
+  });
+});
+
+function languageOfDoc(doc: TextDocument): 'ned' | 'msg' | 'ini' | undefined {
+  const u = doc.uri.toLowerCase();
+  if (doc.languageId === 'OMNeT++ NED' || u.endsWith('.ned')) return 'ned';
+  if (doc.languageId === 'OMNeT++ MSG' || u.endsWith('.msg')) return 'msg';
+  if (doc.languageId === 'OMNeT++ INI' || u.endsWith('.ini')) return 'ini';
+  return undefined;
+}
+
+function safeFsPath(uri: string): string | undefined {
+  try {
+    return fileURLToPath(uri);
+  } catch {
+    return undefined;
+  }
+}
+
+documents.listen(connection);
+connection.listen();

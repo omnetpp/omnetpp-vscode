@@ -1,4 +1,24 @@
+# Source and build inputs — only the bundled dist/ and static assets ship.
 .vscode/**
 .vscode-test/**
+.github/**
+.jj/**
+.claude/**
+client/**
+server/**
+shared/**
+scripts/**
+subprojects/**
+node_modules/**
+resources/**
+**/*.ts
+**/*.map
+**/tsconfig*.json
+tsconfig.base.json
+esbuild.mjs
 .gitignore
+.gitmodules
 vsc-extension-quickstart.md
+refresh_submodules
+omnetpp-vscode.code-workspace
+**/.DS_Store

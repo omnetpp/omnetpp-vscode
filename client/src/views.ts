@@ -1,0 +1,840 @@
+import * as vscode from 'vscode';
+import { LanguageClient } from 'vscode-languageclient/node';
+
+interface Pos {
+  line: number;
+  character: number;
+}
+interface Range {
+  start: Pos;
+  end: Pos;
+}
+interface HierarchyItem {
+  fqName: string;
+  name: string;
+  kind: string;
+  detail?: string;
+  uri: string;
+  range: Range;
+  selectionRange: Range;
+  hasSubtypes?: boolean;
+  children?: HierarchyItem[];
+  lazy?: boolean;
+  expanded?: boolean;
+  isSelected?: boolean;
+}
+
+interface ParamHierNode {
+  kind: 'module' | 'param';
+  label: string;
+  declUri?: string;
+  declRange?: Range;
+  inheritedFrom?: string;
+  typeFqName?: string;
+  isLike?: boolean;
+  isSelected?: boolean;
+  hasChildren?: boolean;
+  children?: ParamHierNode[];
+  path?: string;
+  paramType?: string;
+  paramValue?: string;
+  paramUnit?: string;
+  overridden?: boolean;
+  fromConfig?: boolean;
+  unset?: boolean;
+  valueOwner?: string;
+  declaredIn?: string;
+  subAssign?: Record<string, { value: string; uri: string; range: Range }>;
+}
+
+interface ModuleHierNode {
+  label: string;
+  name: string;
+  typeFqName?: string;
+  typeUri?: string;
+  typeRange?: Range;
+  declUri?: string;
+  declRange?: Range;
+  inheritedFrom?: string;
+  isLike?: boolean;
+  hasChildren: boolean;
+  isSelected?: boolean;
+  children?: ModuleHierNode[];
+}
+
+const OMNETPP_LANGS = new Set(['OMNeT++ NED', 'OMNeT++ MSG', 'OMNeT++ INI']);
+
+function activeContext(): { uri: string; position: Pos } | undefined {
+  const ed = vscode.window.activeTextEditor;
+  if (!ed || !OMNETPP_LANGS.has(ed.document.languageId)) return undefined;
+  const p = ed.selection.active;
+  return { uri: ed.document.uri.toString(), position: { line: p.line, character: p.character } };
+}
+
+function toVscodeRange(r: Range): vscode.Range {
+  return new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character);
+}
+
+/** Reveal a location (uri + range) in the editor. */
+async function openLocation(uri: string, range?: Range): Promise<void> {
+  const doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(uri));
+  const editor = await vscode.window.showTextDocument(doc);
+  if (range) {
+    const r = toVscodeRange(range);
+    editor.selection = new vscode.Selection(r.start, r.start);
+    editor.revealRange(r, vscode.TextEditorRevealType.InCenter);
+  }
+}
+
+/**
+ * Base for the type-focused, editor-following, pinnable tree views (NED
+ * Inheritance and Module Hierarchy). Tracks a single pin, fetches roots for the
+ * current focus (pinned type or editor selection), keeps parent links for
+ * `reveal`, and reveals+selects the focused node. Subclasses implement how to
+ * fetch roots/children and which node is the focus.
+ */
+interface ActiveConfig {
+  uri: string;
+  name: string;
+}
+
+/** Where a focus-tree gets its roots: a pinned type or the editor selection. */
+type Focus = { fqName: string } | { uri: string; position: Pos };
+
+abstract class FocusTreeProvider<T extends object> implements vscode.TreeDataProvider<T> {
+  treeView?: vscode.TreeView<T>;
+  private readonly emitter = new vscode.EventEmitter<T | undefined | void>();
+  readonly onDidChangeTreeData = this.emitter.event;
+  protected pinnedFqName?: string;
+  protected roots: T[] = [];
+  protected selected?: T;
+  protected readonly parents = new WeakMap<T, T>();
+  private loaded = false;
+  /** fq-name the tree is currently focused on, to avoid needless rebuilds. */
+  private focusKey?: string;
+
+  constructor(protected readonly client: LanguageClient) {}
+
+  isPinned(): boolean {
+    return this.pinnedFqName !== undefined;
+  }
+  pin(fqName: string): void {
+    this.pinnedFqName = fqName;
+    this.focusKey = undefined; // force a rebuild so the pinned state renders
+  }
+  unpin(): void {
+    this.pinnedFqName = undefined;
+    this.focusKey = undefined;
+  }
+  pinnedType(): string | undefined {
+    return this.pinnedFqName;
+  }
+
+  /** Drop the focus cache so the next reload rebuilds (used on pin/config change). */
+  protected invalidateFocus(): void {
+    this.focusKey = undefined;
+  }
+  /** The current focus source (pinned type or editor); subclasses may override. */
+  protected focusSource(): Focus | undefined {
+    if (this.pinnedFqName) return { fqName: this.pinnedFqName };
+    const c = activeContext();
+    // A NED editor selection takes priority. Otherwise, when a configuration is
+    // active, default the focus to that config's network type. An ini/msg editor
+    // (or no editor) is not a NED type selection, so it falls through to the network.
+    if (c && vscode.window.activeTextEditor?.document.languageId === 'OMNeT++ NED') return c;
+    const net = activeConfigNetworkFqName();
+    return net ? { fqName: net } : c;
+  }
+  /** True when the focus is fixed (pinned) and empty roots should not be discarded. */
+  protected hasFixedFocus(): boolean {
+    return this.isPinned();
+  }
+
+  abstract getTreeItem(el: T): vscode.TreeItem;
+  /** Fetch the roots for a focus (pinned `{fqName}`, editor `{uri,position}`, or `{activeConfig}`). */
+  protected abstract fetchRoots(focus: Focus): Promise<T[]>;
+  /** Fetch (or return prebuilt) children of a node. */
+  protected abstract fetchChildren(el: T): Promise<T[]>;
+  /** Prebuilt children of a node, used to wire parent links during reload. */
+  protected abstract prebuiltChildren(el: T): T[] | undefined;
+  protected abstract isSelectedNode(el: T): boolean;
+  /** Identifying fq-name of a node (used to detect focus changes). */
+  protected abstract nodeKey(el: T): string | undefined;
+
+  getParent(el: T): T | undefined {
+    return this.parents.get(el);
+  }
+
+  async getChildren(el?: T): Promise<T[]> {
+    if (el) {
+      const kids = await this.fetchChildren(el);
+      for (const c of kids) this.parents.set(c, el);
+      return kids;
+    }
+    if (!this.loaded) await this.reload();
+    return this.roots;
+  }
+
+  private async reload(): Promise<boolean> {
+    this.loaded = true;
+    const focus = this.focusSource();
+    const roots = focus ? await this.fetchRoots(focus) : [];
+    if (!roots.length && !this.hasFixedFocus()) return false; // keep previous content
+
+    // locate the selected node + its key in the freshly fetched tree
+    let selected: T | undefined;
+    const find = (nodes: T[]) => {
+      for (const n of nodes) {
+        if (this.isSelectedNode(n)) selected = n;
+        const ch = this.prebuiltChildren(n);
+        if (ch) find(ch);
+      }
+    };
+    find(roots);
+    const key = selected ? this.nodeKey(selected) : roots[0] ? this.nodeKey(roots[0]) : undefined;
+
+    // same focus as before → keep the existing tree (and the user's expansions)
+    if (key !== undefined && key === this.focusKey && this.roots.length) return false;
+
+    this.focusKey = key;
+    this.roots = roots;
+    this.selected = selected;
+    const walk = (node: T, parent?: T) => {
+      if (parent) this.parents.set(node, parent);
+      for (const c of this.prebuiltChildren(node) ?? []) walk(c, node);
+    };
+    for (const r of this.roots) walk(r);
+    return true;
+  }
+
+  /** Mark stale and force a full rebuild on the next getChildren (no reveal). */
+  refresh(): void {
+    this.loaded = false;
+    this.focusKey = undefined;
+    this.emitter.fire();
+  }
+
+  /** Refetch, refresh, and reveal+select the focused node. */
+  async update(): Promise<void> {
+    if (!(await this.reload())) return;
+    this.emitter.fire();
+    if (this.selected && this.treeView?.visible) {
+      try {
+        await this.treeView.reveal(this.selected, { select: true, focus: false });
+      } catch {
+        /* not rendered yet — the expanded root keeps the focus visible */
+      }
+    }
+  }
+}
+
+class InheritanceProvider extends FocusTreeProvider<HierarchyItem> {
+  getTreeItem(it: HierarchyItem): vscode.TreeItem {
+    const collapsibleState = it.expanded
+      ? vscode.TreeItemCollapsibleState.Expanded // supertype chain + selected node
+      : it.hasSubtypes
+        ? vscode.TreeItemCollapsibleState.Collapsed // subtype nodes start closed
+        : vscode.TreeItemCollapsibleState.None;
+    const item = new vscode.TreeItem(it.name, collapsibleState);
+    item.description = it.detail;
+    item.tooltip = it.fqName;
+    item.command = { command: 'omnetpp.openLocation', title: 'Open', arguments: [it.uri, it.selectionRange] };
+    const isPinned = this.pinnedFqName === it.fqName;
+    item.contextValue = isPinned ? 'nedTypePinned' : 'nedTypeUnpinned';
+    // pinned nodes show a persistent (filled) pin icon as the state indicator
+    item.iconPath = new vscode.ThemeIcon(isPinned ? 'pinned' : 'symbol-class');
+    return item;
+  }
+
+  protected fetchRoots(focus: { fqName: string } | { uri: string; position: Pos }): Promise<HierarchyItem[]> {
+    return this.client
+      .sendRequest<HierarchyItem[]>('omnetpp/inheritanceRoots', focus)
+      .then((r) => r ?? []);
+  }
+  protected async fetchChildren(el: HierarchyItem): Promise<HierarchyItem[]> {
+    if (el.lazy) {
+      return (await this.client.sendRequest<HierarchyItem[]>('omnetpp/subtypes', { fqName: el.fqName })) ?? [];
+    }
+    return el.children ?? [];
+  }
+  protected prebuiltChildren(el: HierarchyItem): HierarchyItem[] | undefined {
+    return el.children;
+  }
+  protected isSelectedNode(el: HierarchyItem): boolean {
+    return !!el.isSelected;
+  }
+  protected nodeKey(el: HierarchyItem): string | undefined {
+    return el.fqName;
+  }
+}
+
+class ModuleHierarchyProvider extends FocusTreeProvider<ModuleHierNode> {
+  getTreeItem(n: ModuleHierNode): vscode.TreeItem {
+    const collapsibleState = n.isSelected
+      ? vscode.TreeItemCollapsibleState.Expanded // the focused type opens to its submodules
+      : n.hasChildren
+        ? vscode.TreeItemCollapsibleState.Collapsed
+        : vscode.TreeItemCollapsibleState.None;
+    const item = new vscode.TreeItem(n.label, collapsibleState);
+    item.description = (n.isLike ? '~ ' : '') + (n.typeFqName ?? '');
+    item.tooltip = n.typeFqName ?? n.name;
+    const isPinned = !!n.typeFqName && this.pinnedFqName === n.typeFqName;
+    item.contextValue = isPinned ? 'nedModulePinned' : 'nedModuleUnpinned';
+    // pinned nodes show a persistent (filled) pin icon as the state indicator
+    item.iconPath = new vscode.ThemeIcon(
+      isPinned ? 'pinned' : n.isSelected ? 'symbol-class' : n.hasChildren ? 'symbol-structure' : 'symbol-field',
+    );
+    // navigate to the submodule's declaration; the root node has no declaration,
+    // so it falls back to its type definition
+    const navUri = n.declUri ?? n.typeUri;
+    const navRange = n.declUri ? n.declRange : n.typeRange;
+    if (navUri) {
+      item.command = { command: 'omnetpp.openLocation', title: 'Open', arguments: [navUri, navRange] };
+    }
+    return item;
+  }
+
+  protected fetchRoots(focus: { fqName: string } | { uri: string; position: Pos }): Promise<ModuleHierNode[]> {
+    return this.client
+      .sendRequest<ModuleHierNode[]>('omnetpp/moduleHierarchy', focus)
+      .then((r) => r ?? []);
+  }
+  protected async fetchChildren(el: ModuleHierNode): Promise<ModuleHierNode[]> {
+    if (el.children) return el.children; // prebuilt root level
+    if (!el.typeFqName) return [];
+    return (
+      (await this.client.sendRequest<ModuleHierNode[]>('omnetpp/moduleHierarchyChildren', {
+        fqName: el.typeFqName,
+      })) ?? []
+    );
+  }
+  protected prebuiltChildren(el: ModuleHierNode): ModuleHierNode[] | undefined {
+    return el.children;
+  }
+  protected isSelectedNode(el: ModuleHierNode): boolean {
+    return !!el.isSelected;
+  }
+  protected nodeKey(el: ModuleHierNode): string | undefined {
+    return el.typeFqName;
+  }
+}
+
+class ModuleParamsProvider extends FocusTreeProvider<ParamHierNode> {
+  private activeConfig?: ActiveConfig;
+
+  /** The view keeps its normal (type-centric, editor-following) behavior; the
+   * active config only changes how parameter values are resolved. */
+  setActiveConfig(cfg?: ActiveConfig): void {
+    this.activeConfig = cfg;
+    this.invalidateFocus(); // re-resolve values for the current focus
+    void this.update();
+  }
+
+  getTreeItem(n: ParamHierNode): vscode.TreeItem {
+    if (n.kind === 'param') {
+      const item = new vscode.TreeItem(n.label, vscode.TreeItemCollapsibleState.None);
+      const suffix = n.overridden
+        ? ' (overridden)'
+        : n.fromConfig
+          ? ' (from config)'
+          : n.unset
+            ? ' — UNASSIGNED'
+            : '';
+      item.description =
+        `${n.paramType ?? ''}${n.paramUnit ? ' (' + n.paramUnit + ')' : ''}` +
+        `${n.paramValue !== undefined ? ' = ' + n.paramValue : ''}` +
+        suffix;
+      item.iconPath = new vscode.ThemeIcon(
+        'symbol-parameter',
+        n.overridden ? new vscode.ThemeColor('disabledForeground') : undefined,
+      );
+      if (n.overridden) {
+        item.resourceUri = vscode.Uri.parse(
+          'omnetpp-shadowed:/' + encodeURIComponent(`${n.label}#${n.paramValue ?? ''}`),
+        );
+        item.tooltip = 'Overridden — not in effect';
+      } else if (n.unset) {
+        // Unassigned is legitimate when inspecting a NED type directly — just
+        // note it in the description; no color/badge/icon emphasis.
+        item.tooltip = 'Unassigned: no value in effect (no NED default and no config assignment)';
+      } else if (n.fromConfig) {
+        item.tooltip = `value in effect from config${n.valueOwner ? ' ' + n.valueOwner : ''}: ${n.paramValue}`;
+      } else if (n.paramValue !== undefined) {
+        const where = n.valueOwner ? ` (set in ${n.valueOwner}` + (n.declaredIn && n.declaredIn !== n.valueOwner ? `, declared in ${n.declaredIn})` : ')') : '';
+        item.tooltip = `value in effect: ${n.paramValue}${where}`;
+      }
+      item.contextValue = 'nedParamLeaf';
+      if (n.declUri) {
+        item.command = { command: 'omnetpp.openLocation', title: 'Open', arguments: [n.declUri, n.declRange] };
+      }
+      return item;
+    }
+    // module node
+    const collapsibleState = n.isSelected
+      ? vscode.TreeItemCollapsibleState.Expanded
+      : n.hasChildren
+        ? vscode.TreeItemCollapsibleState.Collapsed
+        : vscode.TreeItemCollapsibleState.None;
+    const item = new vscode.TreeItem(n.label, collapsibleState);
+    item.description = (n.isLike ? '~ ' : '') + (n.typeFqName ?? '');
+    item.tooltip = n.typeFqName ?? n.label;
+    const isPinned = !!n.typeFqName && this.pinnedFqName === n.typeFqName;
+    item.contextValue = isPinned ? 'nedParamPinned' : 'nedParamUnpinned';
+    item.iconPath = new vscode.ThemeIcon(
+      isPinned ? 'pinned' : n.isSelected ? 'symbol-class' : 'symbol-structure',
+    );
+    if (n.declUri) {
+      item.command = { command: 'omnetpp.openLocation', title: 'Open', arguments: [n.declUri, n.declRange] };
+    }
+    return item;
+  }
+
+  protected fetchRoots(focus: Focus): Promise<ParamHierNode[]> {
+    const req = this.activeConfig ? { ...focus, activeConfig: this.activeConfig } : focus;
+    return this.client.sendRequest<ParamHierNode[]>('omnetpp/paramHierarchy', req).then((r) => r ?? []);
+  }
+  protected async fetchChildren(el: ParamHierNode): Promise<ParamHierNode[]> {
+    if (el.kind === 'param') return [];
+    if (el.children) return el.children; // prebuilt root level
+    if (!el.typeFqName) return [];
+    const req: {
+      fqName: string;
+      path?: string;
+      activeConfig?: ActiveConfig;
+      subAssign?: ParamHierNode['subAssign'];
+    } = { fqName: el.typeFqName };
+    if (el.path !== undefined) req.path = el.path;
+    if (this.activeConfig) req.activeConfig = this.activeConfig;
+    if (el.subAssign) req.subAssign = el.subAssign; // apply this instance's NED assignments
+    return (await this.client.sendRequest<ParamHierNode[]>('omnetpp/paramHierarchyChildren', req)) ?? [];
+  }
+  protected prebuiltChildren(el: ParamHierNode): ParamHierNode[] | undefined {
+    return el.children;
+  }
+  protected isSelectedNode(el: ParamHierNode): boolean {
+    return !!el.isSelected;
+  }
+  protected nodeKey(el: ParamHierNode): string | undefined {
+    return el.typeFqName;
+  }
+}
+
+const PIN_KEY = 'omnetpp.pinnedType';
+const MODULE_PIN_KEY = 'omnetpp.pinnedModule';
+const PARAM_PIN_KEY = 'omnetpp.pinnedParamModule';
+const ACTIVE_CONFIG_KEY = 'omnetpp.activeConfig';
+
+/** The active configuration (ini file + config name), if any. */
+let activeConfigState: ActiveConfig | undefined;
+/** Fq-name of the active configuration's network type (resolved lazily by the server). */
+let activeConfigNetwork: string | undefined;
+/** The active configuration, for other features (run/launch, preview, ...). */
+export function getActiveConfig(): ActiveConfig | undefined {
+  return activeConfigState;
+}
+/** The active config's network type fq-name, used as a default focus for the views. */
+function activeConfigNetworkFqName(): string | undefined {
+  return activeConfigState ? activeConfigNetwork : undefined;
+}
+
+/** The canonical config name of the nearest `[...]` header at/above `line`, if any. */
+function configNameAtLine(doc: vscode.TextDocument, line: number): string | undefined {
+  for (let i = line; i >= 0; i--) {
+    const m = /^\s*\[(.+?)\]\s*$/.exec(doc.lineAt(i).text);
+    if (!m) continue;
+    const raw = m[1].trim();
+    if (/^General$/i.test(raw)) return 'General';
+    const cm = /^Config\s+(.+)$/.exec(raw); // [Config X] -> X ; [X] -> X
+    return cm ? cm[1].trim() : raw;
+  }
+  return undefined;
+}
+
+function iniFsPath(uri: string): string {
+  return decodeURIComponent(uri.replace(/^file:\/\//, ''));
+}
+
+/** A short, identifying label: parent dir for a generic `omnetpp.ini`, else the file name. */
+function activeConfigLabel(cfg: ActiveConfig): string {
+  const parts = iniFsPath(cfg.uri).split('/').filter(Boolean);
+  const base = parts[parts.length - 1] ?? cfg.uri;
+  const parent = parts[parts.length - 2];
+  const ident = base.toLowerCase() === 'omnetpp.ini' && parent ? parent : base;
+  return `${ident} - ${cfg.name}`;
+}
+
+/** Whether `cfg` (uri+name) is the currently active configuration. */
+function isActiveConfig(uri: string, name: string): boolean {
+  return !!activeConfigState && activeConfigState.uri === uri && activeConfigState.name === name;
+}
+
+/** A config section as reported by the server's `omnetpp/listConfigurations`. */
+interface ConfigEntryDto {
+  name: string;
+  rawName: string;
+  range: Range;
+  abstract: boolean;
+  extends: string[];
+  description?: string;
+}
+interface IniFileConfigs {
+  uri: string;
+  configs: ConfigEntryDto[];
+}
+
+/** Tree nodes for the Configurations view: ini files at the top, configs beneath. */
+type ConfigTreeNode =
+  | { kind: 'file'; uri: string; configs: ConfigEntryDto[] }
+  | { kind: 'config'; uri: string; entry: ConfigEntryDto };
+
+/**
+ * Lists every non-abstract configuration in the workspace, grouped by ini file.
+ * The client finds the ini files (`workspace.findFiles`) and the server parses
+ * them (`omnetpp/listConfigurations`). Supports a path/name substring filter and
+ * highlights the active configuration.
+ */
+class ConfigurationsProvider implements vscode.TreeDataProvider<ConfigTreeNode> {
+  treeView?: vscode.TreeView<ConfigTreeNode>;
+  private readonly emitter = new vscode.EventEmitter<void>();
+  readonly onDidChangeTreeData = this.emitter.event;
+  private files: IniFileConfigs[] = [];
+  private filter = '';
+  private loaded = false;
+
+  constructor(private readonly client: LanguageClient) {}
+
+  get filterText(): string {
+    return this.filter;
+  }
+  setFilter(f: string): void {
+    this.filter = f.trim();
+    this.emitter.fire();
+  }
+  /** Refetch the config list from the workspace on the next read. */
+  refresh(): void {
+    this.loaded = false;
+    this.emitter.fire();
+  }
+  /** Re-render without refetching (e.g. the active-config highlight changed). */
+  rerender(): void {
+    this.emitter.fire();
+  }
+
+  private async load(): Promise<void> {
+    const uris = (
+      await vscode.workspace.findFiles('**/*.ini', '**/{node_modules,out,.git}/**')
+    ).map((u) => u.toString());
+    this.files =
+      (await this.client.sendRequest<IniFileConfigs[]>('omnetpp/listConfigurations', { uris })) ?? [];
+    this.loaded = true;
+  }
+
+  /** Files (with their non-abstract configs) that survive the current filter. */
+  private visibleFiles(): { uri: string; configs: ConfigEntryDto[] }[] {
+    const f = this.filter.toLowerCase();
+    const out: { uri: string; configs: ConfigEntryDto[] }[] = [];
+    for (const file of this.files) {
+      const nonAbstract = file.configs.filter((c) => !c.abstract);
+      if (!nonAbstract.length) continue;
+      const pathMatch =
+        !f ||
+        vscode.workspace.asRelativePath(vscode.Uri.parse(file.uri)).toLowerCase().includes(f) ||
+        iniFsPath(file.uri).toLowerCase().includes(f);
+      const configs = pathMatch
+        ? nonAbstract
+        : nonAbstract.filter((c) => c.name.toLowerCase().includes(f));
+      if (configs.length) out.push({ uri: file.uri, configs });
+    }
+    return out;
+  }
+
+  async getChildren(el?: ConfigTreeNode): Promise<ConfigTreeNode[]> {
+    if (!el) {
+      if (!this.loaded) await this.load();
+      return this.visibleFiles().map(({ uri, configs }) => ({ kind: 'file', uri, configs }));
+    }
+    if (el.kind === 'file') {
+      return el.configs.map((entry) => ({ kind: 'config' as const, uri: el.uri, entry }));
+    }
+    return [];
+  }
+
+  getTreeItem(node: ConfigTreeNode): vscode.TreeItem {
+    if (node.kind === 'file') {
+      const rel = vscode.workspace.asRelativePath(vscode.Uri.parse(node.uri));
+      // Start collapsed; open only the file that holds the active config (or all
+      // files while a filter is narrowing the list).
+      const hasActive =
+        !!activeConfigState &&
+        node.uri === activeConfigState.uri &&
+        node.configs.some((c) => c.name === activeConfigState!.name);
+      const state =
+        this.filterText || hasActive
+          ? vscode.TreeItemCollapsibleState.Expanded
+          : vscode.TreeItemCollapsibleState.Collapsed;
+      const item = new vscode.TreeItem(rel, state);
+      item.tooltip = iniFsPath(node.uri);
+      item.resourceUri = vscode.Uri.parse(node.uri);
+      item.iconPath = vscode.ThemeIcon.File;
+      item.contextValue = 'omnetppIniFile';
+      item.command = { command: 'omnetpp.openLocation', title: 'Open', arguments: [node.uri] };
+      return item;
+    }
+    const { uri, entry } = node;
+    const active = isActiveConfig(uri, entry.name);
+    const item = new vscode.TreeItem(entry.name, vscode.TreeItemCollapsibleState.None);
+    if (active) item.description = 'active';
+    const md = new vscode.MarkdownString();
+    md.appendMarkdown(`**${entry.name}**${active ? ' — _active configuration_' : ''}\n\n`);
+    if (entry.description) md.appendMarkdown(`${entry.description}\n\n`);
+    md.appendMarkdown(`File: \`${iniFsPath(uri)}\``);
+    if (entry.extends.length) md.appendMarkdown(`\n\nExtends: ${entry.extends.join(', ')}`);
+    item.tooltip = md;
+    item.iconPath = active
+      ? new vscode.ThemeIcon('pass-filled', new vscode.ThemeColor('charts.green'))
+      : new vscode.ThemeIcon('gear');
+    item.contextValue = active ? 'omnetppConfigActive' : 'omnetppConfig';
+    item.command = { command: 'omnetpp.openLocation', title: 'Open', arguments: [uri, entry.range] };
+    return item;
+  }
+}
+
+/** Register the three auxiliary tree views and keep them in sync with the editor. */
+export function registerViews(context: vscode.ExtensionContext, client: LanguageClient): void {
+  const inheritance = new InheritanceProvider(client);
+  const moduleHierarchy = new ModuleHierarchyProvider(client);
+  const moduleParams = new ModuleParamsProvider(client);
+  const configurations = new ConfigurationsProvider(client);
+
+  // grey out overridden (shadowed) parameter rows in the Module Parameters view
+  context.subscriptions.push(
+    vscode.window.registerFileDecorationProvider({
+      provideFileDecoration: (uri) =>
+        // colour only; the tree item supplies the tooltip (avoid duplicating it)
+        uri.scheme === 'omnetpp-shadowed'
+          ? { color: new vscode.ThemeColor('disabledForeground') }
+          : undefined,
+    }),
+  );
+
+  // restore persisted (single) pins
+  const savedTypePin = context.workspaceState.get<string | undefined>(PIN_KEY, undefined);
+  if (savedTypePin) inheritance.pin(savedTypePin);
+  const savedModulePin = context.workspaceState.get<string | undefined>(MODULE_PIN_KEY, undefined);
+  if (savedModulePin) moduleHierarchy.pin(savedModulePin);
+  const savedParamPin = context.workspaceState.get<string | undefined>(PARAM_PIN_KEY, undefined);
+  if (savedParamPin) moduleParams.pin(savedParamPin);
+  const persistPin = () => context.workspaceState.update(PIN_KEY, inheritance.pinnedType());
+  const persistModulePin = () =>
+    context.workspaceState.update(MODULE_PIN_KEY, moduleHierarchy.pinnedType());
+  const persistParamPin = () =>
+    context.workspaceState.update(PARAM_PIN_KEY, moduleParams.pinnedType());
+
+  // context keys gate the view-title "Unpin" buttons (shown only while pinned)
+  const syncPinContext = () => {
+    void vscode.commands.executeCommand('setContext', 'omnetpp.typePinned', inheritance.isPinned());
+    void vscode.commands.executeCommand('setContext', 'omnetpp.modulePinned', moduleHierarchy.isPinned());
+    void vscode.commands.executeCommand('setContext', 'omnetpp.paramPinned', moduleParams.isPinned());
+  };
+
+  // reflect the pinned type in each view's header ("<Base title> of <Type>")
+  const simpleName = (fq: string) => fq.slice(fq.lastIndexOf('.') + 1);
+  const syncTitle = (view: vscode.TreeView<unknown>, base: string, pinned?: string) => {
+    view.title = pinned ? `${base} of ${simpleName(pinned)}` : base;
+  };
+  const syncTitles = () => {
+    syncTitle(inheritanceView, 'NED Inheritance', inheritance.pinnedType());
+    syncTitle(moduleHierarchyView, 'Module Hierarchy', moduleHierarchy.pinnedType());
+    syncTitle(moduleParamsView, 'Module Parameters', moduleParams.pinnedType());
+  };
+
+  syncPinContext();
+
+  const inheritanceView = vscode.window.createTreeView('omnetppInheritance', {
+    treeDataProvider: inheritance,
+  });
+  inheritance.treeView = inheritanceView;
+  const moduleHierarchyView = vscode.window.createTreeView('omnetppModuleHierarchy', {
+    treeDataProvider: moduleHierarchy,
+  });
+  moduleHierarchy.treeView = moduleHierarchyView;
+  const moduleParamsView = vscode.window.createTreeView('omnetppModuleParams', {
+    treeDataProvider: moduleParams,
+  });
+  moduleParams.treeView = moduleParamsView;
+  const configurationsView = vscode.window.createTreeView('omnetppActiveConfig', {
+    treeDataProvider: configurations,
+  });
+  configurations.treeView = configurationsView;
+  syncTitles(); // reflect any restored pins
+
+  // The view title doubles as the active-config banner so it stays visible even
+  // when the whole tree is collapsed: "Active Config: <ini> - <name>".
+  const syncConfigTitle = () => {
+    configurationsView.title = activeConfigState
+      ? `Active Config: ${activeConfigLabel(activeConfigState)}`
+      : 'Configurations';
+  };
+  const syncFilterDescription = () => {
+    configurationsView.description = configurations.filterText
+      ? `filter: ${configurations.filterText}`
+      : undefined;
+  };
+  // Set/clear/restore the active configuration from one place.
+  const applyActiveConfig = (cfg?: ActiveConfig) => {
+    activeConfigState = cfg;
+    activeConfigNetwork = undefined; // resolved asynchronously below
+    void context.workspaceState.update(ACTIVE_CONFIG_KEY, cfg);
+    void vscode.commands.executeCommand('setContext', 'omnetpp.hasActiveConfig', !!cfg);
+    syncConfigTitle();
+    configurations.rerender(); // re-highlight the active node + open its path
+    moduleParams.setActiveConfig(cfg);
+    if (cfg) {
+      // Resolve the config's network so the views can default to it when no NED
+      // editor is focused. followEditor() runs in the .then so it never fires
+      // during the synchronous restore (followEditor is defined later).
+      void client
+        .sendRequest<string | undefined>('omnetpp/configNetwork', { uri: cfg.uri, name: cfg.name })
+        .then((fq) => {
+          if (activeConfigState?.uri !== cfg.uri || activeConfigState?.name !== cfg.name) return;
+          activeConfigNetwork = fq;
+          followEditor(); // re-evaluate focus for the non-pinned views
+        });
+    } else {
+      followEditor(); // cleared → revert the views to the editor focus
+    }
+  };
+
+  // restore the persisted active configuration
+  const savedActive = context.workspaceState.get<ActiveConfig | undefined>(ACTIVE_CONFIG_KEY, undefined);
+  if (savedActive) applyActiveConfig(savedActive);
+  else syncConfigTitle();
+
+  context.subscriptions.push(
+    inheritanceView,
+    moduleHierarchyView,
+    moduleParamsView,
+    configurationsView,
+    vscode.commands.registerCommand('omnetpp.openLocation', (uri: string, range?: Range) =>
+      openLocation(uri, range),
+    ),
+    vscode.commands.registerCommand('omnetpp.pinType', (it?: HierarchyItem) => {
+      if (!it?.fqName) return;
+      inheritance.pin(it.fqName); // single pin: replaces any previous
+      void persistPin();
+      syncPinContext();
+      syncTitles();
+      void inheritance.update();
+    }),
+    vscode.commands.registerCommand('omnetpp.unpinType', () => {
+      inheritance.unpin();
+      void persistPin();
+      syncPinContext();
+      syncTitles();
+      void inheritance.update();
+    }),
+    vscode.commands.registerCommand('omnetpp.pinModule', (n?: ModuleHierNode) => {
+      if (!n?.typeFqName) return;
+      moduleHierarchy.pin(n.typeFqName);
+      void persistModulePin();
+      syncPinContext();
+      syncTitles();
+      void moduleHierarchy.update();
+    }),
+    vscode.commands.registerCommand('omnetpp.unpinModule', () => {
+      moduleHierarchy.unpin();
+      void persistModulePin();
+      syncPinContext();
+      syncTitles();
+      void moduleHierarchy.update();
+    }),
+    vscode.commands.registerCommand('omnetpp.pinParam', (n?: ParamHierNode) => {
+      if (!n?.typeFqName) return;
+      moduleParams.pin(n.typeFqName);
+      void persistParamPin();
+      syncPinContext();
+      syncTitles();
+      void moduleParams.update();
+    }),
+    vscode.commands.registerCommand('omnetpp.unpinParam', () => {
+      moduleParams.unpin();
+      void persistParamPin();
+      syncPinContext();
+      syncTitles();
+      void moduleParams.update();
+    }),
+    vscode.commands.registerCommand('omnetpp.setActiveConfiguration', () => {
+      const ed = vscode.window.activeTextEditor;
+      if (!ed || ed.document.languageId !== 'OMNeT++ INI') {
+        void vscode.window.showWarningMessage(
+          'Set as Active Configuration: place the cursor in a config section of an .ini file.',
+        );
+        return;
+      }
+      const name = configNameAtLine(ed.document, ed.selection.active.line);
+      if (!name) {
+        void vscode.window.showWarningMessage('No [Config ...] section found at the cursor.');
+        return;
+      }
+      applyActiveConfig({ uri: ed.document.uri.toString(), name });
+    }),
+    vscode.commands.registerCommand('omnetpp.clearActiveConfiguration', () => {
+      applyActiveConfig(undefined);
+    }),
+    // Set the active configuration from a node in the Configurations view.
+    vscode.commands.registerCommand('omnetpp.setActiveConfigItem', (node?: ConfigTreeNode) => {
+      if (!node || node.kind !== 'config') return;
+      applyActiveConfig({ uri: node.uri, name: node.entry.name });
+    }),
+    vscode.commands.registerCommand('omnetpp.refreshConfigurations', () => configurations.refresh()),
+    vscode.commands.registerCommand('omnetpp.filterConfigurations', async () => {
+      const v = await vscode.window.showInputBox({
+        prompt: 'Filter configurations by ini path or config name',
+        placeHolder: 'substring match (case-insensitive)',
+        value: configurations.filterText,
+      });
+      if (v === undefined) return; // cancelled — keep the current filter
+      configurations.setFilter(v);
+      void vscode.commands.executeCommand('setContext', 'omnetpp.configFilterActive', !!v.trim());
+      syncFilterDescription();
+    }),
+    vscode.commands.registerCommand('omnetpp.clearConfigurationsFilter', () => {
+      configurations.setFilter('');
+      void vscode.commands.executeCommand('setContext', 'omnetpp.configFilterActive', false);
+      syncFilterDescription();
+    }),
+  );
+
+  // Keep the Configurations view in sync as ini files are created/saved/deleted.
+  const iniWatcher = vscode.workspace.createFileSystemWatcher('**/*.ini');
+  const refreshConfigs = () => configurations.refresh();
+  context.subscriptions.push(
+    iniWatcher,
+    iniWatcher.onDidCreate(refreshConfigs),
+    iniWatcher.onDidDelete(refreshConfigs),
+    iniWatcher.onDidChange(refreshConfigs),
+  );
+
+  // all three views follow the editor unless individually pinned
+  const followEditor = () => {
+    if (!inheritance.isPinned()) void inheritance.update();
+    if (!moduleHierarchy.isPinned()) void moduleHierarchy.update();
+    if (!moduleParams.isPinned()) void moduleParams.update();
+  };
+
+  let timer: NodeJS.Timeout | undefined;
+  const debounced = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(followEditor, 300);
+  };
+
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor(followEditor),
+    vscode.window.onDidChangeTextEditorSelection((e) => {
+      if (OMNETPP_LANGS.has(e.textEditor.document.languageId)) debounced();
+    }),
+    vscode.workspace.onDidChangeTextDocument((e) => {
+      if (OMNETPP_LANGS.has(e.document.languageId)) debounced();
+    }),
+  );
+}

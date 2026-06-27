@@ -1,20 +1,41 @@
 {
   "name": "omnetpp-vscode",
-  "displayName": "OMNeT++ NED and MSG",
-  "description": "Official extension for the OMNeT++ NED and MSG languages",
+  "displayName": "OMNeT++ Development Environment",
+  "description": "Language server and editor support for the OMNeT++ NED, MSG and INI languages",
   "version": "0.0.4",
   "publisher": "opensim",
   "repository": "https://github.com/omnetpp/omnetpp-vscode",
   "license": "SEE LICENSE IN LICENSE",
-  "icon": "logo128.png",
+  "icon": "logo.png",
   "engines": {
     "vscode": "^1.92.0"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Linters"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "workspaceContains:**/*.ned",
+    "onLanguage:OMNeT++ NED",
+    "onLanguage:OMNeT++ MSG",
+    "onLanguage:OMNeT++ INI"
+  ],
+  "workspaces": [
+    "shared",
+    "server",
+    "client"
   ],
   "scripts": {
-    "test": "echo \"Error: no test specified\"",
+    "build:wasm": "node ./scripts/build-wasm.mjs",
+    "compile": "tsc --build",
+    "watch": "tsc --build --watch",
+    "bundle": "node ./esbuild.mjs",
+    "bundle:watch": "node ./esbuild.mjs --watch",
+    "dev:build": "npm run copy:assets && npm run bundle",
+    "copy:assets": "node ./scripts/copy-assets.mjs",
+    "vscode:prepublish": "npm run build:wasm && npm run copy:assets && node ./esbuild.mjs --production",
+    "test": "npm run compile && node --test \"shared/out/test/**/*.test.js\"",
     "package": "vsce package",
     "deploy": "vsce publish"
   },
@@ -33,8 +54,259 @@
           ".msg"
         ],
         "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "OMNeT++ INI",
+        "extensions": [
+          ".ini"
+        ],
+        "configuration": "./language-configuration-ini.json"
       }
     ],
+    "snippets": [
+      {
+        "language": "OMNeT++ NED",
+        "path": "./snippets/ned.json"
+      },
+      {
+        "language": "OMNeT++ INI",
+        "path": "./snippets/ini.json"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "omnetpp",
+          "title": "OMNeT++",
+          "icon": "media/omnetpp.svg"
+        }
+      ]
+    },
+    "views": {
+      "omnetpp": [
+        {
+          "id": "omnetppActiveConfig",
+          "name": "Configurations"
+        },
+        {
+          "id": "omnetppModuleHierarchy",
+          "name": "Module Hierarchy"
+        },
+        {
+          "id": "omnetppModuleParams",
+          "name": "Module Parameters"
+        },
+        {
+          "id": "omnetppInheritance",
+          "name": "NED Inheritance"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "omnetpp.pinType",
+        "title": "Pin Type",
+        "category": "OMNeT++",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "omnetpp.unpinType",
+        "title": "Unpin Type",
+        "category": "OMNeT++",
+        "icon": "$(pinned)"
+      },
+      {
+        "command": "omnetpp.pinModule",
+        "title": "Pin Module",
+        "category": "OMNeT++",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "omnetpp.unpinModule",
+        "title": "Unpin Module",
+        "category": "OMNeT++",
+        "icon": "$(pinned)"
+      },
+      {
+        "command": "omnetpp.pinParam",
+        "title": "Pin Module",
+        "category": "OMNeT++",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "omnetpp.unpinParam",
+        "title": "Unpin Module",
+        "category": "OMNeT++",
+        "icon": "$(pinned)"
+      },
+      {
+        "command": "omnetpp.setActiveConfiguration",
+        "title": "Set as Active Configuration",
+        "category": "OMNeT++"
+      },
+      {
+        "command": "omnetpp.clearActiveConfiguration",
+        "title": "Clear Active Configuration",
+        "category": "OMNeT++",
+        "icon": "$(close)"
+      },
+      {
+        "command": "omnetpp.setActiveConfigItem",
+        "title": "Set as Active Config",
+        "category": "OMNeT++",
+        "icon": "$(check)"
+      },
+      {
+        "command": "omnetpp.filterConfigurations",
+        "title": "Filter Configurations",
+        "category": "OMNeT++",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "omnetpp.clearConfigurationsFilter",
+        "title": "Clear Configurations Filter",
+        "category": "OMNeT++",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "omnetpp.refreshConfigurations",
+        "title": "Refresh Configurations",
+        "category": "OMNeT++",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        { "command": "omnetpp.pinType", "when": "false" },
+        { "command": "omnetpp.unpinType", "when": "false" },
+        { "command": "omnetpp.pinModule", "when": "false" },
+        { "command": "omnetpp.unpinModule", "when": "false" },
+        { "command": "omnetpp.pinParam", "when": "false" },
+        { "command": "omnetpp.unpinParam", "when": "false" },
+        { "command": "omnetpp.setActiveConfiguration", "when": "editorLangId == 'OMNeT++ INI'" },
+        { "command": "omnetpp.clearActiveConfiguration", "when": "omnetpp.hasActiveConfig" },
+        { "command": "omnetpp.setActiveConfigItem", "when": "false" },
+        { "command": "omnetpp.filterConfigurations", "when": "true" },
+        { "command": "omnetpp.clearConfigurationsFilter", "when": "omnetpp.configFilterActive" },
+        { "command": "omnetpp.refreshConfigurations", "when": "true" }
+      ],
+      "editor/context": [
+        {
+          "command": "omnetpp.setActiveConfiguration",
+          "when": "editorLangId == 'OMNeT++ INI'",
+          "group": "navigation@1"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "omnetpp.unpinType",
+          "when": "view == omnetppInheritance && omnetpp.typePinned",
+          "group": "navigation"
+        },
+        {
+          "command": "omnetpp.unpinModule",
+          "when": "view == omnetppModuleHierarchy && omnetpp.modulePinned",
+          "group": "navigation"
+        },
+        {
+          "command": "omnetpp.unpinParam",
+          "when": "view == omnetppModuleParams && omnetpp.paramPinned",
+          "group": "navigation"
+        },
+        {
+          "command": "omnetpp.filterConfigurations",
+          "when": "view == omnetppActiveConfig",
+          "group": "navigation@1"
+        },
+        {
+          "command": "omnetpp.clearConfigurationsFilter",
+          "when": "view == omnetppActiveConfig && omnetpp.configFilterActive",
+          "group": "navigation@2"
+        },
+        {
+          "command": "omnetpp.clearActiveConfiguration",
+          "when": "view == omnetppActiveConfig && omnetpp.hasActiveConfig",
+          "group": "navigation@3"
+        },
+        {
+          "command": "omnetpp.refreshConfigurations",
+          "when": "view == omnetppActiveConfig",
+          "group": "navigation@4"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "omnetpp.setActiveConfigItem",
+          "when": "view == omnetppActiveConfig && viewItem == omnetppConfig",
+          "group": "inline"
+        },
+        {
+          "command": "omnetpp.setActiveConfigItem",
+          "when": "view == omnetppActiveConfig && viewItem == omnetppConfig",
+          "group": "1_config"
+        },
+        {
+          "command": "omnetpp.pinType",
+          "when": "view == omnetppInheritance && viewItem == nedTypeUnpinned",
+          "group": "inline"
+        },
+        {
+          "command": "omnetpp.pinType",
+          "when": "view == omnetppInheritance && viewItem == nedTypeUnpinned",
+          "group": "1_pin"
+        },
+        {
+          "command": "omnetpp.unpinType",
+          "when": "view == omnetppInheritance && viewItem == nedTypePinned",
+          "group": "inline"
+        },
+        {
+          "command": "omnetpp.unpinType",
+          "when": "view == omnetppInheritance && viewItem == nedTypePinned",
+          "group": "1_pin"
+        },
+        {
+          "command": "omnetpp.pinModule",
+          "when": "view == omnetppModuleHierarchy && viewItem == nedModuleUnpinned",
+          "group": "inline"
+        },
+        {
+          "command": "omnetpp.pinModule",
+          "when": "view == omnetppModuleHierarchy && viewItem == nedModuleUnpinned",
+          "group": "1_pin"
+        },
+        {
+          "command": "omnetpp.unpinModule",
+          "when": "view == omnetppModuleHierarchy && viewItem == nedModulePinned",
+          "group": "inline"
+        },
+        {
+          "command": "omnetpp.unpinModule",
+          "when": "view == omnetppModuleHierarchy && viewItem == nedModulePinned",
+          "group": "1_pin"
+        },
+        {
+          "command": "omnetpp.pinParam",
+          "when": "view == omnetppModuleParams && viewItem == nedParamUnpinned",
+          "group": "inline"
+        },
+        {
+          "command": "omnetpp.pinParam",
+          "when": "view == omnetppModuleParams && viewItem == nedParamUnpinned",
+          "group": "1_pin"
+        },
+        {
+          "command": "omnetpp.unpinParam",
+          "when": "view == omnetppModuleParams && viewItem == nedParamPinned",
+          "group": "inline"
+        },
+        {
+          "command": "omnetpp.unpinParam",
+          "when": "view == omnetppModuleParams && viewItem == nedParamPinned",
+          "group": "1_pin"
+        }
+      ]
+    },
     "grammars": [
       {
         "language": "OMNeT++ NED",
@@ -45,10 +317,56 @@
         "language": "OMNeT++ MSG",
         "scopeName": "source.msg",
         "path": "./syntaxes/omnetpp-msg.tmLanguage.json"
+      },
+      {
+        "language": "OMNeT++ INI",
+        "scopeName": "source.omnetpp-ini",
+        "path": "./syntaxes/omnetpp-ini.tmLanguage.json"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "OMNeT++",
+      "properties": {
+        "omnetpp.nedPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Semicolon-separated list of additional NED source root directories (like the `ned-path` config option). Used in addition to source roots discovered from `.nedfolders`/`package.ned`."
+        },
+        "omnetpp.installDir": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to an OMNeT++ installation root. When set (or auto-detected), enables enriched features such as a live config-option registry and bundled NED libraries."
+        },
+        "omnetpp.iniAnalysis.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable full INI parameter-resolution analysis (resolves **.param assignments against the NED module tree of the selected network)."
+        },
+        "omnetpp.iniAnalysis.timeoutMs": {
+          "type": "number",
+          "default": 5000,
+          "description": "Maximum time (in milliseconds) spent analyzing a single INI configuration before yielding a partial result."
+        },
+        "omnetpp.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace the communication between VS Code and the OMNeT++ language server."
+        }
+      }
+    }
   },
   "devDependencies": {
-    "@vscode/vsce": "^3.0.0"
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.92.0",
+    "@vscode/test-electron": "^2.4.1",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.23.0",
+    "tree-sitter-cli": "0.20.8",
+    "typescript": "^5.5.0"
   }
 }

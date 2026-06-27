@@ -1,0 +1,48 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "OMNeT++ INI",
+  "scopeName": "source.omnetpp-ini",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#section" },
+    { "include": "#keyvalue" }
+  ],
+  "repository": {
+    "comment": {
+      "match": "#.*$",
+      "name": "comment.line.number-sign.omnetpp-ini"
+    },
+    "section": {
+      "match": "^\\s*(\\[)\\s*(Config|General)?\\s*([^\\]]*?)\\s*(\\])",
+      "captures": {
+        "1": { "name": "punctuation.definition.section.omnetpp-ini" },
+        "2": { "name": "keyword.control.section.omnetpp-ini" },
+        "3": { "name": "entity.name.section.omnetpp-ini" },
+        "4": { "name": "punctuation.definition.section.omnetpp-ini" }
+      }
+    },
+    "keyvalue": {
+      "begin": "^\\s*([^#=\\s][^=]*?)\\s*(=)",
+      "beginCaptures": {
+        "1": { "name": "variable.other.key.omnetpp-ini" },
+        "2": { "name": "punctuation.separator.key-value.omnetpp-ini" }
+      },
+      "end": "$",
+      "patterns": [
+        { "include": "#comment" },
+        {
+          "match": "\\b(true|false|default|ask)\\b",
+          "name": "constant.language.omnetpp-ini"
+        },
+        {
+          "match": "\"(\\\\.|[^\"])*\"",
+          "name": "string.quoted.double.omnetpp-ini"
+        },
+        {
+          "match": "\\b[0-9]+(\\.[0-9]+)?([eE][+-]?[0-9]+)?\\w*\\b",
+          "name": "constant.numeric.omnetpp-ini"
+        }
+      ]
+    }
+  }
+}

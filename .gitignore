@@ -1,2 +1,16 @@
-# local and generated files not to be committed
-node_modules/*
+# dependencies
+node_modules/
+
+# build output
+dist/
+out/
+*.tsbuildinfo
+
+# vscode test
+.vscode-test/
+
+# generated wasm copies (built from subprojects via npm run build:wasm)
+resources/wasm/*.wasm
+
+# packaged extension
+*.vsix

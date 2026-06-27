@@ -1,0 +1,72 @@
+{
+  "simple module": {
+    "prefix": "simple",
+    "body": [
+      "simple ${1:Name}",
+      "{",
+      "    parameters:",
+      "        $0",
+      "    gates:",
+      "}"
+    ],
+    "description": "A simple module declaration"
+  },
+  "compound module": {
+    "prefix": "module",
+    "body": [
+      "module ${1:Name}",
+      "{",
+      "    parameters:",
+      "    gates:",
+      "    submodules:",
+      "        $0",
+      "    connections:",
+      "}"
+    ],
+    "description": "A compound module declaration"
+  },
+  "network": {
+    "prefix": "network",
+    "body": [
+      "network ${1:Name}",
+      "{",
+      "    submodules:",
+      "        $0",
+      "    connections:",
+      "}"
+    ],
+    "description": "A network declaration"
+  },
+  "channel": {
+    "prefix": "channel",
+    "body": [
+      "channel ${1:Name} extends ned.DatarateChannel",
+      "{",
+      "    $0",
+      "}"
+    ],
+    "description": "A channel declaration"
+  },
+  "module interface": {
+    "prefix": "moduleinterface",
+    "body": [
+      "moduleinterface ${1:Name}",
+      "{",
+      "    parameters:",
+      "    gates:",
+      "        $0",
+      "}"
+    ],
+    "description": "A module interface declaration"
+  },
+  "package": {
+    "prefix": "package",
+    "body": ["package ${1:my.package};", "$0"],
+    "description": "A package declaration"
+  },
+  "import": {
+    "prefix": "import",
+    "body": ["import ${1:package.Type};"],
+    "description": "An import statement"
+  }
+}

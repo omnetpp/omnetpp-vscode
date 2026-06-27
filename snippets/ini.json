@@ -1,0 +1,22 @@
+{
+  "General section": {
+    "prefix": "[General]",
+    "body": ["[General]", "network = ${1:Network}", "sim-time-limit = ${2:100s}", "$0"],
+    "description": "A [General] section"
+  },
+  "Config section": {
+    "prefix": "[Config]",
+    "body": ["[Config ${1:Name}]", "extends = ${2:General}", "$0"],
+    "description": "A named [Config ...] section"
+  },
+  "iteration variable": {
+    "prefix": "itervar",
+    "body": ["**.${1:param} = \\${${2:var}=${3:1,2,5}}"],
+    "description": "A parameter assigned an iteration variable"
+  },
+  "repeat": {
+    "prefix": "repeat",
+    "body": ["repeat = ${1:10}"],
+    "description": "Number of repetitions per run"
+  }
+}

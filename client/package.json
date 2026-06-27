@@ -1,0 +1,9 @@
+{
+  "name": "@omnetpp/client",
+  "version": "0.1.0",
+  "description": "OMNeT++ extension client (LanguageClient host)",
+  "main": "./out/extension.js",
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}
