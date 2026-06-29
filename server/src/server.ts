@@ -31,6 +31,7 @@ import {
   computeHover,
   computeReferences,
   computeCodeLenses,
+  computeUsedBy,
   computeCompletion,
   computePrepareRename,
   computeRename,
@@ -432,6 +433,13 @@ interface ViewParams {
   uri: string;
   position?: LspPosition;
 }
+
+connection.onRequest('omnetpp/usedBy', (params: { uri: string; position: LspPosition }) => {
+  const parsed = store?.get(params.uri);
+  const c = ctx();
+  if (!parsed || !c) return { groups: [] };
+  return computeUsedBy(parsed, params.position, c);
+});
 
 connection.onRequest('omnetpp/inheritanceRoots', (params: ViewParams & { fqName?: string }) => {
   const c = ctx();

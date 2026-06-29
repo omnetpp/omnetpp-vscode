@@ -79,10 +79,15 @@ import {
   HoverResult,
   nedTypeSym,
   msgTypeSym,
+  iniSectionSym,
   nodeRange,
   nameNode,
   msgNameNode,
   MsgTypeInfo,
+  parseSymbolId,
+  SymbolId,
+  EdgeKind,
+  XrefEdge,
 } from '@omnetpp/shared';
 import type { ParsedDocument } from '../documentModel';
 
@@ -365,6 +370,109 @@ export function computeCodeLenses(parsed: ParsedDocument, ctx: IndexContext): Cr
     }
   }
   return out;
+}
+
+// ---- "Used By" reverse-dependency view ----------------------------------
+
+export interface UsedByItem {
+  label: string;
+  description?: string;
+  uri: string;
+  range: Range;
+}
+export interface UsedByGroup {
+  label: string;
+  items: UsedByItem[];
+}
+
+const EDGE_GROUP_LABEL: Record<EdgeKind, string> = {
+  extends: 'Extended by',
+  implements: 'Implemented by',
+  'like-iface': 'Used as «like» by',
+  'submodule-type': 'Instantiated by',
+  'channel-type': 'Used as channel by',
+  import: 'Imported by',
+  'gate-ref': 'Gate referenced by',
+  'submodule-ref': 'Submodule referenced by',
+  'msg-extends': 'Extended by',
+  'msg-field-type': 'Field type in',
+  'ned-class': 'Backing class for',
+  'ini-network': 'Network for config',
+  'ini-extends': 'Extended by config',
+};
+const GROUP_ORDER: EdgeKind[] = [
+  'extends', 'implements', 'msg-extends', 'like-iface', 'submodule-type', 'channel-type',
+  'msg-field-type', 'ned-class', 'ini-network', 'ini-extends', 'import', 'gate-ref', 'submodule-ref',
+];
+
+const baseName = (uri: string) => uri.split('/').pop() ?? uri;
+
+function refName(from: SymbolId): string {
+  const p = parseSymbolId(from);
+  if (!p) return String(from);
+  if (p.lang === 'ned' || p.lang === 'msg') return p.fqName.split(/[.:]/).pop() ?? p.fqName;
+  if (p.lang === 'ini') return p.rawName;
+  if (p.lang === 'nedmem') return p.member.name;
+  if (p.lang === 'file') return baseName(p.uri);
+  return String(from);
+}
+
+function groupEdges(edges: readonly XrefEdge[]): UsedByGroup[] {
+  const byKind = new Map<EdgeKind, UsedByItem[]>();
+  for (const e of edges) {
+    const items = byKind.get(e.kind) ?? [];
+    items.push({ label: refName(e.from), description: baseName(e.src.uri), uri: e.src.uri, range: e.src.range });
+    byKind.set(e.kind, items);
+  }
+  const out: UsedByGroup[] = [];
+  for (const kind of GROUP_ORDER) {
+    const items = byKind.get(kind);
+    if (items?.length) out.push({ label: EDGE_GROUP_LABEL[kind], items });
+  }
+  return out;
+}
+
+/** The reverse dependencies of the symbol at a position, grouped by relation. */
+export function computeUsedBy(parsed: ParsedDocument, pos: Position, ctx: IndexContext): { groups: UsedByGroup[] } {
+  if (parsed.language === 'ned' && parsed.tree) {
+    const file = ctx.nedCache.getFile(parsed.uri);
+    if (!file) return { groups: [] };
+    const tref = referenceAt(ctx.nedCache, file, file.tree, pos);
+    const fq = tref?.kind === 'typedef' ? tref.info.fqName : tref?.kind === 'typeref' ? tref.target?.fqName : undefined;
+    if (fq) return { groups: groupEdges(ctx.db.index.inboundOf(nedTypeSym(fq))) };
+    const mref = memberRefAt(ctx.nedCache, file, file.tree, pos);
+    if (mref?.key.kind === 'param') {
+      const items = findParamAssignments(ctx.iniCache, ctx.nedCache, ctx.registry, { typeFqName: mref.key.ownerFq, param: mref.key.name }).map((a) => ({
+        label: a.key,
+        description: `${a.config}${a.isWinner ? ' ✓' : ''}`,
+        uri: a.uri,
+        range: a.keyRange,
+      }));
+      return { groups: items.length ? [{ label: 'Assigned in INI', items }] : [] };
+    }
+    return { groups: [] };
+  }
+  if (parsed.language === 'msg' && parsed.tree) {
+    const file = ctx.msgCache.getFile(parsed.uri);
+    const t = file ? msgTypeAt(ctx.msgCache, file, file.tree, pos) : undefined;
+    return { groups: t ? groupEdges(ctx.db.index.inboundOf(msgTypeSym(t.fqName))) : [] };
+  }
+  if (parsed.language === 'ini' && parsed.ini) {
+    // a `network=` value → the NED network's reverse deps
+    for (const section of parsed.ini.sections) {
+      for (const e of section.entries) {
+        if (e.key === 'network' && e.value && (posInRange(pos, e.keyRange) || posInRange(pos, e.valueRange))) {
+          const net = resolveNetworkType(ctx.nedCache, e.value);
+          return { groups: net ? groupEdges(ctx.db.index.inboundOf(nedTypeSym(net.fqName))) : [] };
+        }
+      }
+    }
+    // otherwise the enclosing config section → configs that extend it
+    const sec = [...parsed.ini.sections].reverse().find((s) => s.range.start.line <= pos.line);
+    if (sec) return { groups: groupEdges(ctx.db.index.inboundOf(iniSectionSym(parsed.uri, sec.rawName))) };
+    return { groups: [] };
+  }
+  return { groups: [] };
 }
 
 export function computePrepareRename(

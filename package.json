@@ -106,6 +106,10 @@
         {
           "id": "omnetppInheritance",
           "name": "NED Inheritance"
+        },
+        {
+          "id": "omnetppUsedBy",
+          "name": "Used By"
         }
       ]
     },

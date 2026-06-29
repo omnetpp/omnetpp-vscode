@@ -660,12 +660,85 @@ class ConfigurationsProvider implements vscode.TreeDataProvider<ConfigTreeNode> 
   }
 }
 
-/** Register the three auxiliary tree views and keep them in sync with the editor. */
+interface UsedByItem {
+  label: string;
+  description?: string;
+  uri: string;
+  range: Range;
+}
+interface UsedByGroupData {
+  label: string;
+  items: UsedByItem[];
+}
+type UsedByNode =
+  | { kind: 'group'; label: string; children: UsedByNode[] }
+  | ({ kind: 'leaf' } & UsedByItem);
+
+/**
+ * The "Used By" view: reverse dependencies of the symbol under the editor cursor,
+ * grouped by relation (extended by, instantiated by, backing class for, …). Driven
+ * entirely by the cross-reference graph via the `omnetpp/usedBy` request.
+ */
+class UsedByProvider implements vscode.TreeDataProvider<UsedByNode> {
+  treeView?: vscode.TreeView<UsedByNode>;
+  private readonly emitter = new vscode.EventEmitter<void>();
+  readonly onDidChangeTreeData = this.emitter.event;
+  private roots: UsedByNode[] = [];
+
+  constructor(private readonly client: LanguageClient) {}
+
+  async update(): Promise<void> {
+    const focus = activeContext();
+    if (!focus) {
+      if (this.roots.length) {
+        this.roots = [];
+        this.emitter.fire();
+      }
+      return;
+    }
+    let groups: UsedByGroupData[] = [];
+    try {
+      const res = await this.client.sendRequest<{ groups: UsedByGroupData[] }>('omnetpp/usedBy', focus);
+      groups = res?.groups ?? [];
+    } catch {
+      groups = [];
+    }
+    this.roots = groups.map((g) => ({
+      kind: 'group' as const,
+      label: g.label,
+      children: g.items.map((i) => ({ kind: 'leaf' as const, ...i })),
+    }));
+    this.emitter.fire();
+  }
+
+  getChildren(el?: UsedByNode): UsedByNode[] {
+    if (!el) return this.roots;
+    return el.kind === 'group' ? el.children : [];
+  }
+
+  getTreeItem(el: UsedByNode): vscode.TreeItem {
+    if (el.kind === 'group') {
+      const it = new vscode.TreeItem(el.label, vscode.TreeItemCollapsibleState.Expanded);
+      it.description = String(el.children.length);
+      it.iconPath = new vscode.ThemeIcon('references');
+      return it;
+    }
+    const it = new vscode.TreeItem(el.label, vscode.TreeItemCollapsibleState.None);
+    it.description = el.description;
+    it.tooltip = `${el.label} — ${el.description ?? ''}`;
+    it.iconPath = new vscode.ThemeIcon('symbol-reference');
+    it.command = { command: 'omnetpp.openLocation', title: 'Open', arguments: [el.uri, el.range] };
+    return it;
+  }
+}
+
+/** Register the auxiliary tree views and keep them in sync with the editor. */
 export function registerViews(context: vscode.ExtensionContext, client: LanguageClient): void {
   const inheritance = new InheritanceProvider(client);
   const moduleHierarchy = new ModuleHierarchyProvider(client);
   const moduleParams = new ModuleParamsProvider(client);
   const configurations = new ConfigurationsProvider(client);
+  const usedBy = new UsedByProvider(client);
 
   // grey out overridden (shadowed) parameter rows in the Module Parameters view
   context.subscriptions.push(
@@ -727,6 +800,10 @@ export function registerViews(context: vscode.ExtensionContext, client: Language
     treeDataProvider: configurations,
   });
   configurations.treeView = configurationsView;
+  const usedByView = vscode.window.createTreeView('omnetppUsedBy', {
+    treeDataProvider: usedBy,
+  });
+  usedBy.treeView = usedByView;
   // When the view is (re)opened, expand and reveal the active configuration.
   context.subscriptions.push(
     configurationsView.onDidChangeVisibility((e) => {
@@ -782,6 +859,7 @@ export function registerViews(context: vscode.ExtensionContext, client: Language
     moduleHierarchyView,
     moduleParamsView,
     configurationsView,
+    usedByView,
     vscode.commands.registerCommand('omnetpp.openLocation', (uri: string, range?: Range) =>
       openLocation(uri, range),
     ),
@@ -887,11 +965,12 @@ export function registerViews(context: vscode.ExtensionContext, client: Language
     iniWatcher.onDidChange(refreshConfigs),
   );
 
-  // all three views follow the editor unless individually pinned
+  // all views follow the editor unless individually pinned
   const followEditor = () => {
     if (!inheritance.isPinned()) void inheritance.update();
     if (!moduleHierarchy.isPinned()) void moduleHierarchy.update();
     if (!moduleParams.isPinned()) void moduleParams.update();
+    void usedBy.update();
   };
 
   let timer: NodeJS.Timeout | undefined;
