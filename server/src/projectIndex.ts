@@ -9,10 +9,23 @@ import {
   NedResourceCache,
   ParserService,
   ProjectLayout,
+  configSummaries,
   discoverProjectLayout,
   isExcludedPackage,
   packageForFile,
+  parseIni,
+  rootForPath,
 } from '@omnetpp/shared';
+
+/** Per-source-root index statistics, reported in the server log. */
+export interface RootStats {
+  dir: string;
+  rootPackage: string;
+  nedTypes: number;
+  msgFiles: number;
+  iniFiles: number;
+  iniConfigs: number;
+}
 
 /**
  * Owns the project-wide NED type index. Discovers source roots, scans NED files
@@ -23,6 +36,8 @@ export class ProjectIndex {
   readonly msgCache = new MsgResourceCache();
   readonly configRegistry = new ConfigRegistry();
   private layout: ProjectLayout = { roots: [], excludedPackages: [] };
+  /** Scanned INI files → number of named [Config] sections (for status reporting). */
+  private iniConfigCounts = new Map<string, number>();
 
   /** Predicate: is this uri currently open in an editor? Open docs are driven by
    *  the document store, so the disk scanner must not overwrite them. */
@@ -40,6 +55,8 @@ export class ProjectIndex {
 
   /** Discover source roots and index all NED and MSG files on disk. */
   async initialize(workspaceFolders: string[], nedPathDirs: string[]): Promise<void> {
+    this.iniConfigCounts.clear();
+
     // built-in NED declarations (ned.IdealChannel, ...)
     this.cache.addFile(BUILTIN_URI, this.parsers.parse('ned', BUILTIN_NED_TEXT), 'ned');
 
@@ -87,8 +104,22 @@ export class ProjectIndex {
         await this.indexFile(full);
       } else if (name.endsWith('.msg')) {
         await this.indexMsgFile(full);
+      } else if (name.endsWith('.ini')) {
+        await this.indexIniFile(full);
       }
     }
+  }
+
+  /** Record an INI file's named-config count for status reporting. */
+  async indexIniFile(fsPath: string): Promise<void> {
+    const uri = pathToFileURL(fsPath).toString();
+    let text: string;
+    try {
+      text = await this.fs.readFile(fsPath);
+    } catch {
+      return;
+    }
+    this.iniConfigCounts.set(uri, configSummaries(parseIni(text)).length);
   }
 
   /** Read and index a single MSG file from disk (by absolute fs path). */
@@ -169,5 +200,56 @@ export class ProjectIndex {
     } catch {
       return '';
     }
+  }
+
+  /**
+   * Per-source-root counts of indexed NED types, MSG files, and INI files/configs.
+   * The root list is the effective NED path actually scanned (workspace-discovered
+   * roots plus `nedPath` entries). Built-ins and files outside any root are omitted.
+   */
+  stats(): RootStats[] {
+    const byDir = new Map<string, RootStats>();
+    const order: RootStats[] = [];
+    for (const r of this.layout.roots) {
+      if (byDir.has(r.dir)) continue;
+      const s: RootStats = {
+        dir: r.dir,
+        rootPackage: r.rootPackage,
+        nedTypes: 0,
+        msgFiles: 0,
+        iniFiles: 0,
+        iniConfigs: 0,
+      };
+      byDir.set(r.dir, s);
+      order.push(s);
+    }
+    const statFor = (uri: string): RootStats | undefined => {
+      let fsPath: string;
+      try {
+        fsPath = fileURLToPath(uri);
+      } catch {
+        return undefined; // non-file uri (e.g. the NED built-ins)
+      }
+      const root = rootForPath(this.layout.roots, fsPath);
+      return root ? byDir.get(root.dir) : undefined;
+    };
+
+    for (const f of this.cache.allFiles()) {
+      if (f.uri === BUILTIN_URI) continue;
+      const s = statFor(f.uri);
+      if (s) s.nedTypes += this.cache.typesInFile(f.uri).length;
+    }
+    for (const f of this.msgCache.allFiles()) {
+      const s = statFor(f.uri);
+      if (s) s.msgFiles++;
+    }
+    for (const [uri, configs] of this.iniConfigCounts) {
+      const s = statFor(uri);
+      if (s) {
+        s.iniFiles++;
+        s.iniConfigs += configs;
+      }
+    }
+    return order;
   }
 }

@@ -64,7 +64,9 @@ let installDir = '';
 /** Read the `omnetpp.*` settings the server cares about from init/config options. */
 function applySettings(opts: { nedPath?: string; installDir?: string } | undefined): void {
   nedPathSetting = opts?.nedPath ?? '';
-  installDir = opts?.installDir || process.env.OMNETPP_ROOT || '';
+  // explicit setting wins; otherwise fall back to the env vars an OMNeT++ shell exports
+  installDir =
+    opts?.installDir || process.env.OMNETPP_ROOT || process.env.__omnetpp_root_dir || '';
 }
 
 connection.onInitialize(async (params: InitializeParams): Promise<InitializeResult> => {
@@ -133,20 +135,44 @@ function fqNameOf(item: TypeHierarchyItem): string | undefined {
 }
 
 function currentNedPathDirs(): string[] {
-  const dirs = nedPathSetting.split(/[;:]/).map((s) => s.trim()).filter(Boolean);
-  if (installDir) dirs.push(installDir);
-  return dirs;
+  // The install dir itself is never a NED source root, so it is not added here.
+  return nedPathSetting.split(/[;:]/).map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Log where the OMNeT++ install was found, the effective NED path (every source root
+ * actually scanned, including auto-discovered ones), and per-root index counts.
+ */
+function logIndexStatus(): void {
+  if (!index) return;
+  connection.console.info(
+    installDir
+      ? `OMNeT++ installation: ${installDir}`
+      : 'OMNeT++ installation: not detected (set omnetpp.installDir, OMNETPP_ROOT or __omnetpp_root_dir)',
+  );
+  const roots = index.stats();
+  if (!roots.length) {
+    connection.console.info('OMNeT++ NED path: no source roots found');
+    return;
+  }
+  connection.console.info(`OMNeT++ NED path (${roots.length} source root(s)):`);
+  for (const r of roots) {
+    const pkg = r.rootPackage ? ` [package ${r.rootPackage}]` : '';
+    connection.console.info(
+      `  ${r.dir}${pkg} — ${r.nedTypes} NED type(s), ${r.msgFiles} MSG file(s), ` +
+        `${r.iniFiles} INI file(s)/${r.iniConfigs} config(s)`,
+    );
+  }
+  connection.console.info(
+    `OMNeT++ index ready: ${index.cache.allTypeNames().length} NED types total.`,
+  );
 }
 
 connection.onInitialized(async () => {
   if (!index) return;
-  const nedPathDirs = currentNedPathDirs();
-  if (installDir) connection.console.info(`OMNeT++ install detected: ${installDir}`);
   try {
-    await index.initialize(workspaceFolders, nedPathDirs);
-    connection.console.info(
-      `OMNeT++ index ready: ${index.cache.allTypeNames().length} NED types.`,
-    );
+    await index.initialize(workspaceFolders, currentNedPathDirs());
+    logIndexStatus();
   } catch (e) {
     connection.console.error(`OMNeT++ indexing failed: ${(e as Error).message}`);
   }
@@ -233,6 +259,7 @@ function scheduleReindex(): void {
     if (!index) return;
     try {
       await index.reindex(workspaceFolders, currentNedPathDirs());
+      logIndexStatus();
       // re-apply open buffers (the scan skips them) then refresh everything
       for (const doc of documents.all()) refresh(doc);
     } catch (e) {

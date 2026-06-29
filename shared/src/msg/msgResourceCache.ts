@@ -122,6 +122,9 @@ export class MsgResourceCache {
   allTypes(): MsgTypeInfo[] {
     return [...this.types.values()];
   }
+  allFiles(): MsgFileInfo[] {
+    return [...this.files.values()];
+  }
   typeInfoForNode(node: { id: number }, uri: string): MsgTypeInfo | undefined {
     const fq = this.nodeFqName.get(`${uri} ${node.id}`);
     return fq ? this.types.get(fq) : undefined;
