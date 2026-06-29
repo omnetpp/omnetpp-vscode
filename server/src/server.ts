@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   createConnection,
   ProposedFeatures,
@@ -17,7 +17,8 @@ import {
 } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { promises as fsp } from 'node:fs';
-import { ParserService, parseIni, configSummaries } from '@omnetpp/shared';
+import { ParserService, parseIni, configSummaries, OMNETPP_TOOLS, handleTool } from '@omnetpp/shared';
+import type { ToolContext, FileSystem } from '@omnetpp/shared';
 import { DocumentModelStore } from './documentModel';
 import { NodeFileSystem } from './nodeFileSystem';
 import { ProjectIndex } from './projectIndex';
@@ -559,6 +560,45 @@ function safeFsPath(uri: string): string | undefined {
     return undefined;
   }
 }
+
+// ---- MCP live-index bridge ------------------------------------------------
+// The extension hosts an MCP HTTP endpoint and forwards tool calls here, so MCP
+// clients query the SAME live index the editor uses (reflecting unsaved buffers).
+const mcpNodeFs = new NodeFileSystem();
+/** FileSystem that serves open editor buffers first, falling back to disk. */
+const mcpLiveFs: FileSystem = {
+  async readFile(path) {
+    const doc = documents.get(pathToFileURL(path).toString());
+    return doc ? doc.getText() : mcpNodeFs.readFile(path);
+  },
+  readDirectory: (p) => mcpNodeFs.readDirectory(p),
+  stat: (p) => mcpNodeFs.stat(p),
+  exists: (p) => mcpNodeFs.exists(p),
+};
+
+function mcpCtx(): ToolContext | undefined {
+  if (!index || !parsers) return undefined;
+  return {
+    nedCache: index.cache,
+    msgCache: index.msgCache,
+    configRegistry: index.configRegistry,
+    fs: mcpLiveFs,
+    parsers,
+    toUri: (p) => (/^[a-z][a-z0-9+.-]*:\/\//i.test(p) ? p : pathToFileURL(p).toString()),
+    toPath: (u) => (u.startsWith('file:') ? fileURLToPath(u) : u),
+  };
+}
+
+connection.onRequest('omnetpp/mcp/listTools', () => OMNETPP_TOOLS);
+
+connection.onRequest(
+  'omnetpp/mcp/callTool',
+  async (params: { name: string; arguments?: Record<string, unknown> }) => {
+    const c = mcpCtx();
+    if (!c) throw new Error('OMNeT++ project index not ready');
+    return handleTool(params.name, params.arguments ?? {}, c);
+  },
+);
 
 documents.listen(connection);
 connection.listen();

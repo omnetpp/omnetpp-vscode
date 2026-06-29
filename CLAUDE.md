@@ -12,21 +12,33 @@ live config-option registry).
 
 ## Architecture
 
-Three npm workspaces (monorepo), wired together by TypeScript project references:
+Four npm workspaces (monorepo), wired together by TypeScript project references:
 
 - **`shared/`** — the host-agnostic semantic core: tree-sitter parser wrapper, AST/type
   model, and all analyzers for NED/MSG/INI (diagnostics, navigation, completion, rename,
   hierarchy, INI param resolution). **It must never import `vscode` or Node-specific
   APIs.** File access goes through the `FileSystem` interface in
   `shared/src/fs/fileSystem.ts`, which callers inject. Public surface is re-exported from
-  `shared/src/index.ts`.
+  `shared/src/index.ts`. Also hosts the **MCP tool layer** (`shared/src/mcp/tools.ts`):
+  `OMNETPP_TOOLS` + `handleTool(name, args, ctx)`, pure functions over a `ToolContext`
+  (the caches + a `FileSystem`), with **no MCP-SDK dependency** — the SDK glue lives only
+  in the adapters below.
 - **`server/`** — the LSP server (`server/src/server.ts`). Owns the LSP connection,
   the project index (`projectIndex.ts`), and a concrete Node filesystem
   (`nodeFileSystem.ts`) that it injects into `shared`. Translates LSP requests into
-  `shared` calls. Bundled to `dist/server.js` and spawned as a child process.
+  `shared` calls. Bundled to `dist/server.js` and spawned as a child process. Also serves
+  the `omnetpp/mcp/listTools` / `omnetpp/mcp/callTool` custom requests by running
+  `handleTool` against its **live** index (so MCP results reflect unsaved buffers).
 - **`client/`** — the thin VS Code extension (`client/src/extension.ts`). Starts the
   language client over IPC, registers the activity-bar tree views (`views.ts`). Bundled
-  to `dist/extension.js` (the extension `main`).
+  to `dist/extension.js` (the extension `main`). Also hosts a localhost Streamable-HTTP
+  **MCP bridge** (`mcpBridge.ts`, token-guarded) registered via
+  `lm.registerMcpServerDefinitionProvider`; it forwards tool calls to the live LSP index.
+- **`mcp/`** — a standalone stdio MCP server (`mcp/src/server.ts`, bundled to
+  `dist/mcp-server.js`). Builds its own index from disk via `shared` (`indexBuilder.ts`)
+  and serves the same `OMNETPP_TOOLS` — for external clients (Claude Code, etc.) with no
+  editor running. Uses `node16` module resolution because the MCP SDK ships subpaths via a
+  package.json `exports` map (the client uses `bundler` resolution for the same reason).
 
 Data flow: `client` reads `omnetpp.*` settings → passes them to `server` via LSP
 `initializationOptions` → `server` builds the project index and answers requests using
@@ -82,7 +94,11 @@ the server debug port is `6009`.
 `scripts/` holds standalone Node smoke/check scripts (e.g. `lsp-smoke.mjs`,
 `semantic-check.mjs`, `ini-param-check.mjs`, `dump-tree.mjs`) useful for exercising the
 parser/analyzers or an LSP feature outside VS Code. Run them with `node scripts/<file>.mjs`
-after `npm run compile`.
+after `npm run compile`. For the MCP feature (after `npm run dev:build`):
+`mcp-smoke.mjs <projectDir>` drives the standalone `dist/mcp-server.js` over MCP stdio;
+`mcp-live-smoke.mjs <projectDir>` drives `dist/server.js` and exercises the
+`omnetpp/mcp/*` live-index requests (incl. unsaved-buffer reflection). Note: MCP stdio is
+**newline-delimited JSON**, not LSP `Content-Length` framing.
 
 ## Conventions
 

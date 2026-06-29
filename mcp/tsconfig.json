@@ -1,0 +1,16 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./out",
+    "lib": ["ES2021"],
+    "types": ["node"],
+    // The MCP SDK ships its subpaths via a package.json "exports" map, which only
+    // node16/nodenext resolution understands. The runtime artifact is the esbuild
+    // bundle (dist/mcp-server.js); this tsc build is for type-checking only.
+    "module": "node16",
+    "moduleResolution": "node16"
+  },
+  "references": [{ "path": "../shared" }],
+  "include": ["src/**/*.ts"]
+}

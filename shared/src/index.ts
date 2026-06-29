@@ -32,6 +32,9 @@ export * from './expr/infer';
 // Project model
 export * from './project/projectModel';
 
+// MCP tool layer (host-agnostic; no MCP SDK dependency)
+export * from './mcp/tools';
+
 // MSG
 export * from './msg/msgAst';
 export { msgDocumentSymbols } from './msg/msgSymbols';

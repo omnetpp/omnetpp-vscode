@@ -4,7 +4,12 @@
     "rootDir": "./src",
     "outDir": "./out",
     "lib": ["ES2021"],
-    "types": ["node", "vscode"]
+    "types": ["node", "vscode"],
+    // The MCP SDK exposes its subpaths via a package.json "exports" map; "bundler"
+    // resolution reads it (and keeps extensionless relative imports). The runtime
+    // artifact is the esbuild bundle, so this only affects type-checking.
+    "module": "ESNext",
+    "moduleResolution": "Bundler"
   },
   "include": ["src/**/*.ts"]
 }

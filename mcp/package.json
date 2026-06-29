@@ -1,0 +1,11 @@
+{
+  "name": "@omnetpp/mcp",
+  "version": "0.1.0",
+  "description": "MCP server exposing the OMNeT++ NED/MSG/INI semantic model",
+  "main": "./out/server.js",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@omnetpp/shared": "0.1.0",
+    "web-tree-sitter": "0.20.8"
+  }
+}

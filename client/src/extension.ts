@@ -1,5 +1,5 @@
 import * as path from 'node:path';
-import { ExtensionContext, workspace } from 'vscode';
+import { ExtensionContext, workspace, lm, McpHttpServerDefinition } from 'vscode';
 import {
   DidChangeConfigurationNotification,
   LanguageClient,
@@ -8,6 +8,7 @@ import {
   TransportKind,
 } from 'vscode-languageclient/node';
 import { registerViews } from './views';
+import { startMcpBridge } from './mcpBridge';
 
 let client: LanguageClient | undefined;
 
@@ -69,6 +70,29 @@ export function activate(context: ExtensionContext): void {
       });
     }),
   );
+
+  registerMcpProvider(context);
+}
+
+/**
+ * Expose the project's live semantic model as an MCP server (NED/MSG/INI queries
+ * + refactorings), backed by the running language server's live index. Guarded so
+ * the extension still works on editors without the MCP API.
+ */
+function registerMcpProvider(context: ExtensionContext): void {
+  if (typeof lm?.registerMcpServerDefinitionProvider !== 'function') return;
+  void startMcpBridge(() => client).then((bridge) => {
+    context.subscriptions.push({ dispose: () => bridge.dispose() });
+    context.subscriptions.push(
+      lm.registerMcpServerDefinitionProvider('omnetpp.liveModel', {
+        provideMcpServerDefinitions: () => [
+          new McpHttpServerDefinition('OMNeT++ NED/MSG/INI (live)', bridge.uri, {
+            Authorization: `Bearer ${bridge.token}`,
+          }),
+        ],
+      }),
+    );
+  });
 }
 
 export function deactivate(): Thenable<void> | undefined {

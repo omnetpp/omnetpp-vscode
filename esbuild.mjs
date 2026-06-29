@@ -22,6 +22,7 @@ const common = {
 const targets = [
   { entryPoints: ['client/src/extension.ts'], outfile: 'dist/extension.js' },
   { entryPoints: ['server/src/server.ts'], outfile: 'dist/server.js' },
+  { entryPoints: ['mcp/src/server.ts'], outfile: 'dist/mcp-server.js' },
 ];
 
 if (watch) {
