@@ -198,3 +198,26 @@ test('unknown tool rejects', async () => {
   const ctx = await buildCtx();
   await assert.rejects(() => Promise.resolve(handleTool('nope', {}, ctx)));
 });
+
+test('find_param_assignments (reverse INI) finds the INI key that sets a NED param', async () => {
+  const ctx = await buildCtx();
+  const rows = (await handleTool('find_param_assignments', { typeFqName: 'Host', param: 'mode' }, ctx)) as any[];
+  assert.ok(rows.length >= 1, 'expected at least one assignment');
+  const r = rows.find((x) => x.matchedPath === 'Net.host.mode');
+  assert.ok(r, `expected Net.host.mode, got ${JSON.stringify(rows)}`);
+  assert.equal(r.key, '**.host.mode');
+  assert.equal(r.config, 'Fast');
+});
+
+test('get_connections returns an array for a network', async () => {
+  const ctx = await buildCtx();
+  const conns = (await handleTool('get_connections', { fqName: 'Net' }, ctx)) as any[];
+  assert.ok(Array.isArray(conns));
+});
+
+test('new tools are advertised in OMNETPP_TOOLS', () => {
+  const names = OMNETPP_TOOLS.map((t) => t.name);
+  for (const n of ['find_param_assignments', 'get_connections', 'find_msg_usages', 'resolve_class']) {
+    assert.ok(names.includes(n), `missing tool ${n}`);
+  }
+});

@@ -36,9 +36,12 @@ import {
   resolveNetworkType,
   configEntriesInScope,
   configResolver,
+  findParamAssignments,
 } from '../ini/iniParamResolution';
 import { expandNetwork, paramSlots } from '../ini/moduleTree';
 import { parseIni, configSummaries } from '../ini/iniDocument';
+import { findMsgUsagesInNed, resolveNedClass, nedClassReferences } from '../xref/nedMsgLinks';
+import type { ConnectionInfo, ConnEndpoint } from '../ned/nedAst';
 import type { Node as SyntaxNode } from 'web-tree-sitter';
 
 /** The index + capabilities a tool handler needs. Supplied by each adapter. */
@@ -86,6 +89,27 @@ function nedTypeSummary(t: NedTypeInfo) {
   };
 }
 
+function connEndpointSummary(e: ConnEndpoint) {
+  return {
+    module: e.module,
+    gate: e.gate,
+    subgate: e.subgate,
+    index: e.gateIndex,
+    plusplus: e.gatePlusplus,
+  };
+}
+
+function connectionSummary(c: ConnectionInfo) {
+  return {
+    direction: c.direction,
+    src: connEndpointSummary(c.src),
+    dest: connEndpointSummary(c.dest),
+    channelType: c.channel?.typeName,
+    loops: c.loops,
+    conditions: c.conditions,
+  };
+}
+
 function nedTypeDetail(t: NedTypeInfo) {
   const declNode = nameNode(t.node) ?? t.node;
   return {
@@ -111,6 +135,7 @@ function nedTypeDetail(t: NedTypeInfo) {
       isLike: s.isLike,
       isVector: s.isVector,
     })),
+    connections: t.connections().map(connectionSummary),
     location: locOf(t.file.uri, declNode),
   };
 }
@@ -212,7 +237,11 @@ const TOOLS: ToolDef[] = [
     },
     handler: (a, ctx) => {
       const t = ctx.nedCache.getType(a.fqName);
-      return t ? nedTypeDetail(t) : null;
+      if (!t) return null;
+      const detail = nedTypeDetail(t);
+      const cls = nedClassReferences(t)
+        .map((r) => ({ className: r.className, resolved: resolveNedClass(ctx.msgCache, t, r.className)?.fqName ?? null }));
+      return { ...detail, classRefs: cls };
     },
   },
   {
@@ -254,6 +283,65 @@ const TOOLS: ToolDef[] = [
       required: ['fqName'],
     },
     handler: (a, ctx) => ctx.db.findTypeUsages(a.fqName),
+  },
+  {
+    name: 'get_connections',
+    description:
+      'Connections of a compound module/network (topology): each with direction, src/dest endpoints (submodule.gate), channel type, and loop/condition context.',
+    inputSchema: {
+      type: 'object',
+      properties: { fqName: { type: 'string' } },
+      required: ['fqName'],
+    },
+    handler: (a, ctx) => {
+      const t = ctx.nedCache.getType(a.fqName);
+      return t ? t.connections().map(connectionSummary) : [];
+    },
+  },
+  {
+    name: 'find_param_assignments',
+    description:
+      'Reverse of parameter go-to-definition: every INI key across the workspace that assigns the NED parameter declared by (typeFqName, param). Optionally restricted to one config.',
+    inputSchema: {
+      type: 'object',
+      properties: { typeFqName: { type: 'string' }, param: { type: 'string' }, config: { type: 'string' } },
+      required: ['typeFqName', 'param'],
+    },
+    handler: (a, ctx) =>
+      findParamAssignments(ctx.iniCache, ctx.nedCache, ctx.configRegistry, { typeFqName: a.typeFqName, param: a.param }, a.config),
+  },
+  {
+    name: 'find_msg_usages',
+    description: 'Where a MSG type is used: NED @class / @signal(type=) sites, plus its direct MSG subtypes.',
+    inputSchema: {
+      type: 'object',
+      properties: { fqName: { type: 'string' } },
+      required: ['fqName'],
+    },
+    handler: (a, ctx) => ({
+      nedSites: findMsgUsagesInNed(ctx.msgCache, ctx.nedCache, a.fqName),
+      msgSubtypes: ctx.msgCache
+        .allTypes()
+        .filter((t) => t.superType()?.fqName === a.fqName)
+        .map((t) => t.fqName),
+    }),
+  },
+  {
+    name: 'resolve_class',
+    description: "Resolve a NED type's @class / @signal backing-class tokens to their MSG type declarations (via the file @namespace).",
+    inputSchema: {
+      type: 'object',
+      properties: { fqName: { type: 'string' } },
+      required: ['fqName'],
+    },
+    handler: (a, ctx) => {
+      const t = ctx.nedCache.getType(a.fqName);
+      if (!t) return null;
+      return nedClassReferences(t).map((r) => ({
+        className: r.className,
+        resolved: resolveNedClass(ctx.msgCache, t, r.className)?.fqName ?? null,
+      }));
+    },
   },
   {
     name: 'list_msg_types',

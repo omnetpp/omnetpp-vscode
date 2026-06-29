@@ -13,6 +13,9 @@ import {
   MsgResourceCache,
   ConfigRegistry,
   SemanticDatabase,
+  IniResourceCache,
+  findParamAssignments,
+  memberRefAt,
   nedPrepareRename,
   nedPrepareMemberRename,
   nedRename,
@@ -80,6 +83,7 @@ export interface IndexContext {
   msgCache: MsgResourceCache;
   registry: ConfigRegistry;
   db: SemanticDatabase;
+  iniCache: IniResourceCache;
 }
 
 function lineAt(text: string, line: number): string {
@@ -218,9 +222,20 @@ export function computeReferences(
   if (parsed.language !== 'ned' || !parsed.tree) return [];
   const file = ctx.nedCache.getFile(parsed.uri);
   if (!file) return [];
-  return nedReferences(ctx.nedCache, file, file.tree, pos, includeDeclaration, (fq) =>
+  const refs = nedReferences(ctx.nedCache, file, file.tree, pos, includeDeclaration, (fq) =>
     ctx.db.findTypeUsages(fq),
   );
+  // a NED parameter declaration also has references in INI files (assignments)
+  const mref = memberRefAt(ctx.nedCache, file, file.tree, pos);
+  if (mref?.key.kind === 'param') {
+    for (const a of findParamAssignments(ctx.iniCache, ctx.nedCache, ctx.registry, {
+      typeFqName: mref.key.ownerFq,
+      param: mref.key.name,
+    })) {
+      refs.push({ uri: a.uri, range: a.keyRange });
+    }
+  }
+  return refs;
 }
 
 export function computePrepareRename(

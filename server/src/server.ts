@@ -183,7 +183,7 @@ connection.onInitialized(async () => {
 
 function ctx() {
   return index
-    ? { nedCache: index.cache, msgCache: index.msgCache, registry: index.configRegistry, db: index.db }
+    ? { nedCache: index.cache, msgCache: index.msgCache, registry: index.configRegistry, db: index.db, iniCache: index.iniCache }
     : undefined;
 }
 
