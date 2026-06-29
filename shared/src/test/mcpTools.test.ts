@@ -85,6 +85,39 @@ test('OMNETPP_TOOLS exposes the documented tool set', () => {
   }
   // every tool must carry a JSON schema
   for (const t of OMNETPP_TOOLS) assert.equal((t.inputSchema as any).type, 'object');
+  for (const expected of ['impact_of', 'find_unused', 'neighbors']) {
+    assert.ok(names.includes(expected), `missing tool ${expected}`);
+  }
+});
+
+test('impact_of returns the transitive dependents of a type', async () => {
+  const ctx = await buildCtx();
+  const r = (await handleTool('impact_of', { fqName: 'Host' }, ctx)) as any[];
+  const names = r.map((n) => n.name);
+  assert.ok(names.includes('Server'), 'Server extends Host');
+  assert.ok(names.includes('Net'), 'Net instantiates Host');
+  // every dependent carries the relation + depth
+  assert.ok(r.every((n) => typeof n.via === 'string' && typeof n.depth === 'number'));
+});
+
+test('find_unused reports no unused network when a config runs it', async () => {
+  const ctx = await buildCtx();
+  const r = (await handleTool('find_unused', {}, ctx)) as any;
+  assert.deepEqual(r.unusedNetworks, []); // Net is run by [General] network=Net
+  assert.deepEqual(r.orphanMsgTypes, []); // no MSG types in the fixture
+});
+
+test('neighbors returns inbound and outbound graph edges', async () => {
+  const ctx = await buildCtx();
+  const inbound = (await handleTool('neighbors', { fqName: 'Host', direction: 'in' }, ctx)) as any[];
+  const kinds = new Set(inbound.map((e) => e.kind));
+  assert.ok(kinds.has('extends'), 'Server extends Host');
+  assert.ok(kinds.has('submodule-type'), 'Net has a Host submodule');
+
+  const out = (await handleTool('neighbors', { fqName: 'Server', direction: 'out', kinds: ['extends'] }, ctx)) as any[];
+  assert.equal(out.length, 1);
+  assert.equal(out[0].kind, 'extends');
+  assert.equal(out[0].direction, 'out');
 });
 
 test('list_ned_types excludes builtins and supports filters', async () => {

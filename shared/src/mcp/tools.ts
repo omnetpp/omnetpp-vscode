@@ -40,6 +40,8 @@ import {
 import { expandNetwork, paramSlots } from '../ini/moduleTree';
 import { parseIni, configSummaries } from '../ini/iniDocument';
 import { resolveNedClass, nedClassReferences } from '../xref/nedMsgLinks';
+import { impactOf } from '../xref/impact';
+import { nedTypeSym, msgTypeSym } from '../xref/symbolId';
 import type { ConnectionInfo, ConnEndpoint } from '../ned/nedAst';
 import type { Node as SyntaxNode } from 'web-tree-sitter';
 
@@ -523,6 +525,74 @@ const TOOLS: ToolDef[] = [
       const file = ctx.nedCache.getFile(uri);
       if (!file) return { error: `NED file not indexed: ${uri}` };
       return organizeImports(ctx.nedCache, file, file.tree);
+    },
+  },
+  {
+    name: 'impact_of',
+    description:
+      'Transitive reverse dependencies of a NED or MSG type: every type, config, and file that directly or indirectly depends on it, each with the relation and depth. Answers "what breaks if I change this".',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        fqName: { type: 'string' },
+        lang: { type: 'string', enum: ['ned', 'msg'], description: 'Symbol language (default ned).' },
+        maxDepth: { type: 'number', description: 'Optional bound on the walk depth.' },
+      },
+      required: ['fqName'],
+    },
+    handler: (a, ctx) => {
+      const sym = a.lang === 'msg' ? msgTypeSym(a.fqName) : nedTypeSym(a.fqName);
+      return impactOf(ctx.db, sym, a.maxDepth ? { maxDepth: a.maxDepth } : undefined).map((n) => ({
+        name: n.name,
+        lang: n.lang,
+        via: n.via,
+        depth: n.depth,
+        decl: n.decl ?? null,
+      }));
+    },
+  },
+  {
+    name: 'find_unused',
+    description:
+      'Heuristic dead-symbol report from the cross-reference graph: NED networks that no indexed configuration runs and no NED type references, and MSG types referenced by no NED @class/@signal or other message type. A symbol may still be used from external INI or hand-written C++, so treat as a hint.',
+    inputSchema: { type: 'object', properties: {} },
+    handler: (_a, ctx) => ({
+      unusedNetworks: ctx.nedCache
+        .allTypes()
+        .filter((t) => t.kind === 'network' && !t.isInnerType && ctx.db.index.inboundOf(nedTypeSym(t.fqName)).length === 0)
+        .map((t) => ({ fqName: t.fqName, file: t.file.uri })),
+      orphanMsgTypes: ctx.msgCache
+        .allTypes()
+        .filter((t) => ctx.db.index.inboundOf(msgTypeSym(t.fqName)).length === 0)
+        .map((t) => ({ fqName: t.fqName, kind: t.kind, file: t.file.uri })),
+    }),
+  },
+  {
+    name: 'neighbors',
+    description:
+      'Raw cross-reference graph edges incident to a NED or MSG type. direction "in" = who references it (reverse), "out" = what it references (forward), "both". Optionally filter by edge kinds (extends, submodule-type, ned-class, ini-network, …).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        fqName: { type: 'string' },
+        lang: { type: 'string', enum: ['ned', 'msg'], description: 'Symbol language (default ned).' },
+        direction: { type: 'string', enum: ['in', 'out', 'both'], description: 'Default in.' },
+        kinds: { type: 'array', items: { type: 'string' }, description: 'Optional edge-kind filter.' },
+      },
+      required: ['fqName'],
+    },
+    handler: (a, ctx) => {
+      const sym = a.lang === 'msg' ? msgTypeSym(a.fqName) : nedTypeSym(a.fqName);
+      const dir = a.direction ?? 'in';
+      const kinds: Set<string> | undefined = Array.isArray(a.kinds) && a.kinds.length ? new Set(a.kinds) : undefined;
+      const pick = (edges: readonly { kind: string; from: string; to: string | null; rawTarget: string; src: Location }[], direction: string) =>
+        edges
+          .filter((e) => !kinds || kinds.has(e.kind))
+          .map((e) => ({ direction, kind: e.kind, from: e.from, to: e.to, rawTarget: e.rawTarget, src: e.src }));
+      const out: unknown[] = [];
+      if (dir === 'in' || dir === 'both') out.push(...pick(ctx.db.index.inboundOf(sym), 'in'));
+      if (dir === 'out' || dir === 'both') out.push(...pick(ctx.db.index.outboundOf(sym), 'out'));
+      return out;
     },
   },
 ];
