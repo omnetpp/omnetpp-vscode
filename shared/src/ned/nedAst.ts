@@ -208,6 +208,78 @@ export function submoduleInfo(node: SyntaxNode): SubmoduleInfo {
   };
 }
 
+// ---- properties (@class, @signal, @namespace, ...) ------------------------
+
+export interface NedPropertyTag {
+  /** the tag key (e.g. `type` in `@signal[s](type=Foo)`), if any. */
+  key?: string;
+  value: string;
+  /** the value node (for go-to-def / diagnostics range). */
+  node: SyntaxNode;
+}
+
+export interface NedPropertyInfo {
+  name: string;
+  /** the `[index]` selector (e.g. the signal name), if any. */
+  index?: string;
+  tags: NedPropertyTag[];
+  node: SyntaxNode;
+}
+
+export function nedPropertyInfo(node: SyntaxNode): NedPropertyInfo {
+  const tags: NedPropertyTag[] = [];
+  for (const tag of childrenOfType(node, 'tag')) {
+    const vl = firstChildOfType(tag, 'value_list');
+    tags.push({
+      key: firstChildOfType(tag, 'name')?.text.trim(),
+      value: (vl?.text ?? '').trim(),
+      node: vl ?? tag,
+    });
+  }
+  return { name: nameNode(node)?.text ?? '', index: firstChildOfType(node, 'index')?.text, tags, node };
+}
+
+/** The file-level `@namespace(...)` value (the C++ namespace), if declared. */
+export function fileNamespace(tree: Tree): string | undefined {
+  for (const p of childrenOfType(tree.rootNode, 'property')) {
+    if (nameNode(p)?.text === 'namespace') {
+      const v = nedPropertyInfo(p).tags[0]?.value;
+      if (v) return v;
+    }
+  }
+  return undefined;
+}
+
+/** A reference from NED to a C++/MSG class (via `@class` or `@signal(type=...)`). */
+export interface NedClassRef {
+  className: string;
+  node: SyntaxNode;
+}
+
+/** `@class(...)` backing-class references on a type. */
+export function nedClassRefs(typeNode: SyntaxNode): NedClassRef[] {
+  const out: NedClassRef[] = [];
+  for (const p of propertyNodes(typeNode)) {
+    const info = nedPropertyInfo(p);
+    if (info.name === 'class' && info.tags[0]?.value) {
+      out.push({ className: info.tags[0].value, node: info.tags[0].node });
+    }
+  }
+  return out;
+}
+
+/** `@signal[...](type=Foo)` carried-type references on a type. */
+export function nedSignalTypeRefs(typeNode: SyntaxNode): NedClassRef[] {
+  const out: NedClassRef[] = [];
+  for (const p of propertyNodes(typeNode)) {
+    const info = nedPropertyInfo(p);
+    if (info.name !== 'signal') continue;
+    const typeTag = info.tags.find((t) => t.key === 'type');
+    if (typeTag?.value) out.push({ className: typeTag.value, node: typeTag.node });
+  }
+  return out;
+}
+
 // ---- connections ----------------------------------------------------------
 
 export type ConnDirection = '-->' | '<--' | '<-->';

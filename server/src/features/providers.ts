@@ -63,6 +63,9 @@ import {
   nedHover,
   nedReferences,
   nedCompletion,
+  nedClassDefinition,
+  nedClassRefAt,
+  nedMsgDiagnostics,
   msgDefinition,
   msgHover,
   msgCompletion,
@@ -106,7 +109,10 @@ export function computeDiagnostics(parsed: ParsedDocument, ctx?: IndexContext): 
     if (parsed.language === 'ned') {
       diags.push(...nedLocalDiagnostics(parsed.tree));
       diags.push(...nedValueDiagnostics(parsed.tree));
-      if (ctx) diags.push(...nedSemanticDiagnostics(ctx.nedCache, parsed.uri));
+      if (ctx) {
+        diags.push(...nedSemanticDiagnostics(ctx.nedCache, parsed.uri));
+        diags.push(...nedMsgDiagnostics(ctx.msgCache, ctx.nedCache, parsed.uri));
+      }
     } else if (parsed.language === 'msg') {
       diags.push(...msgLocalDiagnostics(parsed.tree));
       if (ctx) diags.push(...msgSemanticDiagnostics(ctx.msgCache, parsed.uri));
@@ -145,7 +151,10 @@ export function computeDefinition(
   if (!parsed.tree) return null;
   if (parsed.language === 'ned') {
     const file = ctx.nedCache.getFile(parsed.uri);
-    return file ? nedDefinition(ctx.nedCache, file, file.tree, pos) : null;
+    if (!file) return null;
+    // a NED @class / @signal(type=) token jumps to its MSG type declaration
+    const cls = nedClassDefinition(ctx.msgCache, ctx.nedCache, file, file.tree, pos);
+    return cls ?? nedDefinition(ctx.nedCache, file, file.tree, pos);
   }
   if (parsed.language === 'msg') {
     const file = ctx.msgCache.getFile(parsed.uri);
@@ -182,7 +191,16 @@ export function computeHover(
   if (!parsed.tree) return null;
   if (parsed.language === 'ned') {
     const file = ctx.nedCache.getFile(parsed.uri);
-    return file ? nedHover(ctx.nedCache, file, file.tree, pos) : null;
+    if (!file) return null;
+    // @class / @signal(type=) token: show the resolved MSG type
+    const hit = nedClassRefAt(ctx.msgCache, ctx.nedCache, file, file.tree, pos);
+    if (hit) {
+      const md = hit.target
+        ? `\`\`\`msg\n${hit.target.kind} ${hit.target.fqName}\n\`\`\``
+        : `Class \`${hit.ref.className}\` (no matching .msg declaration)`;
+      return { markdown: md, range: hit.range };
+    }
+    return nedHover(ctx.nedCache, file, file.tree, pos);
   }
   if (parsed.language === 'msg') {
     const file = ctx.msgCache.getFile(parsed.uri);

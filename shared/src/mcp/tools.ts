@@ -25,6 +25,7 @@ import { nedLocalDiagnostics } from '../ned/nedLocalChecks';
 import { nedValueDiagnostics } from '../ned/nedValueChecks';
 import { nedSemanticDiagnostics } from '../ned/nedSemanticChecks';
 import { msgLocalDiagnostics, msgSemanticDiagnostics } from '../msg/msgChecks';
+import { nedMsgDiagnostics } from '../xref/nedMsgLinks';
 import { iniLocalDiagnostics } from '../ini/iniLocalChecks';
 import { iniVariableDiagnostics } from '../ini/iniVariables';
 import { iniConfigDiagnostics } from '../ini/iniConfigChecks';
@@ -130,7 +131,10 @@ async function getDiagnostics(uri: string, ctx: ToolContext): Promise<{ uri: str
     }
     try {
       diags.push(...syntaxDiagnostics(tree), ...nedLocalDiagnostics(tree), ...nedValueDiagnostics(tree));
-      if (f) diags.push(...nedSemanticDiagnostics(ctx.nedCache, uri));
+      if (f) {
+        diags.push(...nedSemanticDiagnostics(ctx.nedCache, uri));
+        diags.push(...nedMsgDiagnostics(ctx.msgCache, ctx.nedCache, uri));
+      }
     } finally {
       owned?.delete();
     }
