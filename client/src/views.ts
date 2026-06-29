@@ -500,6 +500,12 @@ class ConfigurationsProvider implements vscode.TreeDataProvider<ConfigTreeNode> 
   private files: IniFileConfigs[] = [];
   private filter = '';
   private loaded = false;
+  // Cached node model (stable references) so `getParent`/`reveal` can locate nodes.
+  private roots: ConfigTreeNode[] = [];
+  private readonly childrenOf = new WeakMap<ConfigTreeNode, ConfigTreeNode[]>();
+  private readonly parents = new WeakMap<ConfigTreeNode, ConfigTreeNode>();
+  private activeNode?: ConfigTreeNode;
+  private dirty = true;
 
   constructor(private readonly client: LanguageClient) {}
 
@@ -508,16 +514,20 @@ class ConfigurationsProvider implements vscode.TreeDataProvider<ConfigTreeNode> 
   }
   setFilter(f: string): void {
     this.filter = f.trim();
+    this.dirty = true;
     this.emitter.fire();
   }
   /** Refetch the config list from the workspace on the next read. */
   refresh(): void {
     this.loaded = false;
+    this.dirty = true;
     this.emitter.fire();
   }
   /** Re-render without refetching (e.g. the active-config highlight changed). */
   rerender(): void {
+    this.dirty = true;
     this.emitter.fire();
+    void this.revealActive();
   }
 
   private async load(): Promise<void> {
@@ -527,6 +537,42 @@ class ConfigurationsProvider implements vscode.TreeDataProvider<ConfigTreeNode> 
     this.files =
       (await this.client.sendRequest<IniFileConfigs[]>('omnetpp/listConfigurations', { uris })) ?? [];
     this.loaded = true;
+    this.dirty = true;
+  }
+
+  /** Rebuild the cached node tree (file → config nodes) and locate the active node. */
+  private rebuild(): void {
+    this.roots = [];
+    this.activeNode = undefined;
+    for (const { uri, configs } of this.visibleFiles()) {
+      const fileNode: ConfigTreeNode = { kind: 'file', uri, configs };
+      const children = configs.map<ConfigTreeNode>((entry) => {
+        const child: ConfigTreeNode = { kind: 'config', uri, entry };
+        this.parents.set(child, fileNode);
+        if (isActiveConfig(uri, entry.name)) this.activeNode = child;
+        return child;
+      });
+      this.childrenOf.set(fileNode, children);
+      this.roots.push(fileNode);
+    }
+    this.dirty = false;
+  }
+
+  /** Expand to and select the active configuration, when the view is visible. */
+  async revealActive(): Promise<void> {
+    if (!this.treeView?.visible) return;
+    if (!this.loaded) await this.load();
+    if (this.dirty) this.rebuild();
+    if (!this.activeNode) return;
+    try {
+      await this.treeView.reveal(this.activeNode, { select: true, focus: false, expand: true });
+    } catch {
+      /* node not rendered yet — the expanded file keeps it visible */
+    }
+  }
+
+  getParent(node: ConfigTreeNode): ConfigTreeNode | undefined {
+    return this.parents.get(node);
   }
 
   /** Files (with their non-abstract configs) that survive the current filter. */
@@ -551,10 +597,11 @@ class ConfigurationsProvider implements vscode.TreeDataProvider<ConfigTreeNode> 
   async getChildren(el?: ConfigTreeNode): Promise<ConfigTreeNode[]> {
     if (!el) {
       if (!this.loaded) await this.load();
-      return this.visibleFiles().map(({ uri, configs }) => ({ kind: 'file', uri, configs }));
+      if (this.dirty) this.rebuild();
+      return this.roots;
     }
     if (el.kind === 'file') {
-      return el.configs.map((entry) => ({ kind: 'config' as const, uri: el.uri, entry }));
+      return this.childrenOf.get(el) ?? [];
     }
     return [];
   }
@@ -666,6 +713,12 @@ export function registerViews(context: vscode.ExtensionContext, client: Language
     treeDataProvider: configurations,
   });
   configurations.treeView = configurationsView;
+  // When the view is (re)opened, expand and reveal the active configuration.
+  context.subscriptions.push(
+    configurationsView.onDidChangeVisibility((e) => {
+      if (e.visible) void configurations.revealActive();
+    }),
+  );
   syncTitles(); // reflect any restored pins
 
   // The view title doubles as the active-config banner so it stays visible even
