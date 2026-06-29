@@ -3,7 +3,7 @@ import type { Location, Position, Range } from '../model/location';
 import { ancestorOfType, namedDescendantAt, nodeRange } from '../parser/treeUtils';
 import { NedResourceCache, NedFileInfo } from './nedResourceCache';
 import { NedTypeInfo } from './nedTypeInfo';
-import { NED_TYPE_NODES, isTypeNode, nameNode, paramInfo } from './nedAst';
+import { NED_TYPE_NODES, isTypeNode, nameNode, paramInfo, paramDocComment } from './nedAst';
 
 const TYPEREF_NODES = ['extends', 'implements', 'like_type'];
 
@@ -172,7 +172,7 @@ export function paramRefAt(
     decl: { uri: decl.owner.file.uri, range: nodeRange(nn) },
     name,
     type: paramInfo(decl.node).type,
-    doc: undefined,
+    doc: paramDocComment(decl.node),
     ownerFq: decl.owner.fqName,
     range: nodeRange(node),
   };
@@ -439,7 +439,8 @@ export function nedHover(
     // parameter reference hover
     const pref = paramRefAt(cache, file, tree, pos);
     if (pref) {
-      const md = `\`\`\`ned\n${pref.type ?? ''} ${pref.name}\n\`\`\`\n\ndeclared in \`${pref.ownerFq}\``;
+      let md = `\`\`\`ned\n${pref.type ?? ''} ${pref.name}\n\`\`\`\n\ndeclared in \`${pref.ownerFq}\``;
+      if (pref.doc) md += '\n\n' + pref.doc;
       return { markdown: md, range: pref.range };
     }
     return null;

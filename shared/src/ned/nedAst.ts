@@ -241,3 +241,31 @@ export function stripCommentMarkers(text: string): string {
     .join('\n')
     .trim();
 }
+
+/**
+ * The trailing `// ...` comment on the same line as a declaration
+ * (e.g. `int foo = 5; // doc`). Comments live in `extras`, so the trailing
+ * comment is the next named sibling on the declaration's last line — or, for
+ * the last item in a section, the next sibling of the section itself (extras
+ * attach at the block boundary). Returns the text with `//` markers stripped.
+ */
+export function trailingDocComment(node: SyntaxNode): string | undefined {
+  const endRow = node.endPosition.row;
+  const candidates = [node.nextNamedSibling, node.parent?.nextNamedSibling ?? null];
+  for (const cand of candidates) {
+    if (cand && cand.type === 'comment' && cand.startPosition.row === endRow) {
+      return stripCommentMarkers(cand.text);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Documentation for a parameter declaration: the OMNeT++ convention allows a
+ * trailing comment on the same line (`int foo; // doc`) or a banner comment on
+ * the line(s) above. Prefer the same-line trailing comment, falling back to the
+ * leading banner.
+ */
+export function paramDocComment(node: SyntaxNode): string | undefined {
+  return trailingDocComment(node) ?? leadingDocComment(node);
+}

@@ -63,6 +63,26 @@ simple D extends Base { }`;
   assert.match(hov!.markdown, /A great module/);
 });
 
+test('parameter hover includes trailing and leading doc comments', async () => {
+  const T = `simple S {
+  parameters:
+    int foo = 5;  // documents foo
+    // banner for bar
+    string bar;
+}`;
+  const cache = await build({ 'file:///p.ned': { text: T } });
+  const file = cache.getFile('file:///p.ned')!;
+  // hover on the `foo` declaration -> trailing comment
+  const hovFoo = nedHover(cache, file, file.tree, posOf(T, 'foo = 5'));
+  assert.ok(hovFoo);
+  assert.match(hovFoo!.markdown, /int foo/);
+  assert.match(hovFoo!.markdown, /documents foo/);
+  // hover on `bar` -> falls back to the leading banner comment
+  const hovBar = nedHover(cache, file, file.tree, posOf(T, 'bar;'));
+  assert.ok(hovBar);
+  assert.match(hovBar!.markdown, /banner for bar/);
+});
+
 test('find references to a type', async () => {
   const cache = await build({ 'file:///a.ned': { text: TEXT } });
   const file = cache.getFile('file:///a.ned')!;
