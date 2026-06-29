@@ -3,12 +3,14 @@
 //
 // It resolves NED `@class(...)` and `@signal(...type=...)` class tokens to MSG
 // types (using the NED file's `@namespace`), and provides the reverse: which NED
-// sites reference a given MSG type. Resolution is best-effort — registered C++
-// classes legitimately have no `.msg` declaration, so unresolved refs are never
-// hard errors.
+// sites reference a given MSG type. This is purely best-effort *navigation*: a
+// `@class` names a registered C++ class, which is very often hand-written C++ with
+// no `.msg` file at all. So an unresolved `@class` is NOT an error — we never emit
+// a diagnostic for it, we only offer go-to-def / hover when a matching MSG type
+// happens to exist.
 
 import type { Tree } from 'web-tree-sitter';
-import { Diagnostic, DiagnosticSeverity, Location, Position, Range } from '../model/location';
+import { Location, Position, Range } from '../model/location';
 import { ancestorOfType, namedDescendantAt, nodeRange } from '../parser/treeUtils';
 import type { NedResourceCache, NedFileInfo } from '../ned/nedResourceCache';
 import type { NedTypeInfo } from '../ned/nedTypeInfo';
@@ -107,32 +109,3 @@ export function findMsgUsagesInNed(
   return out;
 }
 
-/**
- * `unknown-class` warnings for `@class`/`@signal` tokens that resolve to no MSG
- * type. Gated on a non-empty MSG index (registered C++ classes with no `.msg` are
- * legitimate, so we stay silent when there are no message definitions to check
- * against) and emitted as warnings, never errors.
- */
-export function nedMsgDiagnostics(
-  msgCache: MsgResourceCache,
-  nedCache: NedResourceCache,
-  uri: string,
-): Diagnostic[] {
-  const out: Diagnostic[] = [];
-  if (msgCache.allTypes().length === 0) return out; // nothing to validate against
-  for (const type of nedCache.typesInFile(uri)) {
-    const ns = fileNamespace(type.file.tree) ?? '';
-    for (const ref of nedClassReferences(type)) {
-      const name = ref.className.replace(/^::/, '');
-      if (msgCache.isKnownType(name, ns)) continue;
-      out.push({
-        range: nodeRange(ref.node),
-        severity: DiagnosticSeverity.Warning,
-        message: `Class '${ref.className}' is not declared in any .msg file`,
-        source: 'omnetpp',
-        code: 'unknown-class',
-      });
-    }
-  }
-  return out;
-}

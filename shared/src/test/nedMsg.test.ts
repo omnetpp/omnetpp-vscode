@@ -9,7 +9,6 @@ import {
   resolveNedClass,
   nedClassDefinition,
   findMsgUsagesInNed,
-  nedMsgDiagnostics,
 } from '../index';
 import type { ParserService } from '../index';
 
@@ -54,13 +53,10 @@ test('findMsgUsagesInNed returns NED sites that reference a MSG type', async () 
   assert.equal(uses[0].uri, 'file:///p.ned');
 });
 
-test('unknown-class is warned only when a MSG index exists and the class is absent', async () => {
-  const withMsg = await build({ 'file:///p.ned': NED }, { 'file:///p.msg': MSG });
-  const codes = nedMsgDiagnostics(withMsg.msgCache, withMsg.nedCache, 'file:///p.ned').map((d) => d.code);
-  assert.deepEqual([...new Set(codes)], ['unknown-class']); // only Bogus's NoSuchClass
-  assert.equal(codes.length, 1);
-
-  // no MSG files indexed → stay silent (C++-only classes are legitimate)
-  const noMsg = await build({ 'file:///p.ned': NED }, {});
-  assert.deepEqual(nedMsgDiagnostics(noMsg.msgCache, noMsg.nedCache, 'file:///p.ned'), []);
+test('an unresolved @class (C++-only class) resolves to nothing without erroring', async () => {
+  // @class names a registered C++ class, which is often hand-written C++ with no
+  // .msg file. resolveNedClass simply returns undefined — there is no diagnostic.
+  const { nedCache, msgCache } = await build({ 'file:///p.ned': NED }, { 'file:///p.msg': MSG });
+  const bogus = nedCache.getType('p.Bogus')!;
+  assert.equal(resolveNedClass(msgCache, bogus, 'NoSuchClass'), undefined);
 });

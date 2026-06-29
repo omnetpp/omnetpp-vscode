@@ -68,7 +68,6 @@ import {
   nedCompletion,
   nedClassDefinition,
   nedClassRefAt,
-  nedMsgDiagnostics,
   msgDefinition,
   msgHover,
   msgCompletion,
@@ -113,10 +112,7 @@ export function computeDiagnostics(parsed: ParsedDocument, ctx?: IndexContext): 
     if (parsed.language === 'ned') {
       diags.push(...nedLocalDiagnostics(parsed.tree));
       diags.push(...nedValueDiagnostics(parsed.tree));
-      if (ctx) {
-        diags.push(...nedSemanticDiagnostics(ctx.nedCache, parsed.uri));
-        diags.push(...nedMsgDiagnostics(ctx.msgCache, ctx.nedCache, parsed.uri));
-      }
+      if (ctx) diags.push(...nedSemanticDiagnostics(ctx.nedCache, parsed.uri));
     } else if (parsed.language === 'msg') {
       diags.push(...msgLocalDiagnostics(parsed.tree));
       if (ctx) diags.push(...msgSemanticDiagnostics(ctx.msgCache, parsed.uri));
