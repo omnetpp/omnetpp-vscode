@@ -115,6 +115,11 @@
     },
     "commands": [
       {
+        "command": "omnetpp.showImpact",
+        "title": "Show Impact (Reverse Dependencies)",
+        "category": "OMNeT++"
+      },
+      {
         "command": "omnetpp.pinType",
         "title": "Pin Type",
         "category": "OMNeT++",

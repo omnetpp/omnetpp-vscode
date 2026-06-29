@@ -32,6 +32,7 @@ import {
   computeReferences,
   computeCodeLenses,
   computeUsedBy,
+  computeImpact,
   computeCompletion,
   computePrepareRename,
   computeRename,
@@ -439,6 +440,13 @@ connection.onRequest('omnetpp/usedBy', (params: { uri: string; position: LspPosi
   const c = ctx();
   if (!parsed || !c) return { groups: [] };
   return computeUsedBy(parsed, params.position, c);
+});
+
+connection.onRequest('omnetpp/impact', (params: { uri: string; position: LspPosition }) => {
+  const parsed = store?.get(params.uri);
+  const c = ctx();
+  if (!parsed || !c) return { items: [] };
+  return computeImpact(parsed, params.position, c);
 });
 
 connection.onRequest('omnetpp/inheritanceRoots', (params: ViewParams & { fqName?: string }) => {

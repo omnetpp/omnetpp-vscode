@@ -88,6 +88,7 @@ import {
   SymbolId,
   EdgeKind,
   XrefEdge,
+  impactOf,
   nedUnusedNetworkDiagnostics,
   suggestSimilar,
   sectionName,
@@ -438,15 +439,43 @@ function groupEdges(edges: readonly XrefEdge[]): UsedByGroup[] {
   return out;
 }
 
-/** The reverse dependencies of the symbol at a position, grouped by relation. */
-export function computeUsedBy(parsed: ParsedDocument, pos: Position, ctx: IndexContext): { groups: UsedByGroup[] } {
+/** The cross-reference graph symbol at a position (NED/MSG type, INI network or section). */
+function symbolAt(parsed: ParsedDocument, pos: Position, ctx: IndexContext): SymbolId | undefined {
   if (parsed.language === 'ned' && parsed.tree) {
     const file = ctx.nedCache.getFile(parsed.uri);
-    if (!file) return { groups: [] };
+    if (!file) return undefined;
     const tref = referenceAt(ctx.nedCache, file, file.tree, pos);
     const fq = tref?.kind === 'typedef' ? tref.info.fqName : tref?.kind === 'typeref' ? tref.target?.fqName : undefined;
-    if (fq) return { groups: groupEdges(ctx.db.index.inboundOf(nedTypeSym(fq))) };
-    const mref = memberRefAt(ctx.nedCache, file, file.tree, pos);
+    return fq ? nedTypeSym(fq) : undefined;
+  }
+  if (parsed.language === 'msg' && parsed.tree) {
+    const file = ctx.msgCache.getFile(parsed.uri);
+    const t = file ? msgTypeAt(ctx.msgCache, file, file.tree, pos) : undefined;
+    return t ? msgTypeSym(t.fqName) : undefined;
+  }
+  if (parsed.language === 'ini' && parsed.ini) {
+    for (const section of parsed.ini.sections) {
+      for (const e of section.entries) {
+        if (e.key === 'network' && e.value && (posInRange(pos, e.keyRange) || posInRange(pos, e.valueRange))) {
+          const net = resolveNetworkType(ctx.nedCache, e.value);
+          return net ? nedTypeSym(net.fqName) : undefined;
+        }
+      }
+    }
+    const sec = [...parsed.ini.sections].reverse().find((s) => s.range.start.line <= pos.line);
+    return sec ? iniSectionSym(parsed.uri, sec.rawName) : undefined;
+  }
+  return undefined;
+}
+
+/** The reverse dependencies of the symbol at a position, grouped by relation. */
+export function computeUsedBy(parsed: ParsedDocument, pos: Position, ctx: IndexContext): { groups: UsedByGroup[] } {
+  const sym = symbolAt(parsed, pos, ctx);
+  if (sym) return { groups: groupEdges(ctx.db.index.inboundOf(sym)) };
+  // NED parameters are not graph symbols; fall back to their INI assignment keys
+  if (parsed.language === 'ned' && parsed.tree) {
+    const file = ctx.nedCache.getFile(parsed.uri);
+    const mref = file ? memberRefAt(ctx.nedCache, file, file.tree, pos) : null;
     if (mref?.key.kind === 'param') {
       const items = findParamAssignments(ctx.iniCache, ctx.nedCache, ctx.registry, { typeFqName: mref.key.ownerFq, param: mref.key.name }).map((a) => ({
         label: a.key,
@@ -456,29 +485,30 @@ export function computeUsedBy(parsed: ParsedDocument, pos: Position, ctx: IndexC
       }));
       return { groups: items.length ? [{ label: 'Assigned in INI', items }] : [] };
     }
-    return { groups: [] };
-  }
-  if (parsed.language === 'msg' && parsed.tree) {
-    const file = ctx.msgCache.getFile(parsed.uri);
-    const t = file ? msgTypeAt(ctx.msgCache, file, file.tree, pos) : undefined;
-    return { groups: t ? groupEdges(ctx.db.index.inboundOf(msgTypeSym(t.fqName))) : [] };
-  }
-  if (parsed.language === 'ini' && parsed.ini) {
-    // a `network=` value → the NED network's reverse deps
-    for (const section of parsed.ini.sections) {
-      for (const e of section.entries) {
-        if (e.key === 'network' && e.value && (posInRange(pos, e.keyRange) || posInRange(pos, e.valueRange))) {
-          const net = resolveNetworkType(ctx.nedCache, e.value);
-          return { groups: net ? groupEdges(ctx.db.index.inboundOf(nedTypeSym(net.fqName))) : [] };
-        }
-      }
-    }
-    // otherwise the enclosing config section → configs that extend it
-    const sec = [...parsed.ini.sections].reverse().find((s) => s.range.start.line <= pos.line);
-    if (sec) return { groups: groupEdges(ctx.db.index.inboundOf(iniSectionSym(parsed.uri, sec.rawName))) };
-    return { groups: [] };
   }
   return { groups: [] };
+}
+
+export interface ImpactResult {
+  /** The starting symbol's display name, or undefined if nothing resolved. */
+  target?: string;
+  items: { label: string; description: string; uri?: string; range?: Range }[];
+}
+
+/** Transitive impact (what depends on the symbol at a position), for the command/MCP. */
+export function computeImpact(parsed: ParsedDocument, pos: Position, ctx: IndexContext): ImpactResult {
+  const sym = symbolAt(parsed, pos, ctx);
+  if (!sym) return { items: [] };
+  const nodes = impactOf(ctx.db, sym);
+  return {
+    target: parseSymbolId(sym)?.lang === 'ini' ? undefined : sym,
+    items: nodes.map((n) => ({
+      label: n.name,
+      description: `${EDGE_GROUP_LABEL[n.via]} · depth ${n.depth}`,
+      uri: n.decl?.uri,
+      range: n.decl?.range,
+    })),
+  };
 }
 
 export function computePrepareRename(

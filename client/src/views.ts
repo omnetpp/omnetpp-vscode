@@ -89,6 +89,39 @@ async function showReferences(
   );
 }
 
+interface ImpactResult {
+  target?: string;
+  items: { label: string; description: string; uri?: string; range?: Range }[];
+}
+
+/** Show the transitive impact of the symbol at the cursor in a navigable QuickPick. */
+async function showImpact(client: LanguageClient): Promise<void> {
+  const focus = activeContext();
+  if (!focus) {
+    void vscode.window.showInformationMessage('OMNeT++: place the cursor on a NED/MSG type or an INI network to analyze impact.');
+    return;
+  }
+  let res: ImpactResult;
+  try {
+    res = await client.sendRequest<ImpactResult>('omnetpp/impact', focus);
+  } catch {
+    return;
+  }
+  if (!res.items.length) {
+    void vscode.window.showInformationMessage('OMNeT++: nothing depends on the symbol at the cursor.');
+    return;
+  }
+  const picks = res.items
+    .filter((i) => i.uri)
+    .map((i) => ({ label: i.label, description: i.description, uri: i.uri!, range: i.range }));
+  const choice = await vscode.window.showQuickPick(picks, {
+    title: res.target ? `Impact of ${res.target.replace(/^[a-z]+:/, '')} (${res.items.length})` : `Impact (${res.items.length})`,
+    placeHolder: 'Symbols that depend on this — select to navigate',
+    matchOnDescription: true,
+  });
+  if (choice) await openLocation(choice.uri, choice.range);
+}
+
 /** Reveal a location (uri + range) in the editor. */
 async function openLocation(uri: string, range?: Range): Promise<void> {
   const doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(uri));
@@ -868,6 +901,7 @@ export function registerViews(context: vscode.ExtensionContext, client: Language
       (uri: string, position: Pos, locations: { uri: string; range: Range }[]) =>
         showReferences(uri, position, locations),
     ),
+    vscode.commands.registerCommand('omnetpp.showImpact', () => showImpact(client)),
     vscode.commands.registerCommand('omnetpp.pinType', (it?: HierarchyItem) => {
       if (!it?.fqName) return;
       inheritance.pin(it.fqName); // single pin: replaces any previous
