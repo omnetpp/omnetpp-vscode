@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 import { ExtensionContext, workspace } from 'vscode';
 import {
+  DidChangeConfigurationNotification,
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
@@ -9,6 +10,15 @@ import {
 import { registerViews } from './views';
 
 let client: LanguageClient | undefined;
+
+/** The `omnetpp.*` settings the server consumes; read on activation and on change. */
+function readSettings() {
+  const config = workspace.getConfiguration('omnetpp');
+  return {
+    nedPath: config.get<string>('nedPath', ''),
+    installDir: config.get<string>('installDir', ''),
+  };
+}
 
 export function activate(context: ExtensionContext): void {
   // The bundled server lives next to the bundled client in dist/.
@@ -23,17 +33,13 @@ export function activate(context: ExtensionContext): void {
     },
   };
 
-  const config = workspace.getConfiguration('omnetpp');
   const clientOptions: LanguageClientOptions = {
     documentSelector: [
       { scheme: 'file', language: 'OMNeT++ NED' },
       { scheme: 'file', language: 'OMNeT++ MSG' },
       { scheme: 'file', language: 'OMNeT++ INI' },
     ],
-    initializationOptions: {
-      nedPath: config.get<string>('nedPath', ''),
-      installDir: config.get<string>('installDir', ''),
-    },
+    initializationOptions: readSettings(),
     synchronize: {
       fileEvents: [
         workspace.createFileSystemWatcher('**/*.ned'),
@@ -52,6 +58,17 @@ export function activate(context: ExtensionContext): void {
 
   void client.start();
   registerViews(context, client);
+
+  // Push setting changes to the server so they apply without a window reload.
+  // (The LanguageClient handles `omnetpp.trace.server` live on its own.)
+  context.subscriptions.push(
+    workspace.onDidChangeConfiguration((e) => {
+      if (!e.affectsConfiguration('omnetpp')) return;
+      void client?.sendNotification(DidChangeConfigurationNotification.type, {
+        settings: { omnetpp: readSettings() },
+      });
+    }),
+  );
 }
 
 export function deactivate(): Thenable<void> | undefined {

@@ -61,6 +61,12 @@ let workspaceFolders: string[] = [];
 let nedPathSetting = '';
 let installDir = '';
 
+/** Read the `omnetpp.*` settings the server cares about from init/config options. */
+function applySettings(opts: { nedPath?: string; installDir?: string } | undefined): void {
+  nedPathSetting = opts?.nedPath ?? '';
+  installDir = opts?.installDir || process.env.OMNETPP_ROOT || '';
+}
+
 connection.onInitialize(async (params: InitializeParams): Promise<InitializeResult> => {
   workspaceFolders = (params.workspaceFolders ?? [])
     .map((f) => safeFsPath(f.uri))
@@ -69,9 +75,7 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
     const p = safeFsPath(params.rootUri);
     if (p) workspaceFolders = [p];
   }
-  nedPathSetting = (params.initializationOptions?.nedPath as string) ?? '';
-  installDir =
-    (params.initializationOptions?.installDir as string) || process.env.OMNETPP_ROOT || '';
+  applySettings(params.initializationOptions);
 
   const wasmDir = join(__dirname, 'wasm');
   parsers = await ParserService.create({
@@ -236,6 +240,13 @@ function scheduleReindex(): void {
     }
   }, 400);
 }
+
+connection.onDidChangeConfiguration((change) => {
+  const before = `${nedPathSetting}\0${installDir}`;
+  applySettings((change.settings as { omnetpp?: { nedPath?: string; installDir?: string } })?.omnetpp);
+  const after = `${nedPathSetting}\0${installDir}`;
+  if (before !== after) scheduleReindex(); // re-discover roots with the new path/install dir
+});
 
 connection.onDidChangeWatchedFiles(async (params) => {
   if (!index) return;

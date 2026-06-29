@@ -337,16 +337,6 @@
           "default": "",
           "markdownDescription": "Path to an OMNeT++ installation root. When set (or auto-detected), enables enriched features such as a live config-option registry and bundled NED libraries."
         },
-        "omnetpp.iniAnalysis.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable full INI parameter-resolution analysis (resolves **.param assignments against the NED module tree of the selected network)."
-        },
-        "omnetpp.iniAnalysis.timeoutMs": {
-          "type": "number",
-          "default": 5000,
-          "description": "Maximum time (in milliseconds) spent analyzing a single INI configuration before yielding a partial result."
-        },
         "omnetpp.trace.server": {
           "type": "string",
           "enum": [

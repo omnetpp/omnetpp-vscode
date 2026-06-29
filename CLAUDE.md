@@ -34,9 +34,12 @@ Data flow: `client` reads `omnetpp.*` settings → passes them to `server` via L
 
 ### Things that bite
 
-- **Settings are read once at activation** (`extension.ts` → `initializationOptions`).
-  Changing `omnetpp.nedPath` / `omnetpp.installDir` requires a window reload to take
-  effect; there is no live `didChangeConfiguration` handling.
+- **Settings apply live, via push.** `extension.ts` seeds the server through
+  `initializationOptions`, then a `workspace.onDidChangeConfiguration` listener forwards any
+  `omnetpp.*` change as a `DidChangeConfigurationNotification`. The server's
+  `onDidChangeConfiguration` re-reads `nedPath` / `installDir` and, if either changed, calls
+  `scheduleReindex()` — no window reload needed. `omnetpp.trace.server` is handled live by
+  the `LanguageClient` itself.
 - **Two separate build passes, do not conflate them.** `tsc --build` type-checks and
   emits `.d.ts`/`out/` for project references and tests. `esbuild` produces the actual
   runtime bundles in `dist/`. Tests run against the `tsc` output (`shared/out/`), **not**
