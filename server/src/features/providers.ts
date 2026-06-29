@@ -88,6 +88,9 @@ import {
   SymbolId,
   EdgeKind,
   XrefEdge,
+  nedUnusedNetworkDiagnostics,
+  suggestSimilar,
+  sectionName,
 } from '@omnetpp/shared';
 import type { ParsedDocument } from '../documentModel';
 
@@ -126,7 +129,10 @@ export function computeDiagnostics(parsed: ParsedDocument, ctx?: IndexContext): 
     if (parsed.language === 'ned') {
       diags.push(...nedLocalDiagnostics(parsed.tree));
       diags.push(...nedValueDiagnostics(parsed.tree));
-      if (ctx) diags.push(...nedSemanticDiagnostics(ctx.nedCache, parsed.uri));
+      if (ctx) {
+        diags.push(...nedSemanticDiagnostics(ctx.nedCache, parsed.uri));
+        diags.push(...nedUnusedNetworkDiagnostics(ctx.db, ctx.nedCache, ctx.iniCache, parsed.uri));
+      }
     } else if (parsed.language === 'msg') {
       diags.push(...msgLocalDiagnostics(parsed.tree));
       if (ctx) diags.push(...msgSemanticDiagnostics(ctx.msgCache, parsed.uri));
@@ -573,7 +579,23 @@ export interface CodeActionResult {
   edit: WorkspaceEdit;
 }
 
-export function computeCodeActions(parsed: ParsedDocument, ctx: IndexContext): CodeActionResult[] {
+/** The value text of the INI entry whose value occupies `range`, if any. */
+function iniValueAtRange(ini: IniDocument, range: Range): string | undefined {
+  for (const section of ini.sections) {
+    for (const e of section.entries) {
+      if (e.valueRange.start.line === range.start.line && e.valueRange.start.character === range.start.character) {
+        return e.value;
+      }
+    }
+  }
+  return undefined;
+}
+
+export function computeCodeActions(
+  parsed: ParsedDocument,
+  ctx: IndexContext,
+  contextDiagnostics?: { code?: string | number; range: Range }[],
+): CodeActionResult[] {
   const out: CodeActionResult[] = [];
   if (parsed.language === 'ned' && parsed.tree) {
     const file = ctx.nedCache.getFile(parsed.uri);
@@ -596,6 +618,23 @@ export function computeCodeActions(parsed: ParsedDocument, ctx: IndexContext): C
         kind: 'source',
         edit: { changes: { [parsed.uri]: edits } },
       });
+    }
+    // "did you mean …" quick-fixes for broken network= / extends= targets
+    const replace = (range: Range, name: string): CodeActionResult => ({
+      title: `Change to '${name}'`,
+      kind: 'quickfix',
+      edit: { changes: { [parsed.uri]: [{ range, newText: name }] } },
+    });
+    for (const d of contextDiagnostics ?? []) {
+      const value = iniValueAtRange(parsed.ini, d.range);
+      if (!value) continue;
+      if (d.code === 'network-type') {
+        const cands = ctx.nedCache.allTypes().filter((t) => t.isNetworkType() && !t.isInnerType).map((t) => t.simpleName);
+        for (const s of suggestSimilar(value, cands)) out.push(replace(d.range, s));
+      } else if (d.code === 'no-such-section') {
+        const cands = parsed.ini.sections.map(sectionName);
+        for (const s of suggestSimilar(value, cands)) out.push(replace(d.range, s));
+      }
     }
   }
   return out;

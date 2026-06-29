@@ -38,6 +38,7 @@ export * from './xref/symbolId';
 export * from './xref/xrefModel';
 export * from './xref/xrefIndex';
 export * from './xref/semanticDatabase';
+export * from './xref/xrefDiagnostics';
 export * from './xref/nedMsgLinks';
 
 // MCP tool layer (host-agnostic; no MCP SDK dependency)

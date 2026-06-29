@@ -106,7 +106,7 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
       renameProvider: { prepareProvider: true },
       documentFormattingProvider: true,
       documentHighlightProvider: true,
-      codeActionProvider: { codeActionKinds: ['source.organizeImports', 'source'] },
+      codeActionProvider: { codeActionKinds: ['source.organizeImports', 'source', 'quickfix'] },
       typeHierarchyProvider: true,
       codeLensProvider: { resolveProvider: false },
       workspaceSymbolProvider: true,
@@ -399,7 +399,7 @@ connection.onCodeAction((params) => {
   const parsed = store?.get(params.textDocument.uri);
   const c = ctx();
   if (!parsed || !c) return [];
-  return computeCodeActions(parsed, c).map((a) => ({
+  return computeCodeActions(parsed, c, params.context.diagnostics).map((a) => ({
     title: a.title,
     kind: a.kind,
     edit: a.edit,
