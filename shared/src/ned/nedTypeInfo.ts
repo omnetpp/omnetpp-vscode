@@ -1,10 +1,13 @@
 import type { Node as SyntaxNode } from 'web-tree-sitter';
 import type { NedResourceCache, NedFileInfo } from './nedResourceCache';
 import {
+  ConnectionInfo,
   GateInfo,
   NedTypeKind,
   ParamInfo,
   SubmoduleInfo,
+  connectionInfo,
+  connectionNodes,
   extendsNodes,
   gateInfo,
   gateNodes,
@@ -164,6 +167,19 @@ export class NedTypeInfo {
     for (const base of chain) for (const [k, v] of base.localSubmodules()) m.set(k, v);
     for (const [k, v] of this.localSubmodules()) m.set(k, v);
     return m;
+  }
+
+  /** Connections declared directly in this type's `connections:` section. */
+  localConnections(): ConnectionInfo[] {
+    return connectionNodes(this.node).map(connectionInfo);
+  }
+
+  /** Connections merged with those inherited from compound bases (base-first). */
+  connections(): ConnectionInfo[] {
+    const out: ConnectionInfo[] = [];
+    for (const base of [...this.ancestors()].reverse()) out.push(...base.localConnections());
+    out.push(...this.localConnections());
+    return out;
   }
 
   findParam(name: string): ParamInfo | undefined {

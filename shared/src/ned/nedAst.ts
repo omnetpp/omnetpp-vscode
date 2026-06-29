@@ -208,6 +208,148 @@ export function submoduleInfo(node: SyntaxNode): SubmoduleInfo {
   };
 }
 
+// ---- connections ----------------------------------------------------------
+
+export type ConnDirection = '-->' | '<--' | '<-->';
+
+/** One endpoint of a connection: a submodule gate or the parent compound's gate. */
+export interface ConnEndpoint {
+  /** submodule name; undefined ⇒ the enclosing compound's own gate. */
+  module?: string;
+  /** index expression text on the submodule (vector submodule), if any. */
+  moduleIndex?: string;
+  gate: string;
+  /** `$i` / `$o` selector on a bidirectional gate, if any. */
+  subgate?: '$i' | '$o';
+  /** gate index expression text, if any. */
+  gateIndex?: string;
+  /** the `++` (append) marker on the gate. */
+  gatePlusplus: boolean;
+  node: SyntaxNode;
+  moduleNameNode?: SyntaxNode;
+  gateNameNode?: SyntaxNode;
+}
+
+/** The channel of a connection: a named/typed channel and/or inline params. */
+export interface ChannelSpec {
+  /** the `c` in `c: Chan`, if the channel is named. */
+  channelName?: string;
+  /** the channel type name (dotted), if specified. */
+  typeName?: string;
+  /** inline `{ ... }` channel parameter assignments. */
+  inlineParams: ParamInfo[];
+  /** the node naming the channel type (for go-to-def / validation). */
+  typeNode?: SyntaxNode;
+}
+
+export interface ConnectionInfo {
+  src: ConnEndpoint;
+  dest: ConnEndpoint;
+  direction: ConnDirection;
+  channel?: ChannelSpec;
+  /** enclosing `for` loops (parametric connections). */
+  loops: { paramName: string; from: string; to: string }[];
+  /** `if` condition expression texts on the connection or enclosing group. */
+  conditions: string[];
+  node: SyntaxNode;
+}
+
+function connEndpoint(ep: SyntaxNode | null): ConnEndpoint {
+  const moduleNode = ep ? firstChildOfType(ep, 'module') : null;
+  const gateNode = ep ? firstChildOfType(ep, 'gate') : null;
+  const moduleNameNode = moduleNode ? nameNode(moduleNode) : null;
+  const gateNameNode = gateNode ? nameNode(gateNode) : null;
+  return {
+    module: moduleNameNode?.text,
+    moduleIndex: moduleNode ? firstChildOfType(moduleNode, 'index')?.text : undefined,
+    gate: gateNameNode?.text ?? '',
+    subgate: gateNode ? (firstChildOfType(gateNode, 'subgate')?.text as '$i' | '$o' | undefined) : undefined,
+    gateIndex: gateNode ? firstChildOfType(gateNode, 'index')?.text : undefined,
+    gatePlusplus: !!(gateNode && firstChildOfType(gateNode, 'plusplus')),
+    node: ep ?? gateNode ?? moduleNode!,
+    moduleNameNode: moduleNameNode ?? undefined,
+    gateNameNode: gateNameNode ?? undefined,
+  };
+}
+
+/** Parse a `connection` node into a structured ConnectionInfo. */
+export function connectionInfo(node: SyntaxNode): ConnectionInfo {
+  const arrow = (firstChildOfType(node, 'arrow')?.text ?? '-->') as ConnDirection;
+  // channel: named (`c:` name + `type`) or unnamed (a `name` between the arrows)
+  const typeNode = firstChildOfType(node, 'type');
+  const nameNodeChild = firstChildOfType(node, 'name'); // the `c:` label or the dotted type
+  const inlineParams = childrenOfType(node, 'parameter').map(paramInfo);
+  let channel: ChannelSpec | undefined;
+  if (typeNode) {
+    channel = {
+      channelName: nameNodeChild?.text.replace(/:$/, ''),
+      typeName: typeNode.text,
+      inlineParams,
+      typeNode,
+    };
+  } else if (nameNodeChild) {
+    channel = { typeName: nameNodeChild.text, inlineParams, typeNode: nameNodeChild };
+  } else if (inlineParams.length) {
+    channel = { inlineParams };
+  }
+
+  const loops: ConnectionInfo['loops'] = [];
+  const conditions: string[] = [];
+  for (const c of childrenOfType(node, 'condition')) {
+    const v = firstChildOfType(c, 'value');
+    if (v) conditions.push(v.text);
+  }
+  let cur: SyntaxNode | null = node.parent;
+  while (cur) {
+    if (cur.type === 'connection_group') {
+      for (const lp of childrenOfType(cur, 'loop')) {
+        loops.push({
+          paramName: firstChildOfType(lp, 'param_name')?.text ?? '',
+          from: firstChildOfType(lp, 'from_value')?.text ?? '',
+          to: firstChildOfType(lp, 'to_value')?.text ?? '',
+        });
+      }
+      for (const c of childrenOfType(cur, 'condition')) {
+        const v = firstChildOfType(c, 'value');
+        if (v) conditions.push(v.text);
+      }
+    }
+    cur = cur.parent;
+  }
+
+  return {
+    src: connEndpoint(firstChildOfType(node, 'src')),
+    dest: connEndpoint(firstChildOfType(node, 'dest')),
+    direction: arrow,
+    channel,
+    loops,
+    conditions,
+    node,
+  };
+}
+
+/** All `connection` nodes in a type's `connections:` section (incl. inside groups). */
+export function connectionNodes(typeNode: SyntaxNode): SyntaxNode[] {
+  const sec = sectionNode(typeNode, 'connections');
+  if (!sec) return [];
+  const out: SyntaxNode[] = [];
+  const visit = (n: SyntaxNode): void => {
+    for (let i = 0; i < n.namedChildCount; i++) {
+      const c = n.namedChild(i)!;
+      if (c.type === 'connection') out.push(c);
+      else if (c.type === 'connection_group') visit(c);
+    }
+  };
+  visit(sec);
+  return out;
+}
+
+/** Whether the type's `connections` section is marked `allowunconnected`. */
+export function allowsUnconnected(typeNode: SyntaxNode): boolean {
+  const sec = sectionNode(typeNode, 'connections');
+  return !!sec && !!firstChildOfType(sec, 'allowunconnected');
+}
+
 /**
  * The doc comment immediately preceding a node (banner comment), if any.
  * Returns the comment text with leading // markers stripped.
