@@ -74,6 +74,12 @@ import {
   iniHover,
   iniCompletion,
   HoverResult,
+  nedTypeSym,
+  msgTypeSym,
+  nodeRange,
+  nameNode,
+  msgNameNode,
+  MsgTypeInfo,
 } from '@omnetpp/shared';
 import type { ParsedDocument } from '../documentModel';
 
@@ -232,6 +238,79 @@ export function computeReferences(
     }
   }
   return refs;
+}
+
+/**
+ * A code lens: a clickable cross-reference count anchored at `range`. The server
+ * turns it into an LSP CodeLens whose command peeks `locations` (via the built-in
+ * `editor.action.showReferences`).
+ */
+export interface CrossRefLens {
+  range: Range;
+  title: string;
+  uri: string;
+  position: Position;
+  locations: Location[];
+}
+
+const plural = (n: number) => (n === 1 ? '' : 's');
+
+function declLocation(ctx: IndexContext, sym: ReturnType<typeof nedTypeSym>): Location | undefined {
+  return ctx.db.index.defOf(sym)?.decl;
+}
+
+/**
+ * Cross-reference count lenses for a NED or MSG document: per type, the number of
+ * references, subtypes, and (NED) configs that use it as a network; per locally
+ * declared NED parameter, the number of INI keys that assign it.
+ */
+export function computeCodeLenses(parsed: ParsedDocument, ctx: IndexContext): CrossRefLens[] {
+  const out: CrossRefLens[] = [];
+  const lens = (range: Range, title: string, locations: Location[]) =>
+    out.push({ range, title, uri: parsed.uri, position: range.start, locations });
+
+  if (parsed.language === 'ned') {
+    for (const t of ctx.nedCache.typesInFile(parsed.uri)) {
+      const fq = t.fqName;
+      const range = declLocation(ctx, nedTypeSym(fq))?.range ?? nodeRange(nameNode(t.node) ?? t.node);
+
+      const usages = ctx.db.findTypeUsages(fq);
+      lens(range, `${usages.length} reference${plural(usages.length)}`, usages);
+
+      const subs = ctx.db.findSubtypes(fq, { direct: true });
+      if (subs.length) {
+        const locs = subs.map((s) => declLocation(ctx, nedTypeSym(s.fqName))).filter((l): l is Location => !!l);
+        lens(range, `${subs.length} subtype${plural(subs.length)}`, locs);
+      }
+
+      const configs = ctx.db.findConfigsForNetwork(fq);
+      if (configs.length) lens(range, `${configs.length} config${plural(configs.length)}`, configs);
+
+      for (const [name, p] of t.localParams()) {
+        const assigns = findParamAssignments(ctx.iniCache, ctx.nedCache, ctx.registry, { typeFqName: fq, param: name });
+        if (!assigns.length) continue;
+        const prange = nodeRange(p.node);
+        const locs = assigns.map((a) => ({ uri: a.uri, range: a.keyRange }));
+        out.push({ range: prange, title: `assigned in ${assigns.length} INI key${plural(assigns.length)}`, uri: parsed.uri, position: prange.start, locations: locs });
+      }
+    }
+  } else if (parsed.language === 'msg') {
+    const msgTypes = ctx.msgCache.allTypes().filter((t: MsgTypeInfo) => t.file.uri === parsed.uri);
+    for (const t of msgTypes) {
+      const fq = t.fqName;
+      const range = declLocation(ctx, msgTypeSym(fq))?.range ?? nodeRange(msgNameNode(t.node) ?? t.node);
+
+      const usages = ctx.db.findMsgUsages(fq);
+      lens(range, `${usages.length} NED usage${plural(usages.length)}`, usages);
+
+      const subs = ctx.db.findMsgSubtypes(fq);
+      if (subs.length) {
+        const locs = subs.map((s) => declLocation(ctx, msgTypeSym(s.fqName))).filter((l): l is Location => !!l);
+        lens(range, `${subs.length} subtype${plural(subs.length)}`, locs);
+      }
+    }
+  }
+  return out;
 }
 
 export function computePrepareRename(

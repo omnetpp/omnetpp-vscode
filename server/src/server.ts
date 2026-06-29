@@ -14,6 +14,7 @@ import {
   FoldingRange as LspFoldingRange,
   TypeHierarchyItem,
   SymbolKind,
+  CodeLens as LspCodeLens,
 } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { promises as fsp } from 'node:fs';
@@ -29,6 +30,7 @@ import {
   computeDefinition,
   computeHover,
   computeReferences,
+  computeCodeLenses,
   computeCompletion,
   computePrepareRename,
   computeRename,
@@ -105,6 +107,7 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
       documentHighlightProvider: true,
       codeActionProvider: { codeActionKinds: ['source.organizeImports', 'source'] },
       typeHierarchyProvider: true,
+      codeLensProvider: { resolveProvider: false },
     },
   };
 });
@@ -344,6 +347,20 @@ connection.onCompletion((params) => {
   const c = ctx();
   if (!parsed || !c) return [];
   return computeCompletion(parsed, params.position, c);
+});
+
+connection.onCodeLens((params): LspCodeLens[] => {
+  const parsed = store?.get(params.textDocument.uri);
+  const c = ctx();
+  if (!parsed || !c) return [];
+  return computeCodeLenses(parsed, c).map((l) => ({
+    range: l.range,
+    command: {
+      title: l.title,
+      command: 'omnetpp.showReferences',
+      arguments: [l.uri, l.position, l.locations],
+    },
+  }));
 });
 
 connection.onPrepareRename((params) => {

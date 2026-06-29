@@ -75,6 +75,20 @@ function toVscodeRange(r: Range): vscode.Range {
   return new vscode.Range(r.start.line, r.start.character, r.end.line, r.end.character);
 }
 
+/** A CodeLens fires this with LSP-shaped args; convert to vscode types and peek. */
+async function showReferences(
+  uri: string,
+  position: Pos,
+  locations: { uri: string; range: Range }[],
+): Promise<void> {
+  await vscode.commands.executeCommand(
+    'editor.action.showReferences',
+    vscode.Uri.parse(uri),
+    new vscode.Position(position.line, position.character),
+    locations.map((l) => new vscode.Location(vscode.Uri.parse(l.uri), toVscodeRange(l.range))),
+  );
+}
+
 /** Reveal a location (uri + range) in the editor. */
 async function openLocation(uri: string, range?: Range): Promise<void> {
   const doc = await vscode.workspace.openTextDocument(vscode.Uri.parse(uri));
@@ -770,6 +784,11 @@ export function registerViews(context: vscode.ExtensionContext, client: Language
     configurationsView,
     vscode.commands.registerCommand('omnetpp.openLocation', (uri: string, range?: Range) =>
       openLocation(uri, range),
+    ),
+    vscode.commands.registerCommand(
+      'omnetpp.showReferences',
+      (uri: string, position: Pos, locations: { uri: string; range: Range }[]) =>
+        showReferences(uri, position, locations),
     ),
     vscode.commands.registerCommand('omnetpp.pinType', (it?: HierarchyItem) => {
       if (!it?.fqName) return;
