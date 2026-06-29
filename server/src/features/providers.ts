@@ -200,7 +200,9 @@ export function computeReferences(
   if (parsed.language !== 'ned' || !parsed.tree) return [];
   const file = ctx.nedCache.getFile(parsed.uri);
   if (!file) return [];
-  return nedReferences(ctx.nedCache, file, file.tree, pos, includeDeclaration);
+  return nedReferences(ctx.nedCache, file, file.tree, pos, includeDeclaration, (fq) =>
+    ctx.db.findTypeUsages(fq),
+  );
 }
 
 export function computePrepareRename(
@@ -447,7 +449,7 @@ export function computeDocumentHighlights(
   if (parsed.language !== 'ned' || !parsed.tree) return [];
   const file = ctx.nedCache.getFile(parsed.uri);
   if (!file) return [];
-  return nedReferences(ctx.nedCache, file, file.tree, pos, true)
+  return nedReferences(ctx.nedCache, file, file.tree, pos, true, (fq) => ctx.db.findTypeUsages(fq))
     .filter((l) => l.uri === parsed.uri)
     .map((l) => ({ range: l.range }));
 }

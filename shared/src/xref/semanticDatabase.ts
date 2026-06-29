@@ -39,17 +39,37 @@ export class SemanticDatabase {
     return this.msgCache.getType(fq);
   }
 
-  /** Subtypes of a NED type (direct or transitive). */
+  /**
+   * Subtypes of a NED type (direct or transitive), read from the reverse index.
+   * O(degree) instead of the cache's O(types) full scan.
+   */
   findSubtypes(fq: string, opts?: { direct?: boolean }): NedTypeInfo[] {
-    return opts?.direct ? this.nedCache.directSubtypesOf(fq) : this.nedCache.subtypesOf(fq);
+    const direct = this.findDirectSubtypesIndexed(fq);
+    if (opts?.direct) return direct;
+    const out: NedTypeInfo[] = [];
+    const seen = new Set<string>();
+    const queue = [...direct];
+    while (queue.length) {
+      const t = queue.shift()!;
+      if (seen.has(t.fqName)) continue;
+      seen.add(t.fqName);
+      out.push(t);
+      queue.push(...this.findDirectSubtypesIndexed(t.fqName));
+    }
+    return out;
   }
 
   /**
-   * Type-position references (extends/implements/like/submodule/channel) of a NED
-   * type, project-wide. Phase 0 implementation re-walks the trees; Phase 2 switches
-   * this to `this.index.inboundOf(nedTypeSym(fq))`.
+   * Type-position references (extends/implements/like/submodule/channel/import) of a
+   * NED type, project-wide — O(degree) from the reverse index. Shadow-validated
+   * against `findTypeUsagesByWalk` (Phase 1 tests).
    */
   findTypeUsages(fq: string): Location[] {
+    return this.index.inboundOf(nedTypeSym(fq)).map((e) => e.src);
+  }
+
+  /** The pre-index project-wide tree walk. Retained as a fallback / shadow oracle. */
+  findTypeUsagesByWalk(fq: string): Location[] {
     const target = this.nedCache.getType(fq);
     if (!target) return [];
     const out: Location[] = [];
@@ -119,12 +139,7 @@ export class SemanticDatabase {
     this.index.clear();
   }
 
-  // ---- index-backed queries (validated against the walkers in Phase 1) ----
-
-  /** Type-position references of a NED type, read from the reverse index. */
-  findTypeUsagesIndexed(fq: string): Location[] {
-    return this.index.inboundOf(nedTypeSym(fq)).map((e) => e.src);
-  }
+  // ---- index-backed query primitives -------------------------------------
 
   /** Direct subtypes of a NED type, read from the reverse index. */
   findDirectSubtypesIndexed(fq: string): NedTypeInfo[] {

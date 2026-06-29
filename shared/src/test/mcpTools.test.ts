@@ -49,19 +49,23 @@ const memFs: FileSystem = {
 async function buildCtx(): Promise<ToolContext> {
   const svc = await getParsers();
   const nedCache = new NedResourceCache();
-  nedCache.addFile(BUILTIN_URI, svc.parse('ned', BUILTIN_NED_TEXT), 'ned');
-  for (const [uri, text] of Object.entries(NED_FILES)) {
-    nedCache.addFile(uri, svc.parse('ned', text), '');
-  }
   const msgCache = new MsgResourceCache();
   const configRegistry = new ConfigRegistry([
     { name: 'sim-time-limit', type: 'double', unit: 's', default: null, scope: 'global', description: 'Simulation time limit.' },
   ]);
+  const db = new SemanticDatabase(nedCache, msgCache, configRegistry);
+  // mirror ProjectIndex: add to the cache, then index its cross-references
+  nedCache.addFile(BUILTIN_URI, svc.parse('ned', BUILTIN_NED_TEXT), 'ned');
+  db.onNedFile(BUILTIN_URI);
+  for (const [uri, text] of Object.entries(NED_FILES)) {
+    nedCache.addFile(uri, svc.parse('ned', text), '');
+    db.onNedFile(uri);
+  }
   return {
     nedCache,
     msgCache,
     configRegistry,
-    db: new SemanticDatabase(nedCache, msgCache, configRegistry),
+    db,
     fs: memFs,
     parsers: svc,
     toUri: (p) => (/^[a-z][a-z0-9+.-]*:\/\//i.test(p) ? p : pathToFileURL(p).toString()),

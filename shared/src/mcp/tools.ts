@@ -17,7 +17,6 @@ import type { SemanticDatabase } from '../xref/semanticDatabase';
 import { ConfigRegistry } from '../ini/configRegistry';
 import { nameNode } from '../ned/nedAst';
 import { nodeRange } from '../parser/treeUtils';
-import { isTypeRefNode, enclosingContextFor } from '../ned/nedNavigation';
 import { nedRenameType, nedRenameMember } from '../ned/nedRename';
 import { organizeImports } from '../ned/nedOrganizeImports';
 import { syntaxDiagnostics } from '../features/syntaxDiagnostics';
@@ -110,24 +109,6 @@ function nedTypeDetail(t: NedTypeInfo) {
     })),
     location: locOf(t.file.uri, declNode),
   };
-}
-
-/** Type references (extends/like/submodule type usages) of a NED type, project-wide. */
-function nedTypeReferences(ctx: ToolContext, target: NedTypeInfo): Location[] {
-  const out: Location[] = [];
-  for (const f of ctx.nedCache.allFiles()) {
-    const stack: SyntaxNode[] = [f.tree.rootNode];
-    while (stack.length) {
-      const n = stack.pop()!;
-      if (isTypeRefNode(n) && n.text.split('.').pop() === target.simpleName) {
-        const enclosing = enclosingContextFor(ctx.nedCache, n, f.uri);
-        const resolved = ctx.nedCache.lookupType(n.text, f, enclosing);
-        if (resolved && resolved.fqName === target.fqName) out.push(locOf(f.uri, n));
-      }
-      for (let i = 0; i < n.namedChildCount; i++) stack.push(n.namedChild(i)!);
-    }
-  }
-  return out;
 }
 
 async function readText(uri: string, ctx: ToolContext): Promise<string> {
@@ -235,8 +216,7 @@ const TOOLS: ToolDef[] = [
       properties: { fqName: { type: 'string' }, direct: { type: 'boolean' } },
       required: ['fqName'],
     },
-    handler: (a, ctx) =>
-      (a.direct ? ctx.nedCache.directSubtypesOf(a.fqName) : ctx.nedCache.subtypesOf(a.fqName)).map(nedTypeSummary),
+    handler: (a, ctx) => ctx.db.findSubtypes(a.fqName, { direct: !!a.direct }).map(nedTypeSummary),
   },
   {
     name: 'get_inheritance',
@@ -253,8 +233,8 @@ const TOOLS: ToolDef[] = [
         fqName: t.fqName,
         ancestors: t.ancestors().map((x) => x.fqName),
         interfaces: t.allInterfaces().map((x) => x.fqName),
-        directSubtypes: ctx.nedCache.directSubtypesOf(t.fqName).map((x) => x.fqName),
-        allSubtypes: ctx.nedCache.subtypesOf(t.fqName).map((x) => x.fqName),
+        directSubtypes: ctx.db.findSubtypes(t.fqName, { direct: true }).map((x) => x.fqName),
+        allSubtypes: ctx.db.findSubtypes(t.fqName).map((x) => x.fqName),
       };
     },
   },
@@ -266,10 +246,7 @@ const TOOLS: ToolDef[] = [
       properties: { fqName: { type: 'string' } },
       required: ['fqName'],
     },
-    handler: (a, ctx) => {
-      const t = ctx.nedCache.getType(a.fqName);
-      return t ? nedTypeReferences(ctx, t) : [];
-    },
+    handler: (a, ctx) => ctx.db.findTypeUsages(a.fqName),
   },
   {
     name: 'list_msg_types',

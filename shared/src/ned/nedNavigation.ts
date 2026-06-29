@@ -459,13 +459,18 @@ export function nedHover(
   return { markdown: md, range };
 }
 
-/** Find all references to a NED type (by definition or any reference position). */
+/**
+ * Find all references to a NED type (by definition or any reference position).
+ * When `typeUsages` is supplied (the index-backed reverse query), it is used for
+ * the project-wide type-reference scan instead of re-walking every file's tree.
+ */
 export function nedReferences(
   cache: NedResourceCache,
   file: NedFileInfo,
   tree: Tree,
   pos: Position,
   includeDeclaration: boolean,
+  typeUsages?: (fqName: string) => Location[],
 ): Location[] {
   const ref = referenceAt(cache, file, tree, pos);
   if (!ref) {
@@ -485,9 +490,11 @@ export function nedReferences(
     const nn = nameNode(target.node) ?? target.node;
     out.push({ uri: target.file.uri, range: nodeRange(nn) });
   }
-  // scan every file for type references resolving to target
-  for (const f of cache.allFiles()) {
-    collectTypeRefs(cache, f, target, out);
+  if (typeUsages) {
+    out.push(...typeUsages(target.fqName));
+  } else {
+    // fallback: scan every file for type references resolving to target
+    for (const f of cache.allFiles()) collectTypeRefs(cache, f, target, out);
   }
   return out;
 }
