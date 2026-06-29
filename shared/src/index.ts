@@ -48,7 +48,7 @@ export * from './msg/msgAst';
 export { msgDocumentSymbols } from './msg/msgSymbols';
 export * from './msg/msgResourceCache';
 export * from './msg/msgTypeInfo';
-export { msgDefinition, msgHover, msgCompletion, msgTypeAt } from './msg/msgNavigation';
+export { msgDefinition, msgHover, msgCompletion, msgTypeAt, msgRenameRangeAt } from './msg/msgNavigation';
 export * from './msg/msgChecks';
 
 // INI

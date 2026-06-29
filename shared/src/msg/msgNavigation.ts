@@ -18,6 +18,12 @@ function refTypeNameAt(tree: Tree, pos: Position): { node: SyntaxNode; isDef: bo
   return null;
 }
 
+/** Range of the MSG type-name token under the cursor (decl or reference), for prepareRename. */
+export function msgRenameRangeAt(tree: Tree, pos: Position): Range | undefined {
+  const r = refTypeNameAt(tree, pos);
+  return r ? nodeRange(r.node) : undefined;
+}
+
 /** The MSG type declared or referenced at a position (for references / rename). */
 export function msgTypeAt(
   cache: MsgResourceCache,
