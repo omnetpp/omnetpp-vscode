@@ -39,7 +39,7 @@ import {
 } from '../ini/iniParamResolution';
 import { expandNetwork, paramSlots } from '../ini/moduleTree';
 import { parseIni, configSummaries } from '../ini/iniDocument';
-import { findMsgUsagesInNed, resolveNedClass, nedClassReferences } from '../xref/nedMsgLinks';
+import { resolveNedClass, nedClassReferences } from '../xref/nedMsgLinks';
 import type { ConnectionInfo, ConnEndpoint } from '../ned/nedAst';
 import type { Node as SyntaxNode } from 'web-tree-sitter';
 
@@ -315,11 +315,8 @@ const TOOLS: ToolDef[] = [
       required: ['fqName'],
     },
     handler: (a, ctx) => ({
-      nedSites: findMsgUsagesInNed(ctx.msgCache, ctx.nedCache, a.fqName),
-      msgSubtypes: ctx.msgCache
-        .allTypes()
-        .filter((t) => t.superType()?.fqName === a.fqName)
-        .map((t) => t.fqName),
+      nedSites: ctx.db.findMsgUsages(a.fqName),
+      msgSubtypes: ctx.db.findMsgSubtypes(a.fqName).map((t) => t.fqName),
     }),
   },
   {

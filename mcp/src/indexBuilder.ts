@@ -110,8 +110,11 @@ export async function buildDiskIndex(
   };
 
   for (const root of layout.roots) await scan(root.dir);
-  const db = new SemanticDatabase(nedCache, msgCache, configRegistry);
-  // populate the cross-reference graph (all types present → immediate resolution)
+  const db = new SemanticDatabase(nedCache, msgCache, configRegistry, iniCache);
+  // populate the cross-reference graph (msg first so NED @class resolves eagerly,
+  // ned before ini so `network=` resolves eagerly; drain covers any residual order)
+  for (const f of msgCache.allFiles()) db.onMsgFile(f.uri);
   for (const f of nedCache.allFiles()) db.onNedFile(f.uri);
+  for (const { uri } of iniCache.allDocs()) db.onIniFile(uri);
   return { nedCache, msgCache, configRegistry, iniCache, db, layout };
 }

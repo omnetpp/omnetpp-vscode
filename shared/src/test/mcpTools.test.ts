@@ -54,7 +54,8 @@ async function buildCtx(): Promise<ToolContext> {
   const configRegistry = new ConfigRegistry([
     { name: 'sim-time-limit', type: 'double', unit: 's', default: null, scope: 'global', description: 'Simulation time limit.' },
   ]);
-  const db = new SemanticDatabase(nedCache, msgCache, configRegistry);
+  const iniCache = new IniResourceCache();
+  const db = new SemanticDatabase(nedCache, msgCache, configRegistry, iniCache);
   // mirror ProjectIndex: add to the cache, then index its cross-references
   nedCache.addFile(BUILTIN_URI, svc.parse('ned', BUILTIN_NED_TEXT), 'ned');
   db.onNedFile(BUILTIN_URI);
@@ -62,8 +63,8 @@ async function buildCtx(): Promise<ToolContext> {
     nedCache.addFile(uri, svc.parse('ned', text), '');
     db.onNedFile(uri);
   }
-  const iniCache = new IniResourceCache();
   iniCache.addFile(pathToFileURL(INI_PATH).toString(), INI_TEXT);
+  db.onIniFile(pathToFileURL(INI_PATH).toString());
   return {
     nedCache,
     msgCache,

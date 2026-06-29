@@ -7,6 +7,7 @@ import {
   NedResourceCache,
   MsgResourceCache,
   ConfigRegistry,
+  IniResourceCache,
   SemanticDatabase,
   XrefIndex,
   nedTypeSym,
@@ -25,7 +26,7 @@ async function makeDb(): Promise<{
 }> {
   const svc = await getParsers();
   const cache = new NedResourceCache();
-  const db = new SemanticDatabase(cache, new MsgResourceCache(), new ConfigRegistry());
+  const db = new SemanticDatabase(cache, new MsgResourceCache(), new ConfigRegistry(), new IniResourceCache());
   const add = (uri: string, text: string, pkg = '') => {
     cache.addFile(uri, svc.parse('ned', text), pkg);
     db.onNedFile(uri);

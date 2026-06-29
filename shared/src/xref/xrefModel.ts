@@ -40,6 +40,8 @@ export interface XrefEdge {
   originUri: string;
   /** NED lookup context (topmost enclosing compound fq) for re-resolution. */
   enclosingFq?: string;
+  /** Namespace context for re-resolving a MSG-target edge (`msg-*` / `ned-class`). */
+  nsContext?: string;
   /** True when the edge was reached through a `like` interface boundary. */
   viaLike?: boolean;
   /** True when `to` is null because the target could not be resolved. */

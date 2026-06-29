@@ -24,6 +24,8 @@ import {
   nedClassRefs,
   nedSignalTypeRefs,
 } from '../ned/nedAst';
+import { msgTypeSym, nedTypeSym } from './symbolId';
+import type { XrefEdge } from './xrefModel';
 
 /** Resolve a NED `@class`/`@signal` class token to a MSG type via the file namespace. */
 export function resolveNedClass(
@@ -91,6 +93,38 @@ export function nedClassDefinition(
   const t = hit.target;
   const nn = nameNode(t.node) ?? t.node;
   return { uri: t.file.uri, range: nodeRange(nn) };
+}
+
+/**
+ * `ned-class` edges of a NED file: every `@class` / `@signal(type=)` reference of
+ * each type in the file, resolved to its MSG type via the file `@namespace`. An
+ * unresolved reference (the backing class is hand-written C++ with no `.msg`)
+ * carries `to=null` and is bucketed for drain — it is navigation, never an error.
+ */
+export function extractNedClassEdges(
+  msgCache: MsgResourceCache,
+  nedCache: NedResourceCache,
+  file: NedFileInfo,
+): XrefEdge[] {
+  const ns = fileNamespace(file.tree) ?? '';
+  const out: XrefEdge[] = [];
+  for (const type of nedCache.typesInFile(file.uri)) {
+    const fromSym = nedTypeSym(type.fqName);
+    for (const ref of nedClassReferences(type)) {
+      const resolved = resolveNedClass(msgCache, type, ref.className);
+      out.push({
+        kind: 'ned-class',
+        from: fromSym,
+        to: resolved ? msgTypeSym(resolved.fqName) : null,
+        rawTarget: ref.className,
+        src: { uri: file.uri, range: nodeRange(ref.node) },
+        originUri: file.uri,
+        nsContext: ns,
+        unresolved: !resolved,
+      });
+    }
+  }
+  return out;
 }
 
 /** Reverse: every NED site referencing a MSG type (by `@class` / `@signal type`). */

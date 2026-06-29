@@ -39,7 +39,7 @@ export class ProjectIndex {
   readonly configRegistry = new ConfigRegistry();
   readonly iniCache = new IniResourceCache();
   /** Unified query surface over the caches + cross-reference graph. */
-  readonly db = new SemanticDatabase(this.cache, this.msgCache, this.configRegistry);
+  readonly db = new SemanticDatabase(this.cache, this.msgCache, this.configRegistry, this.iniCache);
   private layout: ProjectLayout = { roots: [], excludedPackages: [] };
   /** Scanned INI files → number of named [Config] sections (for status reporting). */
   private iniConfigCounts = new Map<string, number>();
@@ -128,12 +128,14 @@ export class ProjectIndex {
     }
     this.iniCache.addFile(uri, text);
     this.iniConfigCounts.set(uri, configSummaries(parseIni(text)).length);
+    this.db.onIniFile(uri);
   }
 
   /** Update the INI index from an open document's text (for reverse queries). */
   updateOpenIniDocument(uri: string, text: string): void {
     this.iniCache.addFile(uri, text);
     this.iniConfigCounts.set(uri, configSummaries(parseIni(text)).length);
+    this.db.onIniFile(uri);
   }
 
   /** Read and index a single MSG file from disk (by absolute fs path). */
@@ -147,6 +149,7 @@ export class ProjectIndex {
       return;
     }
     this.msgCache.addFile(uri, this.parsers.parse('msg', text));
+    this.db.onMsgFile(uri);
   }
 
   /** Read and index a single NED file from disk (by absolute fs path). */
@@ -184,6 +187,7 @@ export class ProjectIndex {
   /** Update the MSG index from an open document's text (cache owns its tree). */
   updateOpenMsgDocument(uri: string, text: string): void {
     this.msgCache.addFile(uri, this.parsers.parse('msg', text));
+    this.db.onMsgFile(uri);
   }
 
   /** Re-read a changed file from disk; remove if deleted or gone. */
@@ -197,10 +201,13 @@ export class ProjectIndex {
       return; // not a file uri
     }
     if (deleted || !(await this.fs.exists(fsPath))) {
-      if (isMsg) this.msgCache.removeFile(uri);
-      else if (isIni) {
+      if (isMsg) {
+        this.msgCache.removeFile(uri);
+        this.db.dropFile(uri);
+      } else if (isIni) {
         this.iniCache.removeFile(uri);
         this.iniConfigCounts.delete(uri);
+        this.db.dropFile(uri);
       } else {
         this.cache.removeFile(uri);
         this.db.dropFile(uri);
