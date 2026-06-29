@@ -64,6 +64,7 @@ async function main(): Promise<void> {
     nedCache: index.nedCache,
     msgCache: index.msgCache,
     configRegistry: index.configRegistry,
+    db: index.db,
     fs,
     parsers,
     toUri: (p) => (/^[a-z][a-z0-9+.-]*:\/\//i.test(p) ? p : pathToFileURL(resolve(p)).toString()),

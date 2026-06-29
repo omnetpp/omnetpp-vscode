@@ -183,7 +183,7 @@ connection.onInitialized(async () => {
 
 function ctx() {
   return index
-    ? { nedCache: index.cache, msgCache: index.msgCache, registry: index.configRegistry }
+    ? { nedCache: index.cache, msgCache: index.msgCache, registry: index.configRegistry, db: index.db }
     : undefined;
 }
 
@@ -582,6 +582,7 @@ function mcpCtx(): ToolContext | undefined {
     nedCache: index.cache,
     msgCache: index.msgCache,
     configRegistry: index.configRegistry,
+    db: index.db,
     fs: mcpLiveFs,
     parsers,
     toUri: (p) => (/^[a-z][a-z0-9+.-]*:\/\//i.test(p) ? p : pathToFileURL(p).toString()),

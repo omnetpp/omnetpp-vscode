@@ -9,6 +9,7 @@ import {
   NedResourceCache,
   ParserService,
   ProjectLayout,
+  SemanticDatabase,
   configSummaries,
   discoverProjectLayout,
   isExcludedPackage,
@@ -35,6 +36,8 @@ export class ProjectIndex {
   readonly cache = new NedResourceCache();
   readonly msgCache = new MsgResourceCache();
   readonly configRegistry = new ConfigRegistry();
+  /** Unified query surface over the caches + cross-reference graph. */
+  readonly db = new SemanticDatabase(this.cache, this.msgCache, this.configRegistry);
   private layout: ProjectLayout = { roots: [], excludedPackages: [] };
   /** Scanned INI files → number of named [Config] sections (for status reporting). */
   private iniConfigCounts = new Map<string, number>();
@@ -191,6 +194,7 @@ export class ProjectIndex {
   async reindex(workspaceFolders: string[], nedPathDirs: string[]): Promise<void> {
     this.cache.clear();
     this.msgCache.clear();
+    this.db.clear();
     await this.initialize(workspaceFolders, nedPathDirs);
   }
 

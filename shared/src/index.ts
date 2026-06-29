@@ -32,6 +32,12 @@ export * from './expr/infer';
 // Project model
 export * from './project/projectModel';
 
+// Cross-reference graph + unified query surface
+export * from './xref/symbolId';
+export * from './xref/xrefModel';
+export * from './xref/xrefIndex';
+export * from './xref/semanticDatabase';
+
 // MCP tool layer (host-agnostic; no MCP SDK dependency)
 export * from './mcp/tools';
 

@@ -9,6 +9,7 @@ import {
   NedResourceCache,
   ParserService,
   ProjectLayout,
+  SemanticDatabase,
   discoverProjectLayout,
   isExcludedPackage,
   packageForFile,
@@ -18,6 +19,7 @@ export interface DiskIndex {
   nedCache: NedResourceCache;
   msgCache: MsgResourceCache;
   configRegistry: ConfigRegistry;
+  db: SemanticDatabase;
   layout: ProjectLayout;
 }
 
@@ -98,5 +100,6 @@ export async function buildDiskIndex(
   };
 
   for (const root of layout.roots) await scan(root.dir);
-  return { nedCache, msgCache, configRegistry, layout };
+  const db = new SemanticDatabase(nedCache, msgCache, configRegistry);
+  return { nedCache, msgCache, configRegistry, db, layout };
 }

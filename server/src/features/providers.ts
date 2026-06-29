@@ -12,6 +12,7 @@ import {
   NedResourceCache,
   MsgResourceCache,
   ConfigRegistry,
+  SemanticDatabase,
   nedPrepareRename,
   nedPrepareMemberRename,
   nedRename,
@@ -75,6 +76,7 @@ export interface IndexContext {
   nedCache: NedResourceCache;
   msgCache: MsgResourceCache;
   registry: ConfigRegistry;
+  db: SemanticDatabase;
 }
 
 function lineAt(text: string, line: number): string {
