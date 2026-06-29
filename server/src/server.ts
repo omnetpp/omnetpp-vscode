@@ -18,7 +18,7 @@ import {
 } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { promises as fsp } from 'node:fs';
-import { ParserService, parseIni, configSummaries, OMNETPP_TOOLS, handleTool } from '@omnetpp/shared';
+import { ParserService, parseIni, configSummaries, OMNETPP_TOOLS, handleTool, workspaceSymbols } from '@omnetpp/shared';
 import type { ToolContext, FileSystem } from '@omnetpp/shared';
 import { DocumentModelStore } from './documentModel';
 import { NodeFileSystem } from './nodeFileSystem';
@@ -108,6 +108,7 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
       codeActionProvider: { codeActionKinds: ['source.organizeImports', 'source'] },
       typeHierarchyProvider: true,
       codeLensProvider: { resolveProvider: false },
+      workspaceSymbolProvider: true,
     },
   };
 });
@@ -311,6 +312,15 @@ connection.onDocumentSymbol((params) => {
   const parsed = store?.get(params.textDocument.uri);
   if (!parsed) return [];
   return computeDocumentSymbols(parsed) as unknown as LspDocumentSymbol[];
+});
+
+connection.onWorkspaceSymbol((params) => {
+  if (!index) return [];
+  return workspaceSymbols(params.query, {
+    nedCache: index.cache,
+    msgCache: index.msgCache,
+    iniCache: index.iniCache,
+  }).map((s) => ({ name: s.name, kind: s.kind, location: s.location, containerName: s.containerName }));
 });
 
 connection.onFoldingRanges((params) => {

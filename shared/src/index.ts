@@ -7,6 +7,7 @@ export * from './parser/treeUtils';
 export * from './features/syntaxDiagnostics';
 export * from './features/folding';
 export * from './features/format';
+export * from './features/workspaceSymbols';
 
 // NED
 export * from './ned/nedAst';
