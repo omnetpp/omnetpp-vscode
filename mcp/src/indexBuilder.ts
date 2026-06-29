@@ -101,5 +101,7 @@ export async function buildDiskIndex(
 
   for (const root of layout.roots) await scan(root.dir);
   const db = new SemanticDatabase(nedCache, msgCache, configRegistry);
+  // populate the cross-reference graph (all types present → immediate resolution)
+  for (const f of nedCache.allFiles()) db.onNedFile(f.uri);
   return { nedCache, msgCache, configRegistry, db, layout };
 }

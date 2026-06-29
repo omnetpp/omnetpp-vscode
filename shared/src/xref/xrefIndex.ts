@@ -64,16 +64,42 @@ export class XrefIndex {
     fe.declares.push(sym);
   }
 
-  /** Remove a file's edges and declarations from every structure. */
+  /** Re-point a previously-unresolved edge at a now-known target. */
+  resolvePending(edge: XrefEdge, to: SymbolId): void {
+    remove(this.pendingByName, simpleNameOf(edge.rawTarget), edge);
+    edge.to = to;
+    edge.unresolved = false;
+    push(this.inEdges, to, edge);
+  }
+
+  /**
+   * Remove a file's edges and declarations. Any edge from ANOTHER file that
+   * targeted a symbol this file declared is demoted to pending (its target just
+   * disappeared), so a later (re)declaration of that name can re-resolve it.
+   */
   dropFile(uri: string): void {
     const fe = this.fileEdges.get(uri);
     if (!fe) return;
+    // 1. demote external dependents of this file's declarations to pending
+    for (const sym of fe.declares) {
+      const dependents = this.inEdges.get(sym);
+      if (dependents) {
+        for (const e of dependents.slice()) {
+          if (e.originUri === uri) continue; // own edges handled in step 2
+          e.to = null;
+          e.unresolved = true;
+          remove(this.inEdges, sym, e);
+          push(this.pendingByName, simpleNameOf(e.rawTarget), e);
+        }
+      }
+      this.defs.delete(sym);
+    }
+    // 2. remove this file's own edges
     for (const e of fe.edges) {
       remove(this.outEdges, e.from, e);
       if (e.to) remove(this.inEdges, e.to, e);
       else remove(this.pendingByName, simpleNameOf(e.rawTarget), e);
     }
-    for (const sym of fe.declares) this.defs.delete(sym);
     this.fileEdges.delete(uri);
   }
 

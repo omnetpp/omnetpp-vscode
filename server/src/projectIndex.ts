@@ -62,6 +62,7 @@ export class ProjectIndex {
 
     // built-in NED declarations (ned.IdealChannel, ...)
     this.cache.addFile(BUILTIN_URI, this.parsers.parse('ned', BUILTIN_NED_TEXT), 'ned');
+    this.db.onNedFile(BUILTIN_URI);
 
     // built-in MSG/sim type names
     try {
@@ -151,6 +152,7 @@ export class ProjectIndex {
       return;
     }
     this.cache.addFile(uri, this.parsers.parse('ned', text), pkg);
+    this.db.onNedFile(uri);
   }
 
   /**
@@ -162,9 +164,11 @@ export class ProjectIndex {
     const pkg = this.folderPackageForUri(uri);
     if (pkg && isExcludedPackage(this.layout.excludedPackages, pkg)) {
       this.cache.removeFile(uri); // respect exclusions even for open buffers
+      this.db.dropFile(uri);
       return;
     }
     this.cache.addFile(uri, this.parsers.parse('ned', text), pkg);
+    this.db.onNedFile(uri);
   }
 
   /** Update the MSG index from an open document's text (cache owns its tree). */
@@ -183,7 +187,10 @@ export class ProjectIndex {
     }
     if (deleted || !(await this.fs.exists(fsPath))) {
       if (isMsg) this.msgCache.removeFile(uri);
-      else this.cache.removeFile(uri);
+      else {
+        this.cache.removeFile(uri);
+        this.db.dropFile(uri);
+      }
       return;
     }
     if (isMsg) await this.indexMsgFile(fsPath);

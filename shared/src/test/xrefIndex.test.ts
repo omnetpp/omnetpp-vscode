@@ -13,7 +13,33 @@ import {
   nedMemberSym,
   parseSymbolId,
 } from '../index';
-import type { XrefEdge } from '../index';
+import type { XrefEdge, Location, ParserService } from '../index';
+
+/** Build a cache + database with a helper that mirrors ProjectIndex's add flow. */
+async function makeDb(): Promise<{
+  svc: ParserService;
+  cache: NedResourceCache;
+  db: SemanticDatabase;
+  add: (uri: string, text: string, pkg?: string) => void;
+  remove: (uri: string) => void;
+}> {
+  const svc = await getParsers();
+  const cache = new NedResourceCache();
+  const db = new SemanticDatabase(cache, new MsgResourceCache(), new ConfigRegistry());
+  const add = (uri: string, text: string, pkg = '') => {
+    cache.addFile(uri, svc.parse('ned', text), pkg);
+    db.onNedFile(uri);
+  };
+  const remove = (uri: string) => {
+    cache.removeFile(uri);
+    db.dropFile(uri);
+  };
+  add(BUILTIN_URI, BUILTIN_NED_TEXT, 'ned');
+  return { svc, cache, db, add, remove };
+}
+
+const locKey = (l: Location) => `${l.uri}:${l.range.start.line}:${l.range.start.character}`;
+const locSet = (ls: Location[]) => ls.map(locKey).sort();
 
 test('SymbolId constructors round-trip through parseSymbolId', () => {
   const ned = nedTypeSym('inet.Host');
@@ -84,4 +110,79 @@ test('SemanticDatabase delegates findSubtypes / findTypeUsages to the caches', a
   assert.ok(usages.length >= 2, `expected >=2 Host usages, got ${usages.length}`);
   assert.ok(usages.some((u) => u.uri === 'file:///Net.ned'));
   assert.ok(usages.some((u) => u.uri === 'file:///Server.ned'));
+});
+
+test('indexed type usages match the walker across a multi-file project', async () => {
+  const { cache, db, add } = await makeDb();
+  add('file:///Base.ned', 'package p;\nmoduleinterface IApp { }\nsimple Base { }', 'p');
+  add('file:///App.ned', 'package p;\nsimple App extends Base like IApp { }', 'p');
+  add('file:///Chan.ned', 'package p;\nchannel C extends ned.DelayChannel { }', 'p');
+  add(
+    'file:///Net.ned',
+    'package p;\nimport p.App;\nnetwork Net {\n submodules:\n  a: App;\n  b: Base;\n connections:\n  a.g++ --> C --> b.g++;\n}',
+    'p',
+  );
+
+  for (const fq of ['p.Base', 'p.IApp', 'p.App', 'p.C', 'ned.DelayChannel']) {
+    assert.deepEqual(
+      locSet(db.findTypeUsagesIndexed(fq)),
+      locSet(db.findTypeUsages(fq)),
+      `usages mismatch for ${fq}`,
+    );
+  }
+  // direct subtypes parity
+  assert.deepEqual(
+    db.findDirectSubtypesIndexed('p.Base').map((t) => t.fqName).sort(),
+    cache.directSubtypesOf('p.Base').map((t) => t.fqName).sort(),
+  );
+});
+
+test('forward reference resolves when the target file is added later (drain)', async () => {
+  const { db, add } = await makeDb();
+  // referencing file added BEFORE its target exists
+  add('file:///Net.ned', 'network Net { submodules: h: Host; }');
+  assert.equal(db.findTypeUsagesIndexed('Host').length, 0, 'no target yet');
+
+  add('file:///Host.ned', 'simple Host { }');
+  assert.equal(db.findTypeUsagesIndexed('Host').length, 1, 'drained on target add');
+  assert.deepEqual(locSet(db.findTypeUsagesIndexed('Host')), locSet(db.findTypeUsages('Host')));
+});
+
+test('dropping a target demotes dependents; re-adding restores them', async () => {
+  const { db, add, remove } = await makeDb();
+  add('file:///Host.ned', 'simple Host { }');
+  add('file:///A.ned', 'simple A extends Host { }');
+  add('file:///B.ned', 'network N { submodules: h: Host; }');
+  assert.equal(db.findTypeUsagesIndexed('Host').length, 2);
+
+  remove('file:///Host.ned');
+  assert.equal(db.findTypeUsagesIndexed('Host').length, 0, 'dependents demoted to pending');
+
+  add('file:///Host.ned', 'simple Host { }');
+  assert.equal(db.findTypeUsagesIndexed('Host').length, 2, 'restored on re-add');
+});
+
+test('renaming a type leaves stale references unresolved', async () => {
+  const { db, add } = await makeDb();
+  add('file:///Host.ned', 'simple Host { }');
+  add('file:///A.ned', 'simple A extends Host { }');
+  assert.equal(db.findTypeUsagesIndexed('Host').length, 1);
+
+  // rewrite Host.ned to declare a differently-named type
+  add('file:///Host.ned', 'simple Hoster { }');
+  assert.equal(db.findTypeUsagesIndexed('Host').length, 0, 'old name no longer declared');
+  assert.equal(db.findTypeUsagesIndexed('Hoster').length, 0, 'A still references Host, not Hoster');
+});
+
+test('editing a referencing file does not re-walk unrelated files', async () => {
+  const { db, add } = await makeDb();
+  add('file:///Host.ned', 'simple Host { }');
+  add('file:///A.ned', 'simple A extends Host { }');
+  add('file:///B.ned', 'simple B extends Host { }');
+  assert.equal(db.findTypeUsagesIndexed('Host').length, 2);
+
+  // edit A to stop referencing Host
+  add('file:///A.ned', 'simple A { }');
+  assert.deepEqual(locSet(db.findTypeUsagesIndexed('Host')), locSet(db.findTypeUsages('Host')));
+  assert.equal(db.findTypeUsagesIndexed('Host').length, 1, 'only B references Host now');
 });

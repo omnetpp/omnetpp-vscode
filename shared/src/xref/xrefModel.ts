@@ -14,6 +14,7 @@ export type EdgeKind =
   | 'like-iface'
   | 'submodule-type'
   | 'channel-type'
+  | 'import'
   | 'gate-ref'
   | 'submodule-ref'
   // MSG → MSG
