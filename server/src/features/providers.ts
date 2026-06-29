@@ -16,6 +16,8 @@ import {
   IniResourceCache,
   findParamAssignments,
   memberRefAt,
+  referenceAt,
+  msgTypeAt,
   nedPrepareRename,
   nedPrepareMemberRename,
   nedRename,
@@ -215,15 +217,28 @@ export function computeHover(
   return null;
 }
 
+function posInRange(pos: Position, r: Range): boolean {
+  if (pos.line < r.start.line || pos.line > r.end.line) return false;
+  if (pos.line === r.start.line && pos.character < r.start.character) return false;
+  if (pos.line === r.end.line && pos.character > r.end.character) return false;
+  return true;
+}
+
 export function computeReferences(
   parsed: ParsedDocument,
   pos: Position,
   includeDeclaration: boolean,
   ctx: IndexContext,
 ): Location[] {
-  if (parsed.language !== 'ned' || !parsed.tree) return [];
+  if (parsed.language === 'ned' && parsed.tree) return nedReferencesAt(parsed, pos, includeDeclaration, ctx);
+  if (parsed.language === 'msg' && parsed.tree) return msgReferencesAt(parsed, pos, includeDeclaration, ctx);
+  if (parsed.language === 'ini' && parsed.ini) return iniReferencesAt(parsed, pos, includeDeclaration, ctx);
+  return [];
+}
+
+function nedReferencesAt(parsed: ParsedDocument, pos: Position, includeDeclaration: boolean, ctx: IndexContext): Location[] {
   const file = ctx.nedCache.getFile(parsed.uri);
-  if (!file) return [];
+  if (!file || !parsed.tree) return [];
   const refs = nedReferences(ctx.nedCache, file, file.tree, pos, includeDeclaration, (fq) =>
     ctx.db.findTypeUsages(fq),
   );
@@ -237,7 +252,45 @@ export function computeReferences(
       refs.push({ uri: a.uri, range: a.keyRange });
     }
   }
+  // a NED type used as a network also has references in INI `network=` keys
+  const tref = referenceAt(ctx.nedCache, file, file.tree, pos);
+  const fq = tref?.kind === 'typedef' ? tref.info.fqName : tref?.kind === 'typeref' ? tref.target?.fqName : undefined;
+  if (fq) refs.push(...ctx.db.findConfigsForNetwork(fq));
   return refs;
+}
+
+/** Symmetric references from a MSG type: NED @class/@signal, MSG subtypes + field types. */
+function msgReferencesAt(parsed: ParsedDocument, pos: Position, includeDeclaration: boolean, ctx: IndexContext): Location[] {
+  const file = ctx.msgCache.getFile(parsed.uri);
+  if (!file || !parsed.tree) return [];
+  const t = msgTypeAt(ctx.msgCache, file, file.tree, pos);
+  if (!t) return [];
+  const refs = ctx.db.index.inboundOf(msgTypeSym(t.fqName)).map((e) => e.src);
+  if (includeDeclaration) {
+    const decl = ctx.db.index.defOf(msgTypeSym(t.fqName))?.decl;
+    if (decl) refs.push(decl);
+  }
+  return refs;
+}
+
+/** Symmetric references from an INI `network=`: the NED type's usages + configs. */
+function iniReferencesAt(parsed: ParsedDocument, pos: Position, includeDeclaration: boolean, ctx: IndexContext): Location[] {
+  if (!parsed.ini) return [];
+  for (const section of parsed.ini.sections) {
+    for (const e of section.entries) {
+      if (e.key !== 'network' || !e.value) continue;
+      if (!posInRange(pos, e.keyRange) && !posInRange(pos, e.valueRange)) continue;
+      const net = resolveNetworkType(ctx.nedCache, e.value);
+      if (!net) return [];
+      const refs = [...ctx.db.findTypeUsages(net.fqName), ...ctx.db.findConfigsForNetwork(net.fqName)];
+      if (includeDeclaration) {
+        const decl = ctx.db.index.defOf(nedTypeSym(net.fqName))?.decl;
+        if (decl) refs.push(decl);
+      }
+      return refs;
+    }
+  }
+  return [];
 }
 
 /**

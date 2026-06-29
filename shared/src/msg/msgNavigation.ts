@@ -18,6 +18,19 @@ function refTypeNameAt(tree: Tree, pos: Position): { node: SyntaxNode; isDef: bo
   return null;
 }
 
+/** The MSG type declared or referenced at a position (for references / rename). */
+export function msgTypeAt(
+  cache: MsgResourceCache,
+  file: MsgFileInfo,
+  tree: Tree,
+  pos: Position,
+): MsgTypeInfo | undefined {
+  const r = refTypeNameAt(tree, pos);
+  if (!r) return undefined;
+  if (r.isDef) return cache.typeInfoForNode(r.node.parent!, file.uri);
+  return cache.lookupType(coreTypeName(r.node.text), file.namespace);
+}
+
 export function msgDefinition(
   cache: MsgResourceCache,
   file: MsgFileInfo,
