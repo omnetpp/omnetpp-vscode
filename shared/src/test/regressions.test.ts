@@ -10,6 +10,7 @@ import { nedRename } from '../ned/nedRename';
 import { nedDefinition, paramRefAt, connectionRefAt } from '../ned/nedNavigation';
 import { parseIni } from '../ini/iniDocument';
 import { leadingDocComment } from '../ned/nedAst';
+import { treeFoldingRanges } from '../features/folding';
 
 // review fix: expr parser must not crash past EOF (incomplete expressions while typing)
 test('expr parser is EOF-safe on incomplete input', () => {
@@ -141,4 +142,30 @@ test('leadingDocComment: banner yes, trailing no', async () => {
   const trailing = svc.parse('ned', 'package p; // trailing\nsimple A {}');
   const aNode = trailing.rootNode.namedChild(trailing.rootNode.namedChildCount - 1)!;
   assert.equal(leadingDocComment(aNode), undefined);
+});
+
+// grammar change: comments are now one node per `//` line, so a multi-line
+// banner must be re-joined from the run of consecutive comment siblings
+test('leadingDocComment: multi-line banner is joined', async () => {
+  const svc = await getParsers();
+  const t = svc.parse('ned', '//\n// Line one\n// Line two\nsimple A {}');
+  const aNode = t.rootNode.namedChild(t.rootNode.namedChildCount - 1)!;
+  assert.equal(aNode.type, 'simple');
+  assert.equal(leadingDocComment(aNode), 'Line one\nLine two');
+  // a trailing comment above the banner must not leak into it
+  const mixed = svc.parse('ned', 'package p; // trailing\n// Real banner\nsimple A {}');
+  const a2 = mixed.rootNode.namedChild(mixed.rootNode.namedChildCount - 1)!;
+  assert.equal(leadingDocComment(a2), 'Real banner');
+});
+
+// grammar change: a multi-line `//` banner is now a run of per-line comment
+// nodes; folding must group the run into a single comment fold
+test('folding: a multi-line comment block folds as one range', async () => {
+  const svc = await getParsers();
+  const t = svc.parse('ned', '// l0\n// l1\n// l2\nsimple A {}');
+  const ranges = treeFoldingRanges(t);
+  const commentFold = ranges.find((r) => r.kind === 'comment');
+  assert.ok(commentFold, 'expected a comment folding range');
+  assert.equal(commentFold.startLine, 0);
+  assert.equal(commentFold.endLine, 2);
 });

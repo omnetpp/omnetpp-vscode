@@ -72,6 +72,20 @@ test('MSG document symbols', async () => {
   assert.deepEqual(syms[1].children?.map((c) => c.name), ['A', 'B']);
 });
 
+// grammar adds property_key/property_value nodes; surface @properties in the outline
+test('MSG document symbols include @properties', async () => {
+  const svc = await getParsers();
+  const tree = svc.parse(
+    'msg',
+    'message Foo {\n  @customize(true);\n  @display("i=block/cog");\n  int len;\n}',
+  );
+  const syms = msgDocumentSymbols(tree);
+  const props = syms[0].children?.filter((c) => c.name.startsWith('@'));
+  assert.deepEqual(props?.map((c) => c.name), ['@customize', '@display']);
+  const display = props?.find((c) => c.name === '@display');
+  assert.equal(display?.detail, '"i=block/cog"');
+});
+
 test('INI parsing, symbols and duplicate-key check', () => {
   const ini = `network = Foo
 [Config Base]

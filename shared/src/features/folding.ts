@@ -1,4 +1,4 @@
-import type { Tree, SyntaxNode } from 'web-tree-sitter';
+import type { Tree, Node as SyntaxNode } from 'web-tree-sitter';
 import type { IniDocument } from '../ini/iniDocument';
 
 export interface FoldingRange {
@@ -25,10 +25,32 @@ export function treeFoldingRanges(tree: Tree): FoldingRange[] {
       const end = node.endPosition.row;
       if (end > start) ranges.push({ startLine: start, endLine: end });
     }
-    if (node.type === 'comment' && node.endPosition.row > node.startPosition.row) {
-      ranges.push({ startLine: node.startPosition.row, endLine: node.endPosition.row, kind: 'comment' });
+    // The grammar emits one `comment` node per `//` line, so fold a run of
+    // consecutive comment siblings (a banner block) that spans multiple lines.
+    // A single multi-row comment node (`\`-continued) still folds on its own.
+    let runStart: SyntaxNode | null = null;
+    let runEnd: SyntaxNode | null = null;
+    const flush = () => {
+      if (runStart && runEnd && runEnd.endPosition.row > runStart.startPosition.row) {
+        ranges.push({ startLine: runStart.startPosition.row, endLine: runEnd.endPosition.row, kind: 'comment' });
+      }
+      runStart = runEnd = null;
+    };
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const c = node.namedChild(i)!;
+      if (c.type === 'comment') {
+        if (runEnd && c.startPosition.row === runEnd.endPosition.row + 1) {
+          runEnd = c; // contiguous with the current run
+        } else {
+          flush();
+          runStart = runEnd = c;
+        }
+      } else {
+        flush();
+      }
+      visit(c);
     }
-    for (let i = 0; i < node.namedChildCount; i++) visit(node.namedChild(i)!);
+    flush();
   };
   visit(tree.rootNode);
   return ranges;

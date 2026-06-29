@@ -32,6 +32,23 @@ test('type inference', () => {
   assert.equal(inferType(parseExpression('x + 1')).type, 'unknown'); // param ref
 });
 
+// grammar fix: NED's real operators are `##` (logical XOR) and `=~` (match),
+// not `^^`/`match`; hex int literals (0xFF) are also valid
+test('expression layer: ##, =~ and hex literals', () => {
+  assert.equal(inferType(parseExpression('a ## b')).type, 'bool');
+  assert.equal(inferType(parseExpression('name =~ "pat*"')).type, 'bool');
+  const hex = parseExpression('0xFF') as any;
+  assert.equal(hex.kind, 'num');
+  assert.equal(hex.value, 255);
+  assert.equal(hex.isInt, true);
+  assert.equal(inferType(parseExpression('0x10')).type, 'int');
+  // `##` binds looser than `&&` (XOR vs AND), mirroring ned2.y precedence
+  const e = parseExpression('a && b ## c') as any;
+  assert.equal(e.kind, 'binary');
+  assert.equal(e.op, '##');
+  assert.equal(e.left.op, '&&');
+});
+
 test('NED value diagnostics catch clear mismatches', async () => {
   const svc = await getParsers();
   const t = svc.parse('ned', `simple S {

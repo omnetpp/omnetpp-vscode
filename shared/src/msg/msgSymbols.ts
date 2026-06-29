@@ -1,14 +1,17 @@
-import type { SyntaxNode, Tree } from 'web-tree-sitter';
+import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
 import { DocumentSymbol, SymbolKind } from '../model/symbols';
 import { nodeRange } from '../parser/treeUtils';
 import { childrenOfType } from '../parser/treeUtils';
 import {
+  MsgPropertyInfo,
   MsgTypeKind,
   msgBodyNode,
   msgFieldInfo,
   msgFieldNodes,
   msgNameNode,
+  msgPropertyInfo,
   msgTopLevelTypes,
+  msgTypeProperties,
 } from './msgAst';
 
 function kindOf(node: SyntaxNode): { kind: SymbolKind; detail: string } {
@@ -59,6 +62,17 @@ function typeSymbol(node: SyntaxNode): DocumentSymbol {
     }
   }
 
+  for (const p of msgTypeProperties(node)) {
+    const info = msgPropertyInfo(p);
+    children.push({
+      name: '@' + info.name + (info.index ? `[${info.index}]` : ''),
+      detail: propDetail(info),
+      kind: SymbolKind.Property,
+      range: nodeRange(p),
+      selectionRange: nodeRange(msgNameNode(p) ?? p),
+    });
+  }
+
   return {
     name: nameNode?.text ?? '<anonymous>',
     detail,
@@ -67,6 +81,13 @@ function typeSymbol(node: SyntaxNode): DocumentSymbol {
     selectionRange: nodeRange(nameNode ?? node),
     children,
   };
+}
+
+/** A short, human-readable rendering of a property's parenthesized value(s). */
+function propDetail(info: MsgPropertyInfo): string | undefined {
+  if (info.tag) return info.tag;
+  const parts = info.keys.map((k) => (k.name ? `${k.name}=` : '') + k.values.join(','));
+  return parts.length ? parts.join('; ') : undefined;
 }
 
 function nameOf(node: SyntaxNode): SyntaxNode | null {

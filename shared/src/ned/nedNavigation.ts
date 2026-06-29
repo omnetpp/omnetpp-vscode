@@ -1,4 +1,4 @@
-import type { SyntaxNode, Tree } from 'web-tree-sitter';
+import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
 import type { Location, Position, Range } from '../model/location';
 import { ancestorOfType, namedDescendantAt, nodeRange } from '../parser/treeUtils';
 import { NedResourceCache, NedFileInfo } from './nedResourceCache';
@@ -6,6 +6,16 @@ import { NedTypeInfo } from './nedTypeInfo';
 import { NED_TYPE_NODES, isTypeNode, nameNode, paramInfo } from './nedAst';
 
 const TYPEREF_NODES = ['extends', 'implements', 'like_type'];
+
+/**
+ * A connection endpoint module-part (`a` in `a.out --> b.in`) is aliased to the
+ * `module` node type even though it is not a type definition. The grammar places
+ * it under the connection's `src`/`dest` field, so its parent disambiguates it
+ * from a real compound-module definition.
+ */
+function isConnectionEndpointModule(n: SyntaxNode): boolean {
+  return n.type === 'module' && (n.parent?.type === 'src' || n.parent?.type === 'dest');
+}
 
 /** fq-name of the topmost compound/network ancestor of a node, for inner lookups. */
 export function topmostCompoundFq(
@@ -16,7 +26,7 @@ export function topmostCompoundFq(
   let fq: string | undefined;
   let cur: SyntaxNode | null = node;
   while (cur) {
-    if (cur.type === 'module' || cur.type === 'network') {
+    if ((cur.type === 'module' || cur.type === 'network') && !isConnectionEndpointModule(cur)) {
       const f = cache.getFqNameForNode(cur, uri);
       if (f) fq = f; // keep going up; last assignment = topmost
     }
@@ -184,7 +194,7 @@ function enclosingTypeInfo(
 ): NedTypeInfo | undefined {
   let cur: SyntaxNode | null = node;
   while (cur) {
-    if (isTypeNode(cur)) {
+    if (isTypeNode(cur) && !isConnectionEndpointModule(cur)) {
       const info = cache.typeInfoForNode(cur, uri);
       if (info) return info;
     }
@@ -216,7 +226,7 @@ export function connectionRefAt(
   }
   // gate reference (a `name` inside a `gate` part)
   if (node.parent?.type === 'gate') {
-    const sd = node.parent.parent; // src or dest
+    const sd = ancestorOfType(node, ['src', 'dest']); // the connection endpoint
     const modNode = sd ? childByType(sd, 'module') : null;
     const modName = modNode ? childByType(modNode, 'name')?.text : undefined;
     let owner: NedTypeInfo | undefined = compound;

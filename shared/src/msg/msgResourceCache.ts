@@ -1,4 +1,4 @@
-import type { Tree, SyntaxNode } from 'web-tree-sitter';
+import type { Tree, Node as SyntaxNode } from 'web-tree-sitter';
 import { MsgKind, MsgTypeInfo } from './msgTypeInfo';
 import { msgNameNode, msgNamespaceNode, msgTopLevelTypes } from './msgAst';
 import { childrenOfType } from '../parser/treeUtils';

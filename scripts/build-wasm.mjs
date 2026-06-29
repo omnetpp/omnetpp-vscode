@@ -22,8 +22,11 @@ for (const g of grammars) {
     process.exit(1);
   }
   console.log(`Building ${g.name} WASM...`);
-  execFileSync(tsCli, ['build-wasm'], { cwd: g.dir, stdio: 'inherit' });
+  // tree-sitter-cli >= 0.22 replaced `build-wasm` with `build --wasm`. Without `-o`
+  // it names the output after the grammar in tree-sitter.json (e.g. omnetpp-ned.wasm),
+  // so pass an explicit path to keep the tree-sitter-<lang>.wasm filenames.
   const wasm = join(g.dir, `${g.name}.wasm`);
+  execFileSync(tsCli, ['build', '--wasm', '-o', wasm], { cwd: g.dir, stdio: 'inherit' });
   copyFileSync(wasm, join(outDir, `${g.name}.wasm`));
   console.log(`  -> ${join(outDir, `${g.name}.wasm`)}`);
 }

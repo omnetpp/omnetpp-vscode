@@ -1,4 +1,4 @@
-import type { SyntaxNode, Tree } from 'web-tree-sitter';
+import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
 import { childrenOfType, firstChildOfType } from '../parser/treeUtils';
 
 /** MSG type definitions (with a body). */
@@ -69,8 +69,54 @@ export function msgFieldInfo(node: SyntaxNode): MsgFieldInfo {
   return {
     node,
     name: firstChildOfType(node, 'name')?.text,
-    type: firstChildOfType(node, 'type')?.text,
+    type: firstChildOfType(node, 'type')?.text?.trim(),
     value: firstChildOfType(node, 'value')?.text,
     isVector: !!firstChildOfType(node, 'vector'),
+  };
+}
+
+// ---- @property support (grammar exposes property / property_key / property_value) ----
+
+/** A `key=value` (or bare `value`) entry inside a property's parentheses. */
+export interface MsgPropertyKey {
+  name?: string;
+  values: string[];
+}
+
+export interface MsgPropertyInfo {
+  node: SyntaxNode;
+  /** Property name without the leading `@` (e.g. `display`, `unit`, `enum`). */
+  name: string;
+  /** Optional `@prop[index]` selector. */
+  index?: string;
+  /** Parenthesized entries, e.g. `@enum(A=1; B=2)` -> two keys. */
+  keys: MsgPropertyKey[];
+  /** Legacy `enum(NAME)` tag, when present. */
+  tag?: string;
+}
+
+/** Direct `@property` children of a container (a type body, or a field). */
+export function msgPropertyNodes(container: SyntaxNode): SyntaxNode[] {
+  return childrenOfType(container, 'property');
+}
+
+/** The `@property` declarations attached to a type (its body-level properties). */
+export function msgTypeProperties(typeNode: SyntaxNode): SyntaxNode[] {
+  const body = msgBodyNode(typeNode);
+  return body ? msgPropertyNodes(body) : [];
+}
+
+export function msgPropertyInfo(node: SyntaxNode): MsgPropertyInfo {
+  const keys: MsgPropertyKey[] = [];
+  for (const key of childrenOfType(node, 'property_key')) {
+    const values = childrenOfType(key, 'property_value').map((v) => v.text.trim());
+    keys.push({ name: firstChildOfType(key, 'name')?.text?.trim(), values });
+  }
+  return {
+    node,
+    name: (firstChildOfType(node, 'name')?.text ?? '').trim(),
+    index: firstChildOfType(node, 'index')?.text?.trim(),
+    keys,
+    tag: firstChildOfType(node, 'tag')?.text?.trim(),
   };
 }

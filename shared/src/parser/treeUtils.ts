@@ -1,4 +1,4 @@
-import type { SyntaxNode, Tree, Point } from 'web-tree-sitter';
+import type { Node as SyntaxNode, Tree, Point } from 'web-tree-sitter';
 import type { Position, Range } from '../model/location';
 
 export function pointToPosition(p: Point): Position {
@@ -19,13 +19,14 @@ export function positionToPoint(pos: Position): Point {
 /** The smallest named node containing the given position. */
 export function namedDescendantAt(tree: Tree, pos: Position): SyntaxNode {
   const p = positionToPoint(pos);
-  return tree.rootNode.namedDescendantForPosition(p);
+  // the root node contains every in-range position, so this is never null in practice
+  return tree.rootNode.namedDescendantForPosition(p)!;
 }
 
 /** The smallest node (named or anonymous) containing the given position. */
 export function descendantAt(tree: Tree, pos: Position): SyntaxNode {
   const p = positionToPoint(pos);
-  return tree.rootNode.descendantForPosition(p);
+  return tree.rootNode.descendantForPosition(p)!;
 }
 
 /** All direct named children of a given type. */
@@ -44,6 +45,16 @@ export function firstChildOfType(node: SyntaxNode, type: string): SyntaxNode | n
     if (c.type === type) return c;
   }
   return null;
+}
+
+/** The child reached via a grammar `field()` name, if present. */
+export function childByField(node: SyntaxNode, field: string): SyntaxNode | null {
+  return node.childForFieldName(field);
+}
+
+/** All children reached via a grammar `field()` name. */
+export function childrenByField(node: SyntaxNode, field: string): SyntaxNode[] {
+  return node.childrenForFieldName(field).filter((c): c is SyntaxNode => c != null);
 }
 
 /** Depth-first walk over all named descendants (inclusive of node). */
@@ -70,7 +81,7 @@ export function collectSyntaxErrors(tree: Tree): SyntaxNode[] {
   const stack: SyntaxNode[] = [tree.rootNode];
   while (stack.length) {
     const n = stack.pop()!;
-    if (n.type === 'ERROR' || n.isMissing()) {
+    if (n.type === 'ERROR' || n.isMissing) {
       errors.push(n);
       // do not descend into ERROR subtrees to avoid noise
       if (n.type === 'ERROR') continue;

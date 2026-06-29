@@ -1,4 +1,4 @@
-import type { SyntaxNode, Tree } from 'web-tree-sitter';
+import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
 import type { TextEdit } from '../model/location';
 import { NedResourceCache, NedFileInfo, importToRegex } from './nedResourceCache';
 import { importNodes, packageNode } from './nedAst';

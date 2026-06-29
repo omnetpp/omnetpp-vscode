@@ -1,4 +1,4 @@
-import type { Tree, SyntaxNode } from 'web-tree-sitter';
+import type { Tree, Node as SyntaxNode } from 'web-tree-sitter';
 import { Diagnostic, DiagnosticSeverity } from '../model/location';
 import { nodeRange, childrenOfType, firstChildOfType } from '../parser/treeUtils';
 import { MsgResourceCache, coreTypeName } from './msgResourceCache';

@@ -1,4 +1,4 @@
-import type { SyntaxNode } from 'web-tree-sitter';
+import type { Node as SyntaxNode } from 'web-tree-sitter';
 import type { Tree } from 'web-tree-sitter';
 import type { Position, Range, TextEdit, WorkspaceEdit } from '../model/location';
 import { nodeRange } from '../parser/treeUtils';

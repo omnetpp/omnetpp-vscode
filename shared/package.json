@@ -5,6 +5,6 @@
   "main": "./out/index.js",
   "types": "./out/index.d.ts",
   "dependencies": {
-    "web-tree-sitter": "0.20.8"
+    "web-tree-sitter": "0.25.10"
   }
 }

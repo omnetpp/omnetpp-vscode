@@ -1,5 +1,5 @@
-import type { SyntaxNode, Tree } from 'web-tree-sitter';
-import { childrenOfType, firstChildOfType } from '../parser/treeUtils';
+import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
+import { childrenOfType, firstChildOfType, childByField } from '../parser/treeUtils';
 
 /** tree-sitter node types for the six NED type definitions. */
 export const NED_TYPE_NODES = [
@@ -178,10 +178,11 @@ export interface GateInfo {
 }
 
 export function gateInfo(node: SyntaxNode): GateInfo {
+  // the gate direction is exposed via the `direction` field (input|output|inout)
   return {
     node,
     name: nameText(node),
-    type: firstChildOfType(node, 'type')?.text,
+    type: (childByField(node, 'direction') ?? firstChildOfType(node, 'type'))?.text,
     isVector: !!firstChildOfType(node, 'vector'),
   };
 }
@@ -212,13 +213,25 @@ export function submoduleInfo(node: SyntaxNode): SubmoduleInfo {
  * Returns the comment text with leading // markers stripped.
  */
 export function leadingDocComment(node: SyntaxNode): string | undefined {
-  const prev = node.previousNamedSibling;
-  if (!prev || prev.type !== 'comment') return undefined;
-  // exclude a trailing comment that shares a line with the previous statement
-  // (e.g. `package foo; // not a banner`), which would otherwise leak as doc
-  const before = prev.previousNamedSibling;
-  if (before && before.endPosition.row === prev.startPosition.row) return undefined;
-  return stripCommentMarkers(prev.text);
+  // The grammar emits one `comment` node per `//` line, so a multi-line banner
+  // is a run of consecutive `comment` siblings. Walk backward over that run,
+  // stopping at a non-contiguous gap or a trailing comment that shares its line
+  // with a preceding statement (e.g. `package foo; // not a banner`).
+  const lines: SyntaxNode[] = [];
+  let cur: SyntaxNode | null = node.previousNamedSibling;
+  while (
+    cur &&
+    cur.type === 'comment' &&
+    (lines.length === 0 || cur.startPosition.row === lines[lines.length - 1].startPosition.row - 1)
+  ) {
+    const before = cur.previousNamedSibling;
+    if (before && before.type !== 'comment' && before.endPosition.row === cur.startPosition.row) break;
+    lines.push(cur);
+    cur = cur.previousNamedSibling;
+  }
+  if (lines.length === 0) return undefined;
+  lines.reverse();
+  return stripCommentMarkers(lines.map((l) => l.text).join('\n'));
 }
 
 export function stripCommentMarkers(text: string): string {

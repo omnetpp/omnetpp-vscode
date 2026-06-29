@@ -1,4 +1,4 @@
-import type { Tree, SyntaxNode } from 'web-tree-sitter';
+import type { Tree, Node as SyntaxNode } from 'web-tree-sitter';
 import type { Position } from '../model/location';
 import { CompletionItem, CompletionItemKind } from '../model/completion';
 import { ancestorOfType, namedDescendantAt } from '../parser/treeUtils';

@@ -1,9 +1,9 @@
-import type { Tree, SyntaxNode } from 'web-tree-sitter';
+import type { Tree, Node as SyntaxNode } from 'web-tree-sitter';
 import { Diagnostic, DiagnosticSeverity } from '../model/location';
 import { collectSyntaxErrors, nodeRange } from '../parser/treeUtils';
 
 function describe(node: SyntaxNode): string {
-  if (node.isMissing()) {
+  if (node.isMissing) {
     // tree-sitter names missing nodes like: MISSING ";"
     return `Syntax error: missing ${node.type}`;
   }

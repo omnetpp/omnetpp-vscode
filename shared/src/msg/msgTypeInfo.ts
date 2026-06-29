@@ -1,4 +1,4 @@
-import type { SyntaxNode } from 'web-tree-sitter';
+import type { Node as SyntaxNode } from 'web-tree-sitter';
 import type { MsgFileInfo, MsgResourceCache } from './msgResourceCache';
 import { MsgFieldInfo, msgExtendsNode, msgFieldInfo, msgFieldNodes } from './msgAst';
 

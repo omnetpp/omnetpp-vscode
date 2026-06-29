@@ -37,7 +37,7 @@ import {
 } from '../ini/iniParamResolution';
 import { expandNetwork, paramSlots } from '../ini/moduleTree';
 import { parseIni, configSummaries } from '../ini/iniDocument';
-import type { SyntaxNode } from 'web-tree-sitter';
+import type { Node as SyntaxNode } from 'web-tree-sitter';
 
 /** The index + capabilities a tool handler needs. Supplied by each adapter. */
 export interface ToolContext {

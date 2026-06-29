@@ -39,7 +39,7 @@ export function inferType(node: ExprNode): { type: ValueType; unit?: string } {
       return inferType(node.operand); // unary minus preserves numeric
     case 'binary': {
       const op = node.op;
-      if (['==', '!=', '<', '>', '<=', '>=', '&&', '||', '^^', 'match'].includes(op))
+      if (['==', '!=', '<', '>', '<=', '>=', '&&', '||', '^^', '##', 'match', '=~'].includes(op))
         return { type: 'bool' };
       if (['<<', '>>', '&', '|', '#', '%'].includes(op)) return { type: 'int' };
       // arithmetic: int if both int, else double; carry unit if present

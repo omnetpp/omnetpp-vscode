@@ -6,6 +6,6 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@omnetpp/shared": "0.1.0",
-    "web-tree-sitter": "0.20.8"
+    "web-tree-sitter": "0.25.10"
   }
 }

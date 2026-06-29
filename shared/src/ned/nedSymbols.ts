@@ -1,4 +1,4 @@
-import type { SyntaxNode, Tree } from 'web-tree-sitter';
+import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
 import { DocumentSymbol, SymbolKind } from '../model/symbols';
 import { nodeRange } from '../parser/treeUtils';
 import {

@@ -2,8 +2,12 @@
   "compilerOptions": {
     "target": "ES2021",
     "lib": ["ES2021"],
-    "module": "CommonJS",
-    "moduleResolution": "Node",
+    // web-tree-sitter (and the MCP SDK) expose their entry/subpaths via package.json
+    // "exports" maps, which only node16/nodenext resolution understands. These packages
+    // have no "type":"module", so tsc still emits CommonJS — esbuild bundles and the
+    // node:test runner (over shared/out/) keep working as before.
+    "module": "node16",
+    "moduleResolution": "node16",
     "composite": true,
     "declaration": true,
     "declarationMap": true,
