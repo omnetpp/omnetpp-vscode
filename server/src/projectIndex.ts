@@ -5,6 +5,7 @@ import {
   BUILTIN_URI,
   ConfigRegistry,
   FileSystem,
+  IniResourceCache,
   MsgResourceCache,
   NedResourceCache,
   ParserService,
@@ -36,6 +37,7 @@ export class ProjectIndex {
   readonly cache = new NedResourceCache();
   readonly msgCache = new MsgResourceCache();
   readonly configRegistry = new ConfigRegistry();
+  readonly iniCache = new IniResourceCache();
   /** Unified query surface over the caches + cross-reference graph. */
   readonly db = new SemanticDatabase(this.cache, this.msgCache, this.configRegistry);
   private layout: ProjectLayout = { roots: [], excludedPackages: [] };
@@ -114,15 +116,23 @@ export class ProjectIndex {
     }
   }
 
-  /** Record an INI file's named-config count for status reporting. */
+  /** Index an INI file into the workspace INI cache + record its config count. */
   async indexIniFile(fsPath: string): Promise<void> {
     const uri = pathToFileURL(fsPath).toString();
+    if (this.isOpen(uri)) return; // open buffer owns the cache entry
     let text: string;
     try {
       text = await this.fs.readFile(fsPath);
     } catch {
       return;
     }
+    this.iniCache.addFile(uri, text);
+    this.iniConfigCounts.set(uri, configSummaries(parseIni(text)).length);
+  }
+
+  /** Update the INI index from an open document's text (for reverse queries). */
+  updateOpenIniDocument(uri: string, text: string): void {
+    this.iniCache.addFile(uri, text);
     this.iniConfigCounts.set(uri, configSummaries(parseIni(text)).length);
   }
 
@@ -179,6 +189,7 @@ export class ProjectIndex {
   /** Re-read a changed file from disk; remove if deleted or gone. */
   async onFileChanged(uri: string, deleted: boolean): Promise<void> {
     const isMsg = uri.endsWith('.msg');
+    const isIni = uri.endsWith('.ini');
     let fsPath: string | undefined;
     try {
       fsPath = fileURLToPath(uri);
@@ -187,13 +198,17 @@ export class ProjectIndex {
     }
     if (deleted || !(await this.fs.exists(fsPath))) {
       if (isMsg) this.msgCache.removeFile(uri);
-      else {
+      else if (isIni) {
+        this.iniCache.removeFile(uri);
+        this.iniConfigCounts.delete(uri);
+      } else {
         this.cache.removeFile(uri);
         this.db.dropFile(uri);
       }
       return;
     }
     if (isMsg) await this.indexMsgFile(fsPath);
+    else if (isIni) await this.indexIniFile(fsPath);
     else await this.indexFile(fsPath);
   }
 
@@ -201,6 +216,7 @@ export class ProjectIndex {
   async reindex(workspaceFolders: string[], nedPathDirs: string[]): Promise<void> {
     this.cache.clear();
     this.msgCache.clear();
+    this.iniCache.clear();
     this.db.clear();
     await this.initialize(workspaceFolders, nedPathDirs);
   }

@@ -61,8 +61,18 @@ function norm(s: string): string {
   return s.replace(/\[[^\]]*\]/g, '[]');
 }
 
-/** Expand the module tree of a network into module nodes with their parameters. */
-export function expandNetwork(cache: NedResourceCache, root: NedTypeInfo): ExpandResult {
+/**
+ * Expand the module tree of a network into module nodes with their parameters.
+ * When `typenameFor` is supplied, a `like` submodule whose `typename` is bound
+ * (typically by an INI `**.x.typename = T` assignment) is resolved to its concrete
+ * type and expanded fully (the subtree is no longer `open`), while still exposing
+ * `typename` as an assignable pseudo-parameter.
+ */
+export function expandNetwork(
+  cache: NedResourceCache,
+  root: NedTypeInfo,
+  typenameFor?: (slotNorm: string) => string | undefined,
+): ExpandResult {
   const modules: ModuleNode[] = [];
   let nodeCount = 0;
   let truncated = false;
@@ -100,9 +110,22 @@ export function expandNetwork(cache: NedResourceCache, root: NedTypeInfo): Expan
       const subPath = `${path}.${subName}${vec}`;
       // 'typename' is assignable for `like` submodules
       if (sub.isLike) {
-        // expose 'typename' as a param of the parent path's submodule node
         const iface = sub.likeType ? cache.lookupType(sub.likeType, type.file, type.fqName) : undefined;
-        // the submodule node is open (concrete type unknown), but typename is valid
+        // if the concrete type is bound (e.g. via an INI typename assignment),
+        // resolve through the `like` boundary and expand it fully.
+        const chosen = typenameFor?.(norm(subPath));
+        const concrete = chosen ? cache.lookupLikeType(chosen, iface) : undefined;
+        if (concrete) {
+          const idx = modules.length;
+          visit(concrete, subPath, nextStack, depth + 1, false);
+          const node = modules[idx];
+          if (node && node.path === subPath) {
+            node.params.set('typename', 'string'); // keep typename assignable
+            node.defaulted.add('typename');
+          }
+          continue;
+        }
+        // otherwise the submodule node is open (concrete type unknown), typename valid
         visitLike(iface, subPath, nextStack, depth + 1);
         continue;
       }

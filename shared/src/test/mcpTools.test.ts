@@ -9,6 +9,7 @@ import {
   MsgResourceCache,
   ConfigRegistry,
   SemanticDatabase,
+  IniResourceCache,
   handleTool,
   OMNETPP_TOOLS,
   ToolContext,
@@ -61,11 +62,14 @@ async function buildCtx(): Promise<ToolContext> {
     nedCache.addFile(uri, svc.parse('ned', text), '');
     db.onNedFile(uri);
   }
+  const iniCache = new IniResourceCache();
+  iniCache.addFile(pathToFileURL(INI_PATH).toString(), INI_TEXT);
   return {
     nedCache,
     msgCache,
     configRegistry,
     db,
+    iniCache,
     fs: memFs,
     parsers: svc,
     toUri: (p) => (/^[a-z][a-z0-9+.-]*:\/\//i.test(p) ? p : pathToFileURL(p).toString()),

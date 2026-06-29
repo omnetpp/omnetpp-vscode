@@ -1,5 +1,6 @@
-import { Diagnostic, DiagnosticSeverity, Location } from '../model/location';
+import { Diagnostic, DiagnosticSeverity, Location, Range } from '../model/location';
 import { NedResourceCache } from '../ned/nedResourceCache';
+import type { IniResourceCache } from './iniResourceCache';
 import { NedTypeInfo } from '../ned/nedTypeInfo';
 import { nameNode } from '../ned/nedAst';
 import { nodeRange } from '../parser/treeUtils';
@@ -87,6 +88,54 @@ export function configEntriesInScope(
   return out;
 }
 
+/**
+ * The `*.typename` assignment entries visible to a section (own + extends + General).
+ * These bind `like` submodule slots to concrete types during network expansion.
+ * No registry needed — a `typename` leaf is always a parameter assignment.
+ */
+export function collectTypenameEntries(doc: IniDocument, section: IniSection): IniEntry[] {
+  const out: IniEntry[] = [];
+  const seen = new Set<string>();
+  const visit = (sec: IniSection | undefined) => {
+    if (!sec || seen.has(sec.rawName)) return;
+    seen.add(sec.rawName);
+    for (const e of sec.entries) {
+      const dot = e.key.lastIndexOf('.');
+      const leaf = dot < 0 ? e.key : e.key.slice(dot + 1);
+      if (leaf === 'typename') out.push(e);
+    }
+    for (const base of sec.extends) visit(findSection(doc, base));
+  };
+  visit(section);
+  visit(generalSection(doc));
+  return out;
+}
+
+/** A resolver from a `like`-slot norm path to its bound concrete type name. */
+export interface TypenameBindings {
+  resolve: (slotNorm: string) => string | undefined;
+  /** stable digest of the bindings, for the expansion cache key. */
+  digest: string;
+}
+
+/** Compile typename entries into bindings (first match wins, OMNeT++ precedence). */
+export function buildTypenameBindings(entries: IniEntry[]): TypenameBindings {
+  const compiled: { re: RegExp; value: string }[] = [];
+  const parts: string[] = [];
+  for (const e of entries) {
+    const dot = e.key.lastIndexOf('.');
+    const prefix = dot < 0 ? '' : e.key.slice(0, dot); // module-path pattern
+    const value = e.value.replace(/^"|"$/g, '').trim();
+    if (!value) continue;
+    compiled.push({ re: iniKeyToRegex(prefix), value });
+    parts.push(`${normIndices(prefix)}=${value}`);
+  }
+  return {
+    resolve: (slotNorm) => compiled.find((c) => c.re.test(slotNorm))?.value,
+    digest: parts.join(';'),
+  };
+}
+
 /** Resolves a normalized parameter path to its winning INI assignment, if any. */
 export type ConfigResolve = (normPath: string) => IniEntry | undefined;
 
@@ -111,17 +160,21 @@ export function resolveNetworkType(cache: NedResourceCache, name: string): NedTy
 // expansion cache, scoped per resource-cache instance and keyed by (generation, fqName)
 const expandCache = new WeakMap<NedResourceCache, Map<string, ExpandResult>>();
 
-function getExpansion(cache: NedResourceCache, net: NedTypeInfo): ExpandResult {
+function getExpansion(
+  cache: NedResourceCache,
+  net: NedTypeInfo,
+  bindings?: TypenameBindings,
+): ExpandResult {
   let perCache = expandCache.get(cache);
   if (!perCache) {
     perCache = new Map();
     expandCache.set(cache, perCache);
   }
-  const key = `${cache.generation}:${net.fqName}`;
+  const key = `${cache.generation}:${net.fqName}:${bindings?.digest ?? ''}`;
   let r = perCache.get(key);
   if (!r) {
     if (perCache.size > 128) perCache.clear();
-    r = expandNetwork(cache, net);
+    r = expandNetwork(cache, net, bindings?.resolve);
     perCache.set(key, r);
   }
   return r;
@@ -145,7 +198,8 @@ export function iniParamDiagnostics(
     const net = resolveNetworkType(cache, netName);
     if (!net) continue;
 
-    const expansion = getExpansion(cache, net);
+    const bindings = buildTypenameBindings(collectTypenameEntries(doc, section));
+    const expansion = getExpansion(cache, net, bindings);
     const params = paramSlots(expansion);
 
     for (const e of section.entries) {
@@ -277,7 +331,8 @@ export function addMissingKeys(
     if (!netName) continue;
     const net = resolveNetworkType(cache, netName);
     if (!net) continue;
-    const slots = paramSlots(getExpansion(cache, net));
+    const bindings = buildTypenameBindings(collectTypenameEntries(doc, section));
+    const slots = paramSlots(getExpansion(cache, net, bindings));
     const keyRes = scopeParamKeys(doc, section).map((k) => iniKeyToRegex(k));
     const missing: string[] = [];
     const seen = new Set<string>();
@@ -312,7 +367,8 @@ export function iniParamDefinition(
   const re = iniKeyToRegex(key);
   const out: Location[] = [];
   const seen = new Set<string>();
-  for (const m of getExpansion(cache, net).modules) {
+  const bindings = buildTypenameBindings(collectTypenameEntries(doc, section));
+  for (const m of getExpansion(cache, net, bindings).modules) {
     if (!m.typeInfo || !m.params.has(leaf)) continue;
     if (!re.test(`${m.norm}.${leaf}`)) continue;
     const decl = m.typeInfo.paramDecl(leaf);
@@ -322,6 +378,82 @@ export function iniParamDefinition(
     if (seen.has(locKey)) continue;
     seen.add(locKey);
     out.push({ uri: decl.owner.file.uri, range: nodeRange(nn) });
+  }
+  return out;
+}
+
+/** One INI assignment that targets a given NED parameter declaration. */
+export interface ParamAssignment {
+  uri: string;
+  /** config name, or 'General'. */
+  config: string;
+  key: string;
+  value: string;
+  keyRange: Range;
+  /** the normalized instance path the key matched. */
+  matchedPath: string;
+  /** true if this entry wins precedence for `matchedPath` in its config. */
+  isWinner: boolean;
+}
+
+/**
+ * Reverse of {@link iniParamDefinition}: every INI key across the workspace that
+ * assigns the NED parameter declared by `(typeFqName, param)`. For each config,
+ * the parameter's declaring type is expanded to its instance paths, then every
+ * in-scope entry whose pattern matches one of those paths is reported (with the
+ * precedence winner flagged). Optionally restricted to a single config.
+ */
+export function findParamAssignments(
+  iniCache: IniResourceCache,
+  cache: NedResourceCache,
+  registry: ConfigRegistry,
+  target: { typeFqName: string; param: string },
+  configFilter?: string,
+): ParamAssignment[] {
+  const out: ParamAssignment[] = [];
+  const seen = new Set<string>();
+  for (const { uri, doc } of iniCache.allDocs()) {
+    for (const section of doc.sections) {
+      const cfgName = section.configName ?? 'General';
+      if (configFilter && cfgName !== configFilter) continue;
+      const netName = effectiveNetwork(doc, section);
+      if (!netName) continue;
+      const net = resolveNetworkType(cache, netName);
+      if (!net) continue;
+      const bindings = buildTypenameBindings(collectTypenameEntries(doc, section));
+      const expansion = getExpansion(cache, net, bindings);
+
+      // instance paths where (typeFqName, param) is declared
+      const targetNorms = new Set<string>();
+      for (const m of expansion.modules) {
+        const decl = m.typeInfo?.paramDecl(target.param);
+        if (decl && decl.owner.fqName === target.typeFqName) {
+          targetNorms.add(`${m.norm}.${target.param}`);
+        }
+      }
+      if (!targetNorms.size) continue;
+
+      const entries = configEntriesInScope(doc, section, registry);
+      const winner = configResolver(entries);
+      for (const e of entries) {
+        const re = iniKeyToRegex(e.key);
+        for (const tn of targetNorms) {
+          if (!re.test(tn)) continue;
+          const dkey = `${uri}|${cfgName}|${e.keyRange.start.line}|${tn}`;
+          if (seen.has(dkey)) continue;
+          seen.add(dkey);
+          out.push({
+            uri,
+            config: cfgName,
+            key: e.key,
+            value: e.value,
+            keyRange: e.keyRange,
+            matchedPath: tn,
+            isWinner: winner(tn) === e,
+          });
+        }
+      }
+    }
   }
   return out;
 }
@@ -351,5 +483,6 @@ export function reachableParamPaths(
   if (!netName) return [];
   const net = resolveNetworkType(cache, netName);
   if (!net) return [];
-  return paramSlots(getExpansion(cache, net)).map((p) => ({ path: p.path, type: p.type }));
+  const bindings = buildTypenameBindings(collectTypenameEntries(doc, section));
+  return paramSlots(getExpansion(cache, net, bindings)).map((p) => ({ path: p.path, type: p.type }));
 }

@@ -14,6 +14,7 @@ import type { NedResourceCache } from '../ned/nedResourceCache';
 import type { MsgResourceCache } from '../msg/msgResourceCache';
 import type { NedTypeInfo } from '../ned/nedTypeInfo';
 import type { SemanticDatabase } from '../xref/semanticDatabase';
+import type { IniResourceCache } from '../ini/iniResourceCache';
 import { ConfigRegistry } from '../ini/configRegistry';
 import { nameNode } from '../ned/nedAst';
 import { nodeRange } from '../parser/treeUtils';
@@ -46,6 +47,8 @@ export interface ToolContext {
   configRegistry: ConfigRegistry;
   /** Unified query surface (caches + cross-reference graph). */
   db: SemanticDatabase;
+  /** Workspace-wide INI index (for reverse param-assignment queries). */
+  iniCache: IniResourceCache;
   fs: FileSystem;
   parsers: ParserService;
   /** Normalize a path-or-uri argument to the URI form the caches are keyed by. */

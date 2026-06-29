@@ -51,6 +51,7 @@ export * from './msg/msgChecks';
 
 // INI
 export * from './ini/iniDocument';
+export * from './ini/iniResourceCache';
 export * from './ini/iniSymbols';
 export * from './ini/iniLocalChecks';
 export * from './ini/configRegistry';

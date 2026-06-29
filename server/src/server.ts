@@ -193,6 +193,7 @@ function refresh(doc: TextDocument): void {
   if (index && parsed.tree) {
     if (parsed.language === 'ned') index.updateOpenDocument(doc.uri, parsed.text);
     else if (parsed.language === 'msg') index.updateOpenMsgDocument(doc.uri, parsed.text);
+    else if (parsed.language === 'ini') index.updateOpenIniDocument(doc.uri, parsed.text);
   }
   const diags = computeDiagnostics(parsed, ctx()) as LspDiagnostic[];
   connection.sendDiagnostics({ uri: doc.uri, diagnostics: diags });
@@ -583,6 +584,7 @@ function mcpCtx(): ToolContext | undefined {
     msgCache: index.msgCache,
     configRegistry: index.configRegistry,
     db: index.db,
+    iniCache: index.iniCache,
     fs: mcpLiveFs,
     parsers,
     toUri: (p) => (/^[a-z][a-z0-9+.-]*:\/\//i.test(p) ? p : pathToFileURL(p).toString()),

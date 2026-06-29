@@ -5,6 +5,7 @@ import {
   BUILTIN_URI,
   ConfigRegistry,
   FileSystem,
+  IniResourceCache,
   MsgResourceCache,
   NedResourceCache,
   ParserService,
@@ -19,6 +20,7 @@ export interface DiskIndex {
   nedCache: NedResourceCache;
   msgCache: MsgResourceCache;
   configRegistry: ConfigRegistry;
+  iniCache: IniResourceCache;
   db: SemanticDatabase;
   layout: ProjectLayout;
 }
@@ -39,6 +41,7 @@ export async function buildDiskIndex(
   const nedCache = new NedResourceCache();
   const msgCache = new MsgResourceCache();
   const configRegistry = new ConfigRegistry();
+  const iniCache = new IniResourceCache();
 
   // built-in NED declarations (ned.IdealChannel, ...)
   nedCache.addFile(BUILTIN_URI, parsers.parse('ned', BUILTIN_NED_TEXT), 'ned');
@@ -95,6 +98,13 @@ export async function buildDiskIndex(
         } catch {
           /* unreadable file */
         }
+      } else if (name.endsWith('.ini')) {
+        const uri = pathToFileURL(full).toString();
+        try {
+          iniCache.addFile(uri, await fs.readFile(full));
+        } catch {
+          /* unreadable file */
+        }
       }
     }
   };
@@ -103,5 +113,5 @@ export async function buildDiskIndex(
   const db = new SemanticDatabase(nedCache, msgCache, configRegistry);
   // populate the cross-reference graph (all types present → immediate resolution)
   for (const f of nedCache.allFiles()) db.onNedFile(f.uri);
-  return { nedCache, msgCache, configRegistry, db, layout };
+  return { nedCache, msgCache, configRegistry, iniCache, db, layout };
 }
