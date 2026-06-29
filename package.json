@@ -318,17 +318,20 @@
       {
         "language": "OMNeT++ NED",
         "scopeName": "source.ned",
-        "path": "./syntaxes/ned.tmLanguage.json"
+        "path": "./syntaxes/ned.tmLanguage.json",
+        "unbalancedBracketScopes": ["comment", "string"]
       },
       {
         "language": "OMNeT++ MSG",
         "scopeName": "source.msg",
-        "path": "./syntaxes/omnetpp-msg.tmLanguage.json"
+        "path": "./syntaxes/omnetpp-msg.tmLanguage.json",
+        "unbalancedBracketScopes": ["comment", "string"]
       },
       {
         "language": "OMNeT++ INI",
         "scopeName": "source.omnetpp-ini",
-        "path": "./syntaxes/omnetpp-ini.tmLanguage.json"
+        "path": "./syntaxes/omnetpp-ini.tmLanguage.json",
+        "unbalancedBracketScopes": ["comment", "string"]
       }
     ],
     "configuration": {
