@@ -4,7 +4,31 @@
 
 - Ned: added 'parent' keyword
 
-## 0.1.0
+## 0.3.0
+
+- **Cross-reference graph** spanning NED ⇄ MSG ⇄ INI: a single semantic database that
+  powers reverse queries (who references a type, what a config runs, which INI keys assign
+  a parameter)
+- **Impact analysis** — "Show Impact (Reverse Dependencies)": the transitive set of types,
+  configs, and files that break if you change a given type
+- **"Used By" reverse-dependency tree view** (pinnable), showing what depends on the
+  selected type
+- **Cross-language Find All References, safe rename, and a workspace symbol provider**
+  (`Ctrl+T`) that span NED and MSG
+- **CodeLens with cross-reference counts** and cross-reference diagnostics with
+  "did-you-mean" quick-fixes
+- **MCP server for AI agents** — 22 read/refactor tools over the semantic model, available
+  both as a standalone stdio server (`opp_ide_mcp`) and as a live in-editor bridge that
+  reflects unsaved buffers
+- **Standalone command-line linter** (`opp_lint`) — the same analyzers for CI, pre-commit
+  hooks, and scripts, with text/JSON output and configurable exit codes
+- **Inline diagnostic-suppression directives** (`//# suppress(code)` for NED/MSG,
+  `### suppress(code)` for INI) with a lightbulb quick-fix
+- **Workspace-wide diagnostics**: problems in files that aren't open in an editor still
+  appear in the Problems view (configurable via `omnetpp.diagnostics.scope`)
+- Build/test/package toolchain migrated to **Bun only** (no Node.js or npm required for
+  development)
+
 
 - Added a full language server (pure TypeScript on tree-sitter, no OMNeT++ install required)
 - NED: diagnostics (syntax, duplicates, unknown/inheritance/type checks, value type checks),
