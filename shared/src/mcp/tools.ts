@@ -21,6 +21,7 @@ import { nodeRange } from '../parser/treeUtils';
 import { nedRenameType, nedRenameMember } from '../ned/nedRename';
 import { organizeImports } from '../ned/nedOrganizeImports';
 import { syntaxDiagnostics } from '../features/syntaxDiagnostics';
+import { filterSuppressedDiagnostics } from '../diagnostics/suppress';
 import { nedLocalDiagnostics } from '../ned/nedLocalChecks';
 import { nedValueDiagnostics } from '../ned/nedValueChecks';
 import { nedSemanticDiagnostics } from '../ned/nedSemanticChecks';
@@ -148,6 +149,7 @@ async function readText(uri: string, ctx: ToolContext): Promise<string> {
 
 async function getDiagnostics(uri: string, ctx: ToolContext): Promise<{ uri: string; diagnostics: any[] }> {
   const diags: Diagnostic[] = [];
+  let filtered: Diagnostic[] = [];
   if (uri.endsWith('.ned')) {
     const f = ctx.nedCache.getFile(uri);
     let tree = f?.tree;
@@ -159,6 +161,8 @@ async function getDiagnostics(uri: string, ctx: ToolContext): Promise<{ uri: str
     try {
       diags.push(...syntaxDiagnostics(tree), ...nedLocalDiagnostics(tree), ...nedValueDiagnostics(tree));
       if (f) diags.push(...nedSemanticDiagnostics(ctx.nedCache, uri));
+      // use the tree's own source so directives match it even for unsaved buffers
+      filtered = filterSuppressedDiagnostics(diags, { language: 'ned', text: tree.rootNode.text, tree });
     } finally {
       owned?.delete();
     }
@@ -173,11 +177,13 @@ async function getDiagnostics(uri: string, ctx: ToolContext): Promise<{ uri: str
     try {
       diags.push(...syntaxDiagnostics(tree), ...msgLocalDiagnostics(tree));
       if (f) diags.push(...msgSemanticDiagnostics(ctx.msgCache, uri));
+      filtered = filterSuppressedDiagnostics(diags, { language: 'msg', text: tree.rootNode.text, tree });
     } finally {
       owned?.delete();
     }
   } else if (uri.endsWith('.ini')) {
-    const doc = parseIni(await readText(uri, ctx));
+    const text = await readText(uri, ctx);
+    const doc = parseIni(text);
     diags.push(
       ...iniLocalDiagnostics(doc),
       ...iniVariableDiagnostics(doc),
@@ -185,12 +191,13 @@ async function getDiagnostics(uri: string, ctx: ToolContext): Promise<{ uri: str
       ...iniStructureDiagnostics(doc, ctx.nedCache, ctx.configRegistry),
       ...iniParamDiagnostics(doc, ctx.nedCache, ctx.configRegistry),
     );
+    filtered = filterSuppressedDiagnostics(diags, { language: 'ini', text });
   } else {
     throw new Error(`unsupported file (expected .ned/.msg/.ini): ${uri}`);
   }
   return {
     uri,
-    diagnostics: diags.map((d) => ({ ...d, severityName: severityName(d.severity) })),
+    diagnostics: filtered.map((d) => ({ ...d, severityName: severityName(d.severity) })),
   };
 }
 

@@ -45,7 +45,8 @@ function isEscaped(s: string, i: number): boolean {
   return n % 2 === 1;
 }
 
-function stripComment(line: string): string {
+/** The text before the first *unquoted* `#`; the whole line if there is none. */
+export function stripComment(line: string): string {
   let inStr = false;
   for (let i = 0; i < line.length; i++) {
     const c = line[i];

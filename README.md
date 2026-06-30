@@ -33,6 +33,35 @@ grammars — no OMNeT++ installation required) that provides:
 - Content assist for config options and reachable parameter paths; hover docs for
   config options
 
+### Suppressing diagnostics
+
+Any diagnostic can be silenced in-source with a `suppress(...)` directive that
+names the diagnostic's code (shown in the Problems view / hover), placed either on
+the line **before** the reported line or as a **trailing** comment on it:
+
+- **NED & MSG** use a *private* comment `//#` (kept out of generated docs):
+
+  ```ned
+  //# suppress(duplicate)
+  simple Host { ... }
+
+  channel C extends ned.DatarateChannel { } //# suppress(unknown-type)
+  ```
+
+- **INI** uses a `###` comment:
+
+  ```ini
+  ### suppress(no-matching-param)
+  **.unknownParam = 5
+
+  *.host.x = 5   ### suppress(no-matching-param)
+  ```
+
+`suppress()` with no code silences every diagnostic on the target line;
+`suppress(a, b)` silences several. A lightbulb **Quick Fix** on any diagnostic
+inserts the matching directive for you. (One limitation: for MSG, a trailing
+directive on a *type header* line isn't seen — put it on the line above instead.)
+
 The project model honors `.nedfolders` / `.nedexclusions` / `package.ned`, falling
 back to indexing workspace folders. Extra NED roots can be added via the
 `omnetpp.nedPath` setting; an OMNeT++ install (`omnetpp.installDir` or the
@@ -42,6 +71,7 @@ back to indexing workspace folders. Extra NED roots can be added via the
 
 - `omnetpp.nedPath` — extra NED source root directories (semicolon-separated)
 - `omnetpp.installDir` — OMNeT++ installation root (also indexed for NED)
+- `omnetpp.diagnostics.scope` — `workspace` (default; analyse every file) or `openFiles`
 - `omnetpp.iniAnalysis.enabled` / `omnetpp.iniAnalysis.timeoutMs`
 - `omnetpp.trace.server` — language-server trace level
 

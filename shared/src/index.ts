@@ -5,6 +5,7 @@ export * from './model/completion';
 export * from './parser/parserService';
 export * from './parser/treeUtils';
 export * from './features/syntaxDiagnostics';
+export * from './diagnostics/suppress';
 export * from './features/folding';
 export * from './features/format';
 export * from './features/workspaceSymbols';
