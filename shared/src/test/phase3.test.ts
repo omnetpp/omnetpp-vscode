@@ -3,6 +3,8 @@ import assert from 'node:assert';
 import { getParsers } from './helpers';
 import { BUILTIN_NED_TEXT, BUILTIN_URI, NedResourceCache } from '../ned/nedResourceCache';
 import { nedDefinition, nedHover, nedReferences } from '../ned/nedNavigation';
+import { MsgResourceCache } from '../msg/msgResourceCache';
+import { msgDocRefResolver } from '../msg/msgNavigation';
 import { nedCompletion } from '../ned/nedCompletion';
 import type { Position } from '../model/location';
 
@@ -61,6 +63,55 @@ simple D extends Base { }`;
   assert.ok(hov);
   assert.match(hov!.markdown, /simple Base/);
   assert.match(hov!.markdown, /A great module/);
+});
+
+test('hover linkifies ~Type doc cross-references', async () => {
+  const T = `// See ~Other for details, and ~Missing which does not exist.
+simple Base { }
+simple Other { }`;
+  const cache = await build({ 'file:///x.ned': { text: T } });
+  const file = cache.getFile('file:///x.ned')!;
+  const hov = nedHover(cache, file, file.tree, posOf(T, 'Base { }'));
+  assert.ok(hov);
+  // resolvable ref -> markdown link to the declaration; tilde never rendered
+  assert.match(hov!.markdown, /\[Other\]\(file:\/\/\/x\.ned#L3,8\)/);
+  // unresolvable ref -> bare name, tilde stripped
+  assert.match(hov!.markdown, /and Missing which/);
+  assert.doesNotMatch(hov!.markdown, /~Other|~Missing/);
+});
+
+test('hover resolves a ~Type doc ref by unique simple name across the project', async () => {
+  const main = `package a;
+// related to ~Far and the ambiguous ~Dup
+simple Node { }`;
+  const cache = await build({
+    'file:///main.ned': { text: main },
+    'file:///far.ned': { text: 'package b;\nsimple Far { }' },
+    'file:///dup1.ned': { text: 'package c;\nsimple Dup { }' },
+    'file:///dup2.ned': { text: 'package d;\nsimple Dup { }' },
+  });
+  const file = cache.getFile('file:///main.ned')!;
+  const hov = nedHover(cache, file, file.tree, posOf(main, 'Node { }'));
+  assert.ok(hov);
+  // unique simple name -> linked globally even though main.ned never imports it
+  assert.match(hov!.markdown, /\[Far\]\(file:\/\/\/far\.ned#L2,8\)/);
+  // ambiguous simple name -> stays plain text, no guess
+  assert.match(hov!.markdown, /ambiguous Dup/);
+  assert.doesNotMatch(hov!.markdown, /~Far|~Dup/);
+});
+
+test('hover linkifies a ~MsgType cross-language doc reference', async () => {
+  const T = `// Carries a ~Payload message.
+simple Node { }`;
+  const cache = await build({ 'file:///n.ned': { text: T } });
+  const file = cache.getFile('file:///n.ned')!;
+  const svc = await getParsers();
+  const msgCache = new MsgResourceCache();
+  msgCache.addFile('file:///m.msg', svc.parse('msg', 'packet Payload { }'));
+  const hov = nedHover(cache, file, file.tree, posOf(T, 'Node { }'), msgDocRefResolver(msgCache));
+  assert.ok(hov);
+  assert.match(hov!.markdown, /\[Payload\]\(file:\/\/\/m\.msg#L1,8\)/);
+  assert.doesNotMatch(hov!.markdown, /~Payload/);
 });
 
 test('parameter hover includes trailing and leading doc comments', async () => {

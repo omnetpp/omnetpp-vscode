@@ -1,5 +1,6 @@
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
 import { childrenOfType, firstChildOfType } from '../parser/treeUtils';
+import { stripCommentMarkers } from '../ned/nedAst';
 
 /** MSG type definitions (with a body). */
 export const MSG_TYPE_NODES = ['class', 'struct', 'message', 'packet', 'enum'] as const;
@@ -32,6 +33,21 @@ export function msgExtendsNode(node: SyntaxNode): SyntaxNode | null {
 
 export function msgBodyNode(node: SyntaxNode): SyntaxNode | null {
   return firstChildOfType(node, 'body');
+}
+
+/**
+ * The banner doc comment of a MSG type. Unlike NED (where the comment is a
+ * preceding sibling), the MSG grammar nests the leading `// ...` lines as the
+ * first children of the type node, so gather the run of `comment` children that
+ * precedes the type name and strip the markers.
+ */
+export function msgLeadingDocComment(node: SyntaxNode): string | undefined {
+  const lines: string[] = [];
+  for (const c of node.namedChildren) {
+    if (!c || c.type !== 'comment') break; // the run ends at the type name/keyword
+    lines.push(c.text);
+  }
+  return lines.length ? stripCommentMarkers(lines.join('\n')) : undefined;
 }
 
 export function msgTopLevelTypes(tree: Tree): SyntaxNode[] {

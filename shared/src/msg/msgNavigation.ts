@@ -4,8 +4,9 @@ import { CompletionItem, CompletionItemKind } from '../model/completion';
 import { ancestorOfType, namedDescendantAt, nodeRange } from '../parser/treeUtils';
 import { MsgFileInfo, MsgResourceCache, coreTypeName } from './msgResourceCache';
 import { MsgTypeInfo } from './msgTypeInfo';
-import { isMsgTypeNode, msgNameNode } from './msgAst';
+import { isMsgTypeNode, msgNameNode, msgLeadingDocComment } from './msgAst';
 import { docCommentCompletion } from '../ned/nedCompletion';
+import { DocRefResolver, DocRefTarget, linkifyDocRefs } from '../doc/docRefs';
 
 function refTypeNameAt(tree: Tree, pos: Position): { node: SyntaxNode; isDef: boolean } | null {
   const node = namedDescendantAt(tree, pos);
@@ -60,11 +61,28 @@ export interface HoverResult {
   range: Range;
 }
 
+/** Locate a MSG type definition for a doc cross-reference. */
+function msgRefTarget(t: MsgTypeInfo | undefined): DocRefTarget | undefined {
+  if (!t) return undefined;
+  const { start } = nodeRange(msgNameNode(t.node) ?? t.node);
+  return { uri: t.file.uri, pos: start };
+}
+
+/**
+ * Context-free resolver used when a *NED* doc comment references a MSG type.
+ * MSG `lookupType` already falls back to a simple-name match across namespaces,
+ * so a bare `~SomePacket` resolves without a namespace context.
+ */
+export function msgDocRefResolver(cache: MsgResourceCache): DocRefResolver {
+  return (name) => msgRefTarget(cache.lookupType(name, ''));
+}
+
 export function msgHover(
   cache: MsgResourceCache,
   file: MsgFileInfo,
   tree: Tree,
   pos: Position,
+  external?: DocRefResolver,
 ): HoverResult | null {
   const r = refTypeNameAt(tree, pos);
   if (!r) return null;
@@ -75,7 +93,14 @@ export function msgHover(
   let sig = `${info.kind} ${info.fqName}`;
   const base = info.extendsName();
   if (base) sig += ` extends ${base}`;
-  return { markdown: '```msg\n' + sig + '\n```', range: nodeRange(r.node) };
+  let md = '```msg\n' + sig + '\n```';
+  const doc = msgLeadingDocComment(info.node);
+  if (doc) {
+    const resolve: DocRefResolver = (name) =>
+      msgRefTarget(cache.lookupType(name, info.namespace)) ?? external?.(name);
+    md += '\n\n' + linkifyDocRefs(doc, resolve);
+  }
+  return { markdown: md, range: nodeRange(r.node) };
 }
 
 const MSG_PRIMITIVE_ITEMS = [

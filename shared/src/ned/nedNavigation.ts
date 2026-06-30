@@ -1,7 +1,8 @@
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
 import type { Location, Position, Range } from '../model/location';
 import { ancestorOfType, namedDescendantAt, nodeRange } from '../parser/treeUtils';
-import { NedResourceCache, NedFileInfo } from './nedResourceCache';
+import { NedResourceCache, NedFileInfo, BUILTIN_URI } from './nedResourceCache';
+import { DocRefResolver, DocRefTarget, linkifyDocRefs } from '../doc/docRefs';
 import { NedTypeInfo } from './nedTypeInfo';
 import { NED_TYPE_NODES, isTypeNode, nameNode, paramInfo, paramDocComment } from './nedAst';
 
@@ -428,11 +429,64 @@ export interface HoverResult {
   range: Range;
 }
 
+/** Locate a NED type definition for a doc cross-reference, skipping built-ins. */
+function nedRefTarget(t: NedTypeInfo | undefined): DocRefTarget | undefined {
+  if (!t || t.file.uri === BUILTIN_URI) return undefined;
+  const { start } = nodeRange(nameNode(t.node) ?? t.node);
+  return { uri: t.file.uri, pos: start };
+}
+
+/**
+ * Resolver for `~Type` doc refs as seen from a NED type's own doc comment:
+ * `ctxFile`/`enclosingFqName` reproduce that type's lookup context so unqualified
+ * names follow NED precedence. Doc banners routinely name types that the owning
+ * file never imports (e.g. siblings in a module family), so a context miss falls
+ * back to a project-wide unique-simple-name search before finally trying
+ * `external`, the cross-language fallback supplied by the caller.
+ */
+function nedDocResolver(
+  cache: NedResourceCache,
+  ctxFile: NedFileInfo,
+  enclosingFqName: string | undefined,
+  external?: DocRefResolver,
+): DocRefResolver {
+  const global = nedDocRefResolver(cache);
+  return (name) =>
+    nedRefTarget(cache.lookupType(name, ctxFile, enclosingFqName)) ??
+    global(name) ??
+    external?.(name);
+}
+
+/**
+ * Context-free resolver: a qualified name resolves directly, an unqualified one
+ * only when a single project type bears that simple name (an ambiguous name
+ * stays plain text rather than linking to a guess). Used both as NED hover's
+ * project-wide fallback and when a *MSG* doc comment references a NED type.
+ */
+export function nedDocRefResolver(cache: NedResourceCache): DocRefResolver {
+  let bySimple: Map<string, NedTypeInfo[]> | undefined;
+  return (name) => {
+    if (name.includes('.')) return nedRefTarget(cache.getType(name));
+    if (!bySimple) {
+      bySimple = new Map();
+      for (const t of cache.allTypes()) {
+        if (t.isInnerType || t.file.uri === BUILTIN_URI) continue;
+        const arr = bySimple.get(t.simpleName);
+        if (arr) arr.push(t);
+        else bySimple.set(t.simpleName, [t]);
+      }
+    }
+    const matches = bySimple.get(name);
+    return matches && matches.length === 1 ? nedRefTarget(matches[0]) : undefined;
+  };
+}
+
 export function nedHover(
   cache: NedResourceCache,
   file: NedFileInfo,
   tree: Tree,
   pos: Position,
+  external?: DocRefResolver,
 ): HoverResult | null {
   const ref = referenceAt(cache, file, tree, pos);
   if (!ref) {
@@ -440,7 +494,11 @@ export function nedHover(
     const pref = paramRefAt(cache, file, tree, pos);
     if (pref) {
       let md = `\`\`\`ned\n${pref.type ?? ''} ${pref.name}\n\`\`\`\n\ndeclared in \`${pref.ownerFq}\``;
-      if (pref.doc) md += '\n\n' + pref.doc;
+      if (pref.doc) {
+        const owner = cache.getType(pref.ownerFq);
+        const resolve = nedDocResolver(cache, owner?.file ?? file, pref.ownerFq, external);
+        md += '\n\n' + linkifyDocRefs(pref.doc, resolve);
+      }
       return { markdown: md, range: pref.range };
     }
     return null;
@@ -455,7 +513,10 @@ export function nedHover(
   }
   let md = '```ned\n' + typeSignature(info) + '\n```';
   const doc = info.documentation();
-  if (doc) md += '\n\n' + doc;
+  if (doc) {
+    const resolve = nedDocResolver(cache, info.file, info.fqName, external);
+    md += '\n\n' + linkifyDocRefs(doc, resolve);
+  }
   return { markdown: md, range };
 }
 

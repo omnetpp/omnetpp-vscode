@@ -67,12 +67,14 @@ import {
   msgSemanticDiagnostics,
   nedDefinition,
   nedHover,
+  nedDocRefResolver,
   nedReferences,
   nedCompletion,
   nedClassDefinition,
   nedClassRefAt,
   msgDefinition,
   msgHover,
+  msgDocRefResolver,
   msgCompletion,
   iniHover,
   iniCompletion,
@@ -265,11 +267,13 @@ function computeHoverRaw(
         : `Class \`${hit.ref.className}\` (no matching .msg declaration)`;
       return { markdown: md, range: hit.range };
     }
-    return nedHover(ctx.nedCache, file, file.tree, pos);
+    // NED docs may cross-reference MSG types: resolve those against the MSG index.
+    return nedHover(ctx.nedCache, file, file.tree, pos, msgDocRefResolver(ctx.msgCache));
   }
   if (parsed.language === 'msg') {
     const file = ctx.msgCache.getFile(parsed.uri);
-    return file ? msgHover(ctx.msgCache, file, file.tree, pos) : null;
+    // MSG docs may cross-reference NED types, and vice versa.
+    return file ? msgHover(ctx.msgCache, file, file.tree, pos, nedDocRefResolver(ctx.nedCache)) : null;
   }
   return null;
 }
