@@ -152,7 +152,7 @@ function paramUnit(text: string): string | undefined {
 function paramEnum(text: string): string[] | undefined {
   const m = /@enum\s*\(\s*([^)]*?)\s*\)/.exec(text);
   if (!m) return undefined;
-  const vals = m[1].split(',').map((s) => s.replace(/^["']|["']$/g, '').trim()).filter(Boolean);
+  const vals = m[1].split(',').map((s) => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
   return vals.length ? vals : undefined;
 }
 

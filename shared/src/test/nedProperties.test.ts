@@ -140,3 +140,13 @@ test('properties: insert snippets carry the leading @ and arg placeholders', asy
   const mut = items.find((i) => i.label === '@mutable');
   assert.ok(mut && mut.insertText === '@mutable', `bad @mutable insert: ${mut?.insertText}`);
 });
+
+test('@enum values parse without stray quotes regardless of spacing after commas', async () => {
+  const cache = await nedCache({
+    'file:///E.ned':
+      'simple E { parameters: string velocityProjection @enum("projected", "trueLength", "isometric") = default("projected"); }',
+  });
+  const p = cache.getType('E')!.localParams().get('velocityProjection')!;
+  // Before the fix, values after the first kept a leading quote ('"trueLength').
+  assert.deepEqual(p.enumValues, ['projected', 'trueLength', 'isometric']);
+});
