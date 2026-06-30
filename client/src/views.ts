@@ -477,6 +477,7 @@ class ModuleParamsProvider extends FocusTreeProvider<ParamHierNode> {
 const PIN_KEY = 'omnetpp.pinnedType';
 const MODULE_PIN_KEY = 'omnetpp.pinnedModule';
 const PARAM_PIN_KEY = 'omnetpp.pinnedParamModule';
+const USEDBY_PIN_KEY = 'omnetpp.pinnedUsedBy';
 const ACTIVE_CONFIG_KEY = 'omnetpp.activeConfig';
 
 /** The active configuration (ini file + config name), if any. */
@@ -715,10 +716,12 @@ type UsedByNode =
   | { kind: 'group'; label: string; children: UsedByNode[] }
   | ({ kind: 'leaf' } & UsedByItem);
 
+type UsedByFocus = { uri: string; position: Pos };
+
 /**
- * The "Used By" view: reverse dependencies of the symbol under the editor cursor,
- * grouped by relation (extended by, instantiated by, backing class for, …). Driven
- * entirely by the cross-reference graph via the `omnetpp/usedBy` request.
+ * The "Used By" view: reverse dependencies of the symbol under the editor cursor
+ * (or a pinned symbol), grouped by relation (extended by, instantiated by, backing
+ * class for, …). Driven entirely by the cross-reference graph via `omnetpp/usedBy`.
  */
 class UsedByProvider implements vscode.TreeDataProvider<UsedByNode> {
   treeView?: vscode.TreeView<UsedByNode>;
@@ -726,6 +729,10 @@ class UsedByProvider implements vscode.TreeDataProvider<UsedByNode> {
   readonly onDidChangeTreeData = this.emitter.event;
   private roots: UsedByNode[] = [];
   private target?: string;
+  /** When set, the view is frozen on this symbol instead of following the cursor. */
+  private pinnedFocus?: UsedByFocus;
+  /** The focus that produced the current content, captured when the user pins. */
+  private lastFocus?: UsedByFocus;
 
   constructor(private readonly client: LanguageClient) {}
 
@@ -733,17 +740,40 @@ class UsedByProvider implements vscode.TreeDataProvider<UsedByNode> {
   focusedName(): string | undefined {
     return this.target;
   }
+  isPinned(): boolean {
+    return this.pinnedFocus !== undefined;
+  }
+  /** Whether there is a current symbol that could be pinned. */
+  hasTarget(): boolean {
+    return this.target !== undefined;
+  }
+  /** Freeze the view on the symbol it is currently showing. */
+  pin(): void {
+    if (this.lastFocus) this.pinnedFocus = this.lastFocus;
+  }
+  unpin(): void {
+    this.pinnedFocus = undefined;
+  }
+  /** The pinned focus, for persistence across sessions. */
+  pinnedFocusValue(): UsedByFocus | undefined {
+    return this.pinnedFocus;
+  }
+  restorePin(focus: UsedByFocus): void {
+    this.pinnedFocus = focus;
+  }
 
   async update(): Promise<void> {
-    const focus = activeContext();
+    const focus = this.pinnedFocus ?? activeContext();
     if (!focus) {
       this.target = undefined;
+      this.lastFocus = undefined;
       if (this.roots.length) {
         this.roots = [];
         this.emitter.fire();
       }
       return;
     }
+    this.lastFocus = focus;
     let groups: UsedByGroupData[] = [];
     try {
       const res = await this.client.sendRequest<{ target?: string; groups: UsedByGroupData[] }>('omnetpp/usedBy', focus);
@@ -808,17 +838,24 @@ export function registerViews(context: vscode.ExtensionContext, client: Language
   if (savedModulePin) moduleHierarchy.pin(savedModulePin);
   const savedParamPin = context.workspaceState.get<string | undefined>(PARAM_PIN_KEY, undefined);
   if (savedParamPin) moduleParams.pin(savedParamPin);
+  const savedUsedByPin = context.workspaceState.get<UsedByFocus | undefined>(USEDBY_PIN_KEY, undefined);
+  if (savedUsedByPin) usedBy.restorePin(savedUsedByPin);
   const persistPin = () => context.workspaceState.update(PIN_KEY, inheritance.pinnedType());
   const persistModulePin = () =>
     context.workspaceState.update(MODULE_PIN_KEY, moduleHierarchy.pinnedType());
   const persistParamPin = () =>
     context.workspaceState.update(PARAM_PIN_KEY, moduleParams.pinnedType());
+  const persistUsedByPin = () =>
+    context.workspaceState.update(USEDBY_PIN_KEY, usedBy.pinnedFocusValue());
 
-  // context keys gate the view-title "Unpin" buttons (shown only while pinned)
+  // context keys gate the view-title pin/unpin buttons (shown per pinned state;
+  // the Used By "Pin" button also needs a current symbol to pin).
   const syncPinContext = () => {
     void vscode.commands.executeCommand('setContext', 'omnetpp.typePinned', inheritance.isPinned());
     void vscode.commands.executeCommand('setContext', 'omnetpp.modulePinned', moduleHierarchy.isPinned());
     void vscode.commands.executeCommand('setContext', 'omnetpp.paramPinned', moduleParams.isPinned());
+    void vscode.commands.executeCommand('setContext', 'omnetpp.usedByPinned', usedBy.isPinned());
+    void vscode.commands.executeCommand('setContext', 'omnetpp.usedByHasTarget', usedBy.hasTarget());
   };
 
   // Title each view after the selected/pinned type ("<Type> <Noun>"), falling
@@ -960,6 +997,20 @@ export function registerViews(context: vscode.ExtensionContext, client: Language
       syncPinContext();
       void moduleParams.update().then(syncTitles);
     }),
+    vscode.commands.registerCommand('omnetpp.pinUsedBy', () => {
+      usedBy.pin(); // freeze on the symbol currently shown
+      void persistUsedByPin();
+      syncPinContext();
+      syncTitles();
+    }),
+    vscode.commands.registerCommand('omnetpp.unpinUsedBy', () => {
+      usedBy.unpin();
+      void persistUsedByPin();
+      void usedBy.update().then(() => {
+        syncTitles();
+        syncPinContext();
+      });
+    }),
     vscode.commands.registerCommand('omnetpp.setActiveConfiguration', () => {
       const ed = vscode.window.activeTextEditor;
       if (!ed || ed.document.languageId !== 'OMNeT++ INI') {
@@ -1020,7 +1071,10 @@ export function registerViews(context: vscode.ExtensionContext, client: Language
       moduleHierarchy.isPinned() ? undefined : moduleHierarchy.update(),
       moduleParams.isPinned() ? undefined : moduleParams.update(),
       usedBy.update(),
-    ]).then(syncTitles);
+    ]).then(() => {
+      syncTitles();
+      syncPinContext(); // the Used By pin button depends on the current target
+    });
   };
 
   let timer: NodeJS.Timeout | undefined;

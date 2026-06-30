@@ -156,6 +156,18 @@
         "icon": "$(pinned)"
       },
       {
+        "command": "omnetpp.pinUsedBy",
+        "title": "Pin",
+        "category": "OMNeT++",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "omnetpp.unpinUsedBy",
+        "title": "Unpin",
+        "category": "OMNeT++",
+        "icon": "$(pinned)"
+      },
+      {
         "command": "omnetpp.setActiveConfiguration",
         "title": "Set as Active Configuration",
         "category": "OMNeT++"
@@ -199,6 +211,8 @@
         { "command": "omnetpp.unpinModule", "when": "false" },
         { "command": "omnetpp.pinParam", "when": "false" },
         { "command": "omnetpp.unpinParam", "when": "false" },
+        { "command": "omnetpp.pinUsedBy", "when": "false" },
+        { "command": "omnetpp.unpinUsedBy", "when": "false" },
         { "command": "omnetpp.setActiveConfiguration", "when": "editorLangId == 'OMNeT++ INI'" },
         { "command": "omnetpp.clearActiveConfiguration", "when": "omnetpp.hasActiveConfig" },
         { "command": "omnetpp.setActiveConfigItem", "when": "false" },
@@ -227,6 +241,16 @@
         {
           "command": "omnetpp.unpinParam",
           "when": "view == omnetppModuleParams && omnetpp.paramPinned",
+          "group": "navigation"
+        },
+        {
+          "command": "omnetpp.pinUsedBy",
+          "when": "view == omnetppUsedBy && omnetpp.usedByHasTarget && !omnetpp.usedByPinned",
+          "group": "navigation"
+        },
+        {
+          "command": "omnetpp.unpinUsedBy",
+          "when": "view == omnetppUsedBy && omnetpp.usedByPinned",
           "group": "navigation"
         },
         {
