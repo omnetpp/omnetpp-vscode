@@ -89,6 +89,7 @@ import {
   EdgeKind,
   XrefEdge,
   impactOf,
+  paramContainerSimpleNames,
   nedUnusedNetworkDiagnostics,
   suggestSimilar,
   sectionName,
@@ -258,10 +259,15 @@ function nedReferencesAt(parsed: ParsedDocument, pos: Position, includeDeclarati
   // a NED parameter declaration also has references in INI files (assignments)
   const mref = memberRefAt(ctx.nedCache, file, file.tree, pos);
   if (mref?.key.kind === 'param') {
-    for (const a of findParamAssignments(ctx.iniCache, ctx.nedCache, ctx.registry, {
-      typeFqName: mref.key.ownerFq,
-      param: mref.key.name,
-    })) {
+    const relevant = paramContainerSimpleNames(ctx.db, mref.key.ownerFq);
+    for (const a of findParamAssignments(
+      ctx.iniCache,
+      ctx.nedCache,
+      ctx.registry,
+      { typeFqName: mref.key.ownerFq, param: mref.key.name },
+      undefined,
+      relevant,
+    )) {
       refs.push({ uri: a.uri, range: a.keyRange });
     }
   }

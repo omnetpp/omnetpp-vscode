@@ -41,6 +41,7 @@ import { expandNetwork, paramSlots } from '../ini/moduleTree';
 import { parseIni, configSummaries } from '../ini/iniDocument';
 import { resolveNedClass, nedClassReferences } from '../xref/nedMsgLinks';
 import { impactOf } from '../xref/impact';
+import { paramContainerSimpleNames } from '../xref/paramContainers';
 import { nedTypeSym, msgTypeSym } from '../xref/symbolId';
 import type { ConnectionInfo, ConnEndpoint } from '../ned/nedAst';
 import type { Node as SyntaxNode } from 'web-tree-sitter';
@@ -306,7 +307,14 @@ const TOOLS: ToolDef[] = [
       required: ['typeFqName', 'param'],
     },
     handler: (a, ctx) =>
-      findParamAssignments(ctx.iniCache, ctx.nedCache, ctx.configRegistry, { typeFqName: a.typeFqName, param: a.param }, a.config),
+      findParamAssignments(
+        ctx.iniCache,
+        ctx.nedCache,
+        ctx.configRegistry,
+        { typeFqName: a.typeFqName, param: a.param },
+        a.config,
+        paramContainerSimpleNames(ctx.db, a.typeFqName),
+      ),
   },
   {
     name: 'find_msg_usages',

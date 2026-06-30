@@ -173,9 +173,19 @@ function getExpansion(
   const key = `${cache.generation}:${net.fqName}:${bindings?.digest ?? ''}`;
   let r = perCache.get(key);
   if (!r) {
-    if (perCache.size > 128) perCache.clear();
     r = expandNetwork(cache, net, bindings?.resolve);
     perCache.set(key, r);
+    // Bound memory by evicting the OLDEST entries (FIFO) rather than clearing the
+    // whole cache — a single reverse-assignment scan reuses hundreds of distinct
+    // (network, bindings) expansions, so clear-all caused pathological re-expansion.
+    const CAP = 1024;
+    if (perCache.size > CAP) {
+      let evict = perCache.size - CAP;
+      for (const oldKey of perCache.keys()) {
+        if (evict-- <= 0) break;
+        perCache.delete(oldKey);
+      }
+    }
   }
   return r;
 }
@@ -403,12 +413,40 @@ export interface ParamAssignment {
  * in-scope entry whose pattern matches one of those paths is reported (with the
  * precedence winner flagged). Optionally restricted to a single config.
  */
+/**
+ * Whether a config could possibly instantiate a type in `relevant` (a set of
+ * container simple names), given its effective network and `typename` bindings —
+ * a cheap, network-expansion-free over-approximation used to prune the scan.
+ */
+function sectionMaybeRelevant(netName: string, tnEntries: IniEntry[], relevant: Set<string>): boolean {
+  if (relevant.has(lastSegment(unquote(netName)))) return true;
+  for (const e of tnEntries) {
+    const v = e.value;
+    if (v.includes('$') || v.includes('{')) return true; // variable typename: cannot rule out
+    if (relevant.has(lastSegment(unquote(v)))) return true;
+  }
+  return false;
+}
+
+function lastSegment(s: string): string {
+  const dot = s.lastIndexOf('.');
+  const col = s.lastIndexOf('::');
+  const cut = Math.max(dot, col < 0 ? -1 : col + 1);
+  return cut >= 0 ? s.slice(cut + 1) : s;
+}
+function unquote(s: string): string {
+  return s.replace(/^"|"$/g, '');
+}
+
 export function findParamAssignments(
   iniCache: IniResourceCache,
   cache: NedResourceCache,
   registry: ConfigRegistry,
   target: { typeFqName: string; param: string },
   configFilter?: string,
+  /** Container simple names (from paramContainerSimpleNames); when given, configs
+   *  that cannot reach the type are skipped without expanding their network. */
+  relevant?: Set<string>,
 ): ParamAssignment[] {
   const out: ParamAssignment[] = [];
   const seen = new Set<string>();
@@ -418,9 +456,11 @@ export function findParamAssignments(
       if (configFilter && cfgName !== configFilter) continue;
       const netName = effectiveNetwork(doc, section);
       if (!netName) continue;
+      const tnEntries = collectTypenameEntries(doc, section);
+      if (relevant && !sectionMaybeRelevant(netName, tnEntries, relevant)) continue;
       const net = resolveNetworkType(cache, netName);
       if (!net) continue;
-      const bindings = buildTypenameBindings(collectTypenameEntries(doc, section));
+      const bindings = buildTypenameBindings(tnEntries);
       const expansion = getExpansion(cache, net, bindings);
 
       // instance paths where (typeFqName, param) is declared
