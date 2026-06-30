@@ -1,4 +1,4 @@
-// Drives the bundled MCP server (dist/mcp-server.js) over stdio with a minimal
+// Drives the bundled MCP server (dist/opp_ide_mcp.js) over stdio with a minimal
 // MCP handshake, then exercises tools/list and a few tools/call requests against
 // a project directory. Validates the real bundled runtime path.
 //
@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const projectDir = resolve(process.argv[2] ?? join(root, 'samples'));
 
-const server = spawn('node', [join(root, 'dist', 'mcp-server.js'), projectDir], {
+const server = spawn('node', [join(root, 'dist', 'opp_ide_mcp.js'), projectDir], {
   stdio: ['pipe', 'pipe', 'inherit'],
 });
 

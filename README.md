@@ -74,12 +74,12 @@ pre-commit hooks, or scripts. It needs no OMNeT++ installation and honors the
 inline `suppress(...)` directives described above.
 
 ```bash
-omnetpp-lint [options] [path ...]            # paths default to the current dir
+opp_lint [options] [path ...]            # paths default to the current dir
 
-omnetpp-lint src/                            # lint a directory tree
-omnetpp-lint Host.ned omnetpp.ini            # lint specific files
-omnetpp-lint --format=json src/ > lint.json  # machine-readable output
-omnetpp-lint --ned-path=/opt/inet/src src/   # add libraries for cross-file resolution
+opp_lint src/                            # lint a directory tree
+opp_lint Host.ned omnetpp.ini            # lint specific files
+opp_lint --format=json src/ > lint.json  # machine-readable output
+opp_lint --ned-path=/opt/inet/src src/   # add libraries for cross-file resolution
 ```
 
 Options: `--ned-path=<dirs>` (extra source roots, indexed but not linted),
@@ -88,9 +88,9 @@ Options: `--ned-path=<dirs>` (extra source roots, indexed but not linted),
 `--no-color`, `-h`. Exit code is `1` when diagnostics at or above `--fail-on` are
 found, `0` otherwise, `2` on usage/runtime errors.
 
-The runtime artifact is `dist/omnetpp-lint.js` (produced by `npm run dev:build`);
-run it directly with `node dist/omnetpp-lint.js …`, or install the extension's
-package to get the `omnetpp-lint` command on your `PATH`.
+The runtime artifact is `dist/opp_lint.js` (produced by `npm run dev:build`);
+run it directly with `node dist/opp_lint.js …`, or install the extension's
+package to get the `opp_lint` command on your `PATH`.
 
 ## Settings
 

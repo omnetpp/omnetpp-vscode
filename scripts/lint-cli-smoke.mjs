@@ -1,4 +1,4 @@
-// Drives the bundled CLI linter (dist/omnetpp-lint.js) against a throwaway project
+// Drives the bundled CLI linter (dist/opp_lint.js) against a throwaway project
 // and asserts: diagnostics are reported, inline suppression is honored, the JSON
 // shape is correct, and exit codes follow --fail-on. Run after `npm run dev:build`.
 import { spawnSync } from 'node:child_process';
@@ -8,7 +8,7 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const cli = join(root, 'dist', 'omnetpp-lint.js');
+const cli = join(root, 'dist', 'opp_lint.js');
 
 const proj = mkdtempSync(join(tmpdir(), 'opp-lint-'));
 writeFileSync(join(proj, 'Host.ned'), 'simple Host {\n  parameters:\n    int n;\n    int n;\n}\n');

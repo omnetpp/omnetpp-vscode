@@ -1,10 +1,10 @@
 // Standalone MCP server exposing the OMNeT++ NED/MSG/INI semantic model over
 // stdio. Builds a project index from disk (via @omnetpp/shared) and answers the
-// shared tool layer's queries. The runtime artifact is dist/mcp-server.js
+// shared tool layer's queries. The runtime artifact is dist/opp_ide_mcp.js
 // (produced by esbuild); assets (wasm/, config/) live next to it, as for the LSP
 // server bundle.
 //
-// Usage:  node dist/mcp-server.js [projectDir ...] [--ned-path=a;b]
+// Usage:  node dist/opp_ide_mcp.js [projectDir ...] [--ned-path=a;b]
 // Env:    OMNETPP_NED_PATH, OMNETPP_WASM_DIR, OMNETPP_CONFIG_DIR
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -18,7 +18,7 @@ import { buildDiskIndex } from './indexBuilder.js';
 
 /** Log to stderr only — stdout is reserved for the JSON-RPC stdio transport. */
 function log(...args: unknown[]): void {
-  console.error('[omnetpp-mcp]', ...args);
+  console.error('[opp_ide_mcp]', ...args);
 }
 
 function parseArgs(argv: string[]): { roots: string[]; nedPathDirs: string[] } {

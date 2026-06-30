@@ -16,7 +16,7 @@
   ],
   "main": "./dist/extension.js",
   "bin": {
-    "omnetpp-lint": "./dist/omnetpp-lint.js"
+    "opp_lint": "./dist/opp_lint.js"
   },
   "activationEvents": [
     "workspaceContains:**/*.ned",

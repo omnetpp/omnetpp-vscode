@@ -3,10 +3,10 @@
 // same analyzers the IDE uses, printing diagnostics for CI / pre-commit / scripts.
 // Inline `//# suppress(...)` / `### suppress(...)` directives are honored.
 //
-// The runtime artifact is dist/omnetpp-lint.js (produced by esbuild); the grammar
+// The runtime artifact is dist/opp_lint.js (produced by esbuild); the grammar
 // wasm/ and config/ assets live next to it, as for the LSP and MCP bundles.
 //
-// Usage:  omnetpp-lint [options] [path ...]
+// Usage:  opp_lint [options] [path ...]
 // Env:    OMNETPP_NED_PATH, OMNETPP_WASM_DIR, OMNETPP_CONFIG_DIR
 import { existsSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
@@ -48,10 +48,10 @@ const SEVERITY_LABEL: Record<DiagnosticSeverity, string> = {
   [DiagnosticSeverity.Hint]: 'hint',
 };
 
-const USAGE = `omnetpp-lint — lint OMNeT++ NED/MSG/INI files
+const USAGE = `opp_lint — lint OMNeT++ NED/MSG/INI files
 
 Usage:
-  omnetpp-lint [options] [path ...]
+  opp_lint [options] [path ...]
 
 Arguments:
   path                One or more files or directories to lint. Directories are
@@ -74,7 +74,7 @@ Exit codes:
   2  usage or runtime error`;
 
 function fail(msg: string): never {
-  process.stderr.write(`omnetpp-lint: ${msg}\n`);
+  process.stderr.write(`opp_lint: ${msg}\n`);
   process.exit(2);
 }
 
@@ -314,6 +314,6 @@ function emitJson(results: FileResult[], counts: Record<number, number>): void {
 }
 
 main().catch((e) => {
-  process.stderr.write(`omnetpp-lint: ${e instanceof Error ? e.stack : String(e)}\n`);
+  process.stderr.write(`opp_lint: ${e instanceof Error ? e.stack : String(e)}\n`);
   process.exit(2);
 });
