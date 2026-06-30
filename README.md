@@ -88,7 +88,7 @@ Options: `--ned-path=<dirs>` (extra source roots, indexed but not linted),
 `--no-color`, `-h`. Exit code is `1` when diagnostics at or above `--fail-on` are
 found, `0` otherwise, `2` on usage/runtime errors.
 
-The runtime artifact is `dist/opp_lint.js` (produced by `npm run dev:build`);
+The runtime artifact is `dist/opp_lint.js` (produced by `bun run dev:build`);
 run it directly with `node dist/opp_lint.js …`, or install the extension's
 package to get the `opp_lint` command on your `PATH`.
 
@@ -106,16 +106,17 @@ VS Code version 1.92 or higher.
 
 ## Building locally
 
-Node.js is required for building the extension locally (see https://nodejs.org).
-Building the tree-sitter WASM grammars requires `emscripten` (emcc) or Docker.
+[Bun](https://bun.sh) is the package manager and task runner; Node.js is still
+required as the build/test runtime (esbuild + the `node:test` suite). Building the
+tree-sitter WASM grammars requires `emscripten` (emcc) or Docker.
 
 - Clone this repo and run `refresh_submodules` to fetch the grammar submodules
-- `npm install`
-- `npm run build:wasm` — compile the NED/MSG grammars to WASM
-- `npm run compile && npm test` — type-check and run the unit tests
-- `npm run package` — produce the `.vsix`
+- `bun install`
+- `bun run build:wasm` — compile the NED/MSG grammars to WASM
+- `bun run compile && bun run test` — type-check and run the unit tests
+- `bun run package` — produce the `.vsix`
 
-The architecture is split into npm workspaces: `client/` (the VS Code language
+The architecture is split into Bun workspaces: `client/` (the VS Code language
 client), `server/` (the LSP server), and `shared/` (the host-agnostic semantic
 core: parsers, type model, analyzers). The config-option snapshot is regenerated
 with `node scripts/gen-config-options.mjs <omnetpp-src-dir>`.

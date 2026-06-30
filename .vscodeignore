@@ -7,9 +7,12 @@
 client/**
 server/**
 shared/**
+mcp/**
 scripts/**
 subprojects/**
 node_modules/**
+# Bun links workspace deps into per-package node_modules (symlinks); never ship them.
+**/node_modules/**
 resources/**
 **/*.ts
 **/*.map

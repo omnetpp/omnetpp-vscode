@@ -2,7 +2,7 @@
 // requests) over stdio: lists tools, queries the indexed project, and proves an
 // UNSAVED buffer (didOpen, not on disk) is reflected in tool results.
 //
-// Usage: node scripts/mcp-live-smoke.mjs <projectDir>   (after `npm run dev:build`)
+// Usage: node scripts/mcp-live-smoke.mjs <projectDir>   (after `bun run dev:build`)
 import { spawn } from 'node:child_process';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';

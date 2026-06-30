@@ -2,7 +2,7 @@
 // MCP handshake, then exercises tools/list and a few tools/call requests against
 // a project directory. Validates the real bundled runtime path.
 //
-// Usage: node scripts/mcp-smoke.mjs [projectDir]   (after `npm run dev:build`)
+// Usage: node scripts/mcp-smoke.mjs [projectDir]   (after `bun run dev:build`)
 import { spawn } from 'node:child_process';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';

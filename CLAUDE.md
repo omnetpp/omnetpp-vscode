@@ -12,7 +12,7 @@ live config-option registry).
 
 ## Architecture
 
-Four npm workspaces (monorepo), wired together by TypeScript project references:
+Four workspaces (monorepo, managed by Bun's workspaces), wired together by TypeScript project references:
 
 - **`shared/`** — the host-agnostic semantic core: tree-sitter parser wrapper, AST/type
   model, and all analyzers for NED/MSG/INI (diagnostics, navigation, completion, rename,
@@ -68,25 +68,30 @@ Data flow: `client` reads `omnetpp.*` settings → passes them to `server` via L
 
 ## Commands
 
+**Package manager / task runner is `bun`** (not npm). `node` is still the JS runtime
+for the build (esbuild) and the test runner. Note: run the package.json `test` script
+with `bun run test`, **not** `bun test` — the latter invokes Bun's own (incompatible)
+test runner instead of the node:test suite.
+
 ```bash
 # First-time setup (grammars live in git submodules under subprojects/)
 refresh_submodules          # or: git submodule update --init --recursive
-npm install
-npm run build:wasm          # compile NED/MSG tree-sitter grammars to WASM
+bun install
+bun run build:wasm          # compile NED/MSG tree-sitter grammars to WASM
                             # (needs emscripten `emcc` on PATH, or Docker)
 
 # Develop
-npm run compile             # tsc --build (type-check all workspaces)
-npm run watch               # tsc --build --watch
-npm run dev:build           # copy:assets + esbuild bundle to dist/
-npm run bundle:watch        # esbuild in watch mode
+bun run compile             # tsc --build (type-check all workspaces)
+bun run watch               # tsc --build --watch
+bun run dev:build           # copy:assets + esbuild bundle to dist/
+bun run bundle:watch        # esbuild in watch mode
 
 # Test (must compile first; runner is node:test over the tsc output)
-npm test                    # npm run compile && node --test "shared/out/test/**/*.test.js"
-node --test shared/out/test/<name>.test.js   # run a single test file (after `npm run compile`)
+bun run test                # bun run compile && node --test "shared/out/test/**/*.test.js"
+node --test shared/out/test/<name>.test.js   # run a single test file (after `bun run compile`)
 
 # Package / publish
-npm run package             # vsce package -> .vsix
+bun run package             # vsce package --no-dependencies -> .vsix
 ```
 
 Press F5 in VS Code to launch the Extension Development Host (see `.vscode/launch.json`);
@@ -98,7 +103,7 @@ the server debug port is `6009`.
 `workspace-diag-smoke.mjs` (asserts unopened workspace files still get diagnostics),
 `semantic-check.mjs`, `ini-param-check.mjs`, `dump-tree.mjs`) useful for exercising the
 parser/analyzers or an LSP feature outside VS Code. Run them with `node scripts/<file>.mjs`
-after `npm run compile`. For the MCP feature (after `npm run dev:build`):
+after `bun run compile`. For the MCP feature (after `bun run dev:build`):
 `mcp-smoke.mjs <projectDir>` drives the standalone `dist/opp_ide_mcp.js` over MCP stdio;
 `mcp-live-smoke.mjs <projectDir>` drives `dist/server.js` and exercises the
 `omnetpp/mcp/*` live-index requests (incl. unsaved-buffer reflection). Note: MCP stdio is
@@ -116,5 +121,5 @@ suppression, JSON shape, exit codes).
   `initializationOptions` if the server needs them.
 - **Command-line tools must be named with the `opp_` prefix** (OMNeT++'s convention,
   e.g. `opp_msgc`, `opp_run`). This covers their `bin` command, their `dist/` bundle
-  filename, and the program name shown in their `--help`/usage. Current tools:
-  `opp_lint` (the CLI linter) and `opp_ide_mcp` (the stdio MCP server).
+  filename, and the program name shown in their `--help`/usage.
+- Keep each new feature developed in a separate commit with a well written description.

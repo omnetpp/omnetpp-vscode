@@ -19,13 +19,16 @@ jobs:
     - name: Set up Node.js
       uses: actions/setup-node@v3
       with:
-        node-version: '20' # Or any other Node.js version your project requires
+        node-version: '20' # node is still the build/test runtime; bun is the package manager
+
+    - name: Set up Bun
+      uses: oven-sh/setup-bun@v2
 
     - name: Install dependencies
-      run: npm install -g @vscode/vsce && ./refresh_submodules
+      run: bun install && ./refresh_submodules
 
     - name: Build VS Code extension package
-      run: npm run package
+      run: bun run package
 
     - name: Create GitHub release
       id: create_release

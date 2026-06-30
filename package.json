@@ -36,12 +36,12 @@
     "watch": "tsc --build --watch",
     "bundle": "node ./esbuild.mjs",
     "bundle:watch": "node ./esbuild.mjs --watch",
-    "dev:build": "npm run copy:assets && npm run bundle",
+    "dev:build": "bun run copy:assets && bun run bundle",
     "copy:assets": "node ./scripts/copy-assets.mjs",
-    "vscode:prepublish": "npm run build:wasm && npm run copy:assets && node ./esbuild.mjs --production",
-    "test": "npm run compile && node --test \"shared/out/test/**/*.test.js\"",
-    "package": "vsce package",
-    "deploy": "vsce publish"
+    "vscode:prepublish": "bun run build:wasm && bun run copy:assets && node ./esbuild.mjs --production",
+    "test": "bun run compile && node --test \"shared/out/test/**/*.test.js\"",
+    "package": "vsce package --no-dependencies",
+    "deploy": "vsce publish --no-dependencies"
   },
   "contributes": {
     "mcpServerDefinitionProviders": [
@@ -409,6 +409,11 @@
       }
     }
   },
+  "trustedDependencies": [
+    "@vscode/vsce-sign",
+    "esbuild",
+    "tree-sitter-cli"
+  ],
   "devDependencies": {
     "@types/node": "^20.14.0",
     "@types/vscode": "^1.101.0",

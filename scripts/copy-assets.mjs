@@ -26,7 +26,7 @@ if (existsSync(wasmSrc)) {
     if (f.endsWith('.wasm')) copyInto(join(wasmSrc, f), join(dist, 'wasm'), f);
   }
 } else {
-  console.warn('resources/wasm not found - run "npm run build:wasm" first.');
+  console.warn('resources/wasm not found - run "bun run build:wasm" first.');
 }
 
 // 2) web-tree-sitter runtime wasm

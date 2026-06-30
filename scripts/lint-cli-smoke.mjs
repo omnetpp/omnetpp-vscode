@@ -1,6 +1,6 @@
 // Drives the bundled CLI linter (dist/opp_lint.js) against a throwaway project
 // and asserts: diagnostics are reported, inline suppression is honored, the JSON
-// shape is correct, and exit codes follow --fail-on. Run after `npm run dev:build`.
+// shape is correct, and exit codes follow --fail-on. Run after `bun run dev:build`.
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

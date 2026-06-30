@@ -9,7 +9,7 @@ out/
 # vscode test
 .vscode-test/
 
-# generated wasm copies (built from subprojects via npm run build:wasm)
+# generated wasm copies (built from subprojects via bun run build:wasm)
 resources/wasm/*.wasm
 
 # packaged extension
