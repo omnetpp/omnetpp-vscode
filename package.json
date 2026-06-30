@@ -15,6 +15,9 @@
     "Linters"
   ],
   "main": "./dist/extension.js",
+  "bin": {
+    "omnetpp-lint": "./dist/omnetpp-lint.js"
+  },
   "activationEvents": [
     "workspaceContains:**/*.ned",
     "onLanguage:OMNeT++ NED",

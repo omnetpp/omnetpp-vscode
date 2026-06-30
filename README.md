@@ -67,6 +67,31 @@ back to indexing workspace folders. Extra NED roots can be added via the
 `omnetpp.nedPath` setting; an OMNeT++ install (`omnetpp.installDir` or the
 `OMNETPP_ROOT` environment variable) is indexed as an additional source root.
 
+## Command-line linter
+
+The same analyzers are available outside the IDE as a standalone CLI, for CI,
+pre-commit hooks, or scripts. It needs no OMNeT++ installation and honors the
+inline `suppress(...)` directives described above.
+
+```bash
+omnetpp-lint [options] [path ...]            # paths default to the current dir
+
+omnetpp-lint src/                            # lint a directory tree
+omnetpp-lint Host.ned omnetpp.ini            # lint specific files
+omnetpp-lint --format=json src/ > lint.json  # machine-readable output
+omnetpp-lint --ned-path=/opt/inet/src src/   # add libraries for cross-file resolution
+```
+
+Options: `--ned-path=<dirs>` (extra source roots, indexed but not linted),
+`--format=text|json`, `--severity=error|warning|info|hint` (minimum to report),
+`--fail-on=error|warning|info|hint|never` (exit-code threshold, default `error`),
+`--no-color`, `-h`. Exit code is `1` when diagnostics at or above `--fail-on` are
+found, `0` otherwise, `2` on usage/runtime errors.
+
+The runtime artifact is `dist/omnetpp-lint.js` (produced by `npm run dev:build`);
+run it directly with `node dist/omnetpp-lint.js …`, or install the extension's
+package to get the `omnetpp-lint` command on your `PATH`.
+
 ## Settings
 
 - `omnetpp.nedPath` — extra NED source root directories (semicolon-separated)

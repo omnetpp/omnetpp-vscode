@@ -147,7 +147,12 @@ async function readText(uri: string, ctx: ToolContext): Promise<string> {
   return ctx.fs.readFile(ctx.toPath(uri));
 }
 
-async function getDiagnostics(uri: string, ctx: ToolContext): Promise<{ uri: string; diagnostics: any[] }> {
+/**
+ * Run the analyzers on a single NED/MSG/INI file and return its diagnostics with
+ * inline `suppress(...)` directives already applied. Shared by the `get_diagnostics`
+ * MCP tool and the standalone CLI linter.
+ */
+export async function lintFile(uri: string, ctx: ToolContext): Promise<{ uri: string; diagnostics: any[] }> {
   const diags: Diagnostic[] = [];
   let filtered: Diagnostic[] = [];
   if (uri.endsWith('.ned')) {
@@ -495,7 +500,7 @@ const TOOLS: ToolDef[] = [
       properties: { uri: { type: 'string', description: 'File path or file:// URI (.ned/.msg/.ini).' } },
       required: ['uri'],
     },
-    handler: (a, ctx) => getDiagnostics(ctx.toUri(a.uri), ctx),
+    handler: (a, ctx) => lintFile(ctx.toUri(a.uri), ctx),
   },
   {
     name: 'rename_ned_type',

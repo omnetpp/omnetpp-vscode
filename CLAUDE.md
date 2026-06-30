@@ -34,10 +34,13 @@ Four npm workspaces (monorepo), wired together by TypeScript project references:
   to `dist/extension.js` (the extension `main`). Also hosts a localhost Streamable-HTTP
   **MCP bridge** (`mcpBridge.ts`, token-guarded) registered via
   `lm.registerMcpServerDefinitionProvider`; it forwards tool calls to the live LSP index.
-- **`mcp/`** — a standalone stdio MCP server (`mcp/src/server.ts`, bundled to
-  `dist/mcp-server.js`). Builds its own index from disk via `shared` (`indexBuilder.ts`)
-  and serves the same `OMNETPP_TOOLS` — for external clients (Claude Code, etc.) with no
-  editor running. Uses `node16` module resolution because the MCP SDK ships subpaths via a
+- **`mcp/`** — standalone disk-index tooling that runs without an editor. Hosts (a) a
+  stdio MCP server (`mcp/src/server.ts`, bundled to `dist/mcp-server.js`) serving the same
+  `OMNETPP_TOOLS`, and (b) the **CLI linter** (`mcp/src/lint.ts`, bundled to
+  `dist/omnetpp-lint.js` with a node shebang + the `omnetpp-lint` `bin`). Both build their
+  index from disk via `shared` (`indexBuilder.ts`); the linter reuses the shared `lintFile`
+  (the same per-file analysis the `get_diagnostics` tool and the IDE use, suppression
+  included). Uses `node16` module resolution because the MCP SDK ships subpaths via a
   package.json `exports` map (the client uses `bundler` resolution for the same reason).
 
 Data flow: `client` reads `omnetpp.*` settings → passes them to `server` via LSP
@@ -99,7 +102,9 @@ after `npm run compile`. For the MCP feature (after `npm run dev:build`):
 `mcp-smoke.mjs <projectDir>` drives the standalone `dist/mcp-server.js` over MCP stdio;
 `mcp-live-smoke.mjs <projectDir>` drives `dist/server.js` and exercises the
 `omnetpp/mcp/*` live-index requests (incl. unsaved-buffer reflection). Note: MCP stdio is
-**newline-delimited JSON**, not LSP `Content-Length` framing.
+**newline-delimited JSON**, not LSP `Content-Length` framing. `lint-cli-smoke.mjs` drives
+the bundled CLI linter (`dist/omnetpp-lint.js`) over a throwaway project (diagnostics,
+suppression, JSON shape, exit codes).
 
 ## Conventions
 
