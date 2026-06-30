@@ -192,7 +192,50 @@ export function computeDefinition(
   return null;
 }
 
+/**
+ * VS Code's hover widget reserves a minimum height (~4 rows): content shorter
+ * than that leaves the bottom of the widget unpainted, so the editor behind it
+ * shows through as a transparent strip. Built-in hovers never surface this
+ * because they are rarely shorter than the minimum, but our signature-only and
+ * short-doc hovers routinely are. Pad short hovers with trailing zero-width-space
+ * paragraphs so every reserved row carries the hover background.
+ */
+const HOVER_MIN_ROWS = 4;
+const ZWSP_PARAGRAPH = '\n\n​';
+
+/** Rough count of the rows VS Code renders for a hover's markdown. */
+function estimateHoverRows(md: string): number {
+  let rows = 0;
+  let inFence = false;
+  for (const line of md.split('\n')) {
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence; // a fence marker is the code box border, not a visible row
+      continue;
+    }
+    if (inFence) rows += 1; // each code line is a row
+    else if (line.trim() !== '') rows += 1; // a text line is ~a row; blank separators add only margin
+  }
+  return rows;
+}
+
+function padHoverMarkdown(md: string): string {
+  let out = md;
+  for (let rows = estimateHoverRows(md); rows < HOVER_MIN_ROWS; rows += 1) {
+    out += ZWSP_PARAGRAPH;
+  }
+  return out;
+}
+
 export function computeHover(
+  parsed: ParsedDocument,
+  pos: Position,
+  ctx: IndexContext,
+): HoverResult | null {
+  const h = computeHoverRaw(parsed, pos, ctx);
+  return h ? { ...h, markdown: padHoverMarkdown(h.markdown) } : null;
+}
+
+function computeHoverRaw(
   parsed: ParsedDocument,
   pos: Position,
   ctx: IndexContext,
