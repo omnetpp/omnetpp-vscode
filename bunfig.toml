@@ -1,7 +1,5 @@
-# Use a hoisted (npm-style flat) node_modules layout instead of Bun's default
-# isolated layout. The build (copy-assets.mjs / esbuild) and the test/smoke
-# scripts resolve the web-tree-sitter runtime wasm via the top-level
-# `node_modules/web-tree-sitter` path, which only exists when dependencies are
-# hoisted to the root node_modules.
-[install]
-linker = "hoisted"
+[test]
+# Tests are the TypeScript sources under shared/src/test. `bun run compile` also
+# emits compiled copies to shared/out/test; ignore those so a bare `bun test`
+# (no path arg) doesn't run every test twice.
+root = "shared/src/test"

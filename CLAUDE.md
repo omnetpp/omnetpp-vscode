@@ -68,10 +68,12 @@ Data flow: `client` reads `omnetpp.*` settings → passes them to `server` via L
 
 ## Commands
 
-**Package manager / task runner is `bun`** (not npm). `node` is still the JS runtime
-for the build (esbuild) and the test runner. Note: run the package.json `test` script
-with `bun run test`, **not** `bun test` — the latter invokes Bun's own (incompatible)
-test runner instead of the node:test suite.
+**Package manager / task runner is `bun`** (not npm); `node` is still the JS runtime
+for the esbuild bundling step. Tests use **Bun's test runner** (`bun:test`) over the
+TypeScript sources directly — no compile-to-JS needed to run them. `bunfig.toml` pins
+the test `root` to `shared/src/test`, so a bare `bun test` runs exactly that suite (and
+not the `shared/out/test/*.js` copies that `tsc --build` also emits). `bun run test`
+additionally runs `tsc --build` first so type errors surface alongside test failures.
 
 ```bash
 # First-time setup (grammars live in git submodules under subprojects/)
@@ -86,9 +88,10 @@ bun run watch               # tsc --build --watch
 bun run dev:build           # copy:assets + esbuild bundle to dist/
 bun run bundle:watch        # esbuild in watch mode
 
-# Test (must compile first; runner is node:test over the tsc output)
-bun run test                # bun run compile && node --test "shared/out/test/**/*.test.js"
-node --test shared/out/test/<name>.test.js   # run a single test file (after `bun run compile`)
+# Test (bun:test over the TS sources; bun run test also type-checks first)
+bun run test                # bun run compile && bun test shared/src/test
+bun test shared/src/test/<name>.test.ts      # run a single test file
+bun test -t "<name substr>"                  # run tests whose name matches
 
 # Package / publish
 bun run package             # vsce package --no-dependencies -> .vsix

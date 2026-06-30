@@ -106,9 +106,9 @@ VS Code version 1.92 or higher.
 
 ## Building locally
 
-[Bun](https://bun.sh) is the package manager and task runner; Node.js is still
-required as the build/test runtime (esbuild + the `node:test` suite). Building the
-tree-sitter WASM grammars requires `emscripten` (emcc) or Docker.
+[Bun](https://bun.sh) is the package manager, task runner, and test runner
+(`bun:test`); Node.js is still required as the runtime for the esbuild bundling
+step. Building the tree-sitter WASM grammars requires `emscripten` (emcc) or Docker.
 
 - Clone this repo and run `refresh_submodules` to fetch the grammar submodules
 - `bun install`
