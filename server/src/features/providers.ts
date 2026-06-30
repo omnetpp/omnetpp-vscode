@@ -351,14 +351,6 @@ export function computeCodeLenses(parsed: ParsedDocument, ctx: IndexContext): Cr
 
       const configs = ctx.db.findConfigsForNetwork(fq);
       if (configs.length) lens(range, `${configs.length} config${plural(configs.length)}`, configs);
-
-      for (const [name, p] of t.localParams()) {
-        const assigns = findParamAssignments(ctx.iniCache, ctx.nedCache, ctx.registry, { typeFqName: fq, param: name });
-        if (!assigns.length) continue;
-        const prange = nodeRange(p.node);
-        const locs = assigns.map((a) => ({ uri: a.uri, range: a.keyRange }));
-        out.push({ range: prange, title: `assigned in ${assigns.length} INI key${plural(assigns.length)}`, uri: parsed.uri, position: prange.start, locations: locs });
-      }
     }
   } else if (parsed.language === 'msg') {
     const msgTypes = ctx.msgCache.allTypes().filter((t: MsgTypeInfo) => t.file.uri === parsed.uri);
@@ -468,25 +460,17 @@ function symbolAt(parsed: ParsedDocument, pos: Position, ctx: IndexContext): Sym
   return undefined;
 }
 
-/** The reverse dependencies of the symbol at a position, grouped by relation. */
+/**
+ * The reverse dependencies of the symbol at a position, grouped by relation.
+ * Purely graph-backed (O(degree)), so it is safe to drive from cursor movement.
+ * NED parameter → INI assignments are intentionally NOT resolved here: that query
+ * (findParamAssignments) expands every config's network and costs seconds on large
+ * workspaces, which must never run on an auto-firing view. Use Find All References
+ * on the parameter for its INI assignment sites.
+ */
 export function computeUsedBy(parsed: ParsedDocument, pos: Position, ctx: IndexContext): { groups: UsedByGroup[] } {
   const sym = symbolAt(parsed, pos, ctx);
-  if (sym) return { groups: groupEdges(ctx.db.index.inboundOf(sym)) };
-  // NED parameters are not graph symbols; fall back to their INI assignment keys
-  if (parsed.language === 'ned' && parsed.tree) {
-    const file = ctx.nedCache.getFile(parsed.uri);
-    const mref = file ? memberRefAt(ctx.nedCache, file, file.tree, pos) : null;
-    if (mref?.key.kind === 'param') {
-      const items = findParamAssignments(ctx.iniCache, ctx.nedCache, ctx.registry, { typeFqName: mref.key.ownerFq, param: mref.key.name }).map((a) => ({
-        label: a.key,
-        description: `${a.config}${a.isWinner ? ' ✓' : ''}`,
-        uri: a.uri,
-        range: a.keyRange,
-      }));
-      return { groups: items.length ? [{ label: 'Assigned in INI', items }] : [] };
-    }
-  }
-  return { groups: [] };
+  return { groups: sym ? groupEdges(ctx.db.index.inboundOf(sym)) : [] };
 }
 
 export interface ImpactResult {
