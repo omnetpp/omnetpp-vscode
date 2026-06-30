@@ -18,6 +18,9 @@ function readSettings() {
   return {
     nedPath: config.get<string>('nedPath', ''),
     installDir: config.get<string>('installDir', ''),
+    diagnostics: {
+      scope: config.get<string>('diagnostics.scope', 'workspace'),
+    },
   };
 }
 

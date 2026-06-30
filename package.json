@@ -380,6 +380,19 @@
           "default": "",
           "markdownDescription": "Path to an OMNeT++ installation root. When set (or auto-detected), enables enriched features such as a live config-option registry and bundled NED libraries."
         },
+        "omnetpp.diagnostics.scope": {
+          "type": "string",
+          "enum": [
+            "workspace",
+            "openFiles"
+          ],
+          "enumDescriptions": [
+            "Report problems for every NED/MSG/INI file in the workspace, even ones that aren't open in an editor.",
+            "Report problems only for files currently open in an editor."
+          ],
+          "default": "workspace",
+          "markdownDescription": "Which files contribute problem markers to the Problems view. `workspace` analyses the whole project so errors in unopened files stay visible; `openFiles` restricts diagnostics to the editors you have open."
+        },
         "omnetpp.trace.server": {
           "type": "string",
           "enum": [

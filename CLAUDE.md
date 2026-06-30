@@ -92,6 +92,7 @@ the server debug port is `6009`.
 ### Debugging / smoke scripts
 
 `scripts/` holds standalone Node smoke/check scripts (e.g. `lsp-smoke.mjs`,
+`workspace-diag-smoke.mjs` (asserts unopened workspace files still get diagnostics),
 `semantic-check.mjs`, `ini-param-check.mjs`, `dump-tree.mjs`) useful for exercising the
 parser/analyzers or an LSP feature outside VS Code. Run them with `node scripts/<file>.mjs`
 after `npm run compile`. For the MCP feature (after `npm run dev:build`):

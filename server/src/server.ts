@@ -18,9 +18,10 @@ import {
 } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { promises as fsp } from 'node:fs';
-import { ParserService, parseIni, configSummaries, OMNETPP_TOOLS, handleTool, workspaceSymbols } from '@omnetpp/shared';
+import { ParserService, parseIni, configSummaries, OMNETPP_TOOLS, handleTool, workspaceSymbols, BUILTIN_URI } from '@omnetpp/shared';
 import type { ToolContext, FileSystem } from '@omnetpp/shared';
 import { DocumentModelStore } from './documentModel';
+import type { ParsedDocument } from './documentModel';
 import { NodeFileSystem } from './nodeFileSystem';
 import { ProjectIndex } from './projectIndex';
 import {
@@ -65,13 +66,18 @@ let index: ProjectIndex | undefined;
 let workspaceFolders: string[] = [];
 let nedPathSetting = '';
 let installDir = '';
+/** Whether diagnostics are published for the whole workspace or only open files. */
+let diagnosticsScope: 'openFiles' | 'workspace' = 'workspace';
 
 /** Read the `omnetpp.*` settings the server cares about from init/config options. */
-function applySettings(opts: { nedPath?: string; installDir?: string } | undefined): void {
+function applySettings(
+  opts: { nedPath?: string; installDir?: string; diagnostics?: { scope?: string } } | undefined,
+): void {
   nedPathSetting = opts?.nedPath ?? '';
   // explicit setting wins; otherwise fall back to the env vars an OMNeT++ shell exports
   installDir =
     opts?.installDir || process.env.OMNETPP_ROOT || process.env.__omnetpp_root_dir || '';
+  diagnosticsScope = opts?.diagnostics?.scope === 'openFiles' ? 'openFiles' : 'workspace';
 }
 
 connection.onInitialize(async (params: InitializeParams): Promise<InitializeResult> => {
@@ -183,8 +189,10 @@ connection.onInitialized(async () => {
   } catch (e) {
     connection.console.error(`OMNeT++ indexing failed: ${(e as Error).message}`);
   }
-  // refresh diagnostics for any already-open documents
+  // refresh diagnostics for any already-open documents, then publish markers for
+  // every other indexed file so the Problems view reflects the whole workspace.
   for (const doc of documents.all()) refresh(doc);
+  publishWorkspaceDiagnostics();
 });
 
 function ctx() {
@@ -218,6 +226,79 @@ function refreshAll(language: 'ned' | 'msg', exceptUri?: string): void {
   }
 }
 
+// ---- Workspace-wide diagnostics -------------------------------------------
+// By default the Problems view shows markers for *every* indexed file under the
+// workspace, not just the active/open editors. `refresh()` keeps open files
+// instantly up to date; the passes below cover closed files (and cross-file
+// errors they pick up), and are debounced so editing stays responsive.
+
+/** URIs we last published *non-empty* diagnostics for, so we can clear their
+ *  markers once a file becomes clean or drops out of the index. */
+const workspaceDiagUris = new Set<string>();
+
+function isUnderWorkspace(uri: string): boolean {
+  const p = safeFsPath(uri);
+  if (!p) return false;
+  return workspaceFolders.some(
+    (root) => p === root || p.startsWith(root.endsWith('/') ? root : `${root}/`),
+  );
+}
+
+/** Compute + publish diagnostics for every indexed NED/MSG/INI file under the
+ *  workspace, clearing markers for files that are now clean. Open files are
+ *  skipped: they are owned by `refresh()`/`scheduleIni`, which see unsaved edits
+ *  the resident caches may not yet reflect. */
+function publishWorkspaceDiagnostics(): void {
+  if (!index || diagnosticsScope !== 'workspace') return;
+  const c = ctx();
+  const nextNonEmpty = new Set<string>();
+  const publish = (uri: string, parsed: ParsedDocument): void => {
+    if (!isUnderWorkspace(uri) || documents.get(uri)) return;
+    const diags = computeDiagnostics(parsed, c) as LspDiagnostic[];
+    if (!diags.length) return;
+    nextNonEmpty.add(uri);
+    connection.sendDiagnostics({ uri, diagnostics: diags });
+  };
+  for (const f of index.cache.allFiles()) {
+    if (f.uri === BUILTIN_URI) continue;
+    publish(f.uri, { uri: f.uri, language: 'ned', version: 0, text: '', tree: f.tree });
+  }
+  for (const f of index.msgCache.allFiles()) {
+    publish(f.uri, { uri: f.uri, language: 'msg', version: 0, text: '', tree: f.tree });
+  }
+  for (const { uri, doc } of index.iniCache.allDocs()) {
+    publish(uri, { uri, language: 'ini', version: 0, text: '', ini: doc });
+  }
+  // anything previously dirty but now clean (or gone from the index) → clear it,
+  // unless it is open (then `refresh()` owns its markers)
+  for (const uri of workspaceDiagUris) {
+    if (!nextNonEmpty.has(uri) && !documents.get(uri)) {
+      connection.sendDiagnostics({ uri, diagnostics: [] });
+    }
+  }
+  workspaceDiagUris.clear();
+  for (const uri of nextNonEmpty) workspaceDiagUris.add(uri);
+}
+
+/** Drop all workspace markers for files that aren't open (used when the scope
+ *  setting flips back to open-files-only). Open files are owned by `refresh()`. */
+function clearWorkspaceDiagnostics(): void {
+  for (const uri of workspaceDiagUris) {
+    if (!documents.get(uri)) connection.sendDiagnostics({ uri, diagnostics: [] });
+  }
+  workspaceDiagUris.clear();
+}
+
+let wsDiagTimer: NodeJS.Timeout | undefined;
+function scheduleWorkspaceDiagnostics(): void {
+  if (diagnosticsScope !== 'workspace') return;
+  if (wsDiagTimer) clearTimeout(wsDiagTimer);
+  wsDiagTimer = setTimeout(() => {
+    wsDiagTimer = undefined;
+    publishWorkspaceDiagnostics();
+  }, 500);
+}
+
 const iniTimers = new Map<string, NodeJS.Timeout>();
 function scheduleIni(uri: string): void {
   const prev = iniTimers.get(uri);
@@ -244,15 +325,20 @@ documents.onDidChangeContent((e) => {
   refresh(e.document);
   if (lang === 'ned') refreshAll('ned', e.document.uri);
   else if (lang === 'msg') refreshAll('msg', e.document.uri);
+  // an edit can introduce/clear errors in *closed* files that reference this one
+  scheduleWorkspaceDiagnostics();
 });
 documents.onDidClose((e) => {
   store?.remove(e.document.uri);
   connection.sendDiagnostics({ uri: e.document.uri, diagnostics: [] });
+  workspaceDiagUris.delete(e.document.uri);
   // re-sync the index to the on-disk version of the now-closed file
   const lang = languageOfDoc(e.document);
   if (index && (lang === 'ned' || lang === 'msg')) {
     void index.onFileChanged(e.document.uri, false);
   }
+  // the file stays in the index (now disk-backed) — re-publish its markers
+  scheduleWorkspaceDiagnostics();
 });
 
 function isProjectConfigFile(uri: string): boolean {
@@ -270,6 +356,7 @@ function scheduleReindex(): void {
       logIndexStatus();
       // re-apply open buffers (the scan skips them) then refresh everything
       for (const doc of documents.all()) refresh(doc);
+      publishWorkspaceDiagnostics();
     } catch (e) {
       connection.console.error(`OMNeT++ reindex failed: ${(e as Error).message}`);
     }
@@ -278,9 +365,18 @@ function scheduleReindex(): void {
 
 connection.onDidChangeConfiguration((change) => {
   const before = `${nedPathSetting}\0${installDir}`;
-  applySettings((change.settings as { omnetpp?: { nedPath?: string; installDir?: string } })?.omnetpp);
+  const beforeScope = diagnosticsScope;
+  applySettings(
+    (change.settings as {
+      omnetpp?: { nedPath?: string; installDir?: string; diagnostics?: { scope?: string } };
+    })?.omnetpp,
+  );
   const after = `${nedPathSetting}\0${installDir}`;
   if (before !== after) scheduleReindex(); // re-discover roots with the new path/install dir
+  if (diagnosticsScope !== beforeScope) {
+    if (diagnosticsScope === 'workspace') publishWorkspaceDiagnostics();
+    else clearWorkspaceDiagnostics();
+  }
 });
 
 connection.onDidChangeWatchedFiles(async (params) => {
@@ -307,6 +403,7 @@ connection.onDidChangeWatchedFiles(async (params) => {
   } else {
     if (nedChanged) refreshAll('ned');
     if (msgChanged) refreshAll('msg');
+    if (nedChanged || msgChanged) scheduleWorkspaceDiagnostics();
   }
 });
 
