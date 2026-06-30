@@ -56,31 +56,47 @@ Data flow: `client` reads `omnetpp.*` settings → passes them to `server` via L
   `scheduleReindex()` — no window reload needed. `omnetpp.trace.server` is handled live by
   the `LanguageClient` itself.
 - **Two separate build passes, do not conflate them.** `tsc --build` type-checks and
-  emits `.d.ts`/`out/` for project references and tests. `esbuild` produces the actual
-  runtime bundles in `dist/`. Tests run against the `tsc` output (`shared/out/`), **not**
-  the esbuild bundle.
+  emits `.d.ts`/`out/` for project references (and feeds esbuild, which bundles from
+  `shared/out`). `esbuild` produces the actual runtime bundles in `dist/`. Tests run via
+  `bun:test` over the **TypeScript sources** (`shared/src/test`), not the `tsc` output
+  and not the esbuild bundle.
 - **Project model discovery**: NED source roots come from `.nedfolders` /
   `.nedexclusions` / `package.ned` (see `shared/src/project/projectModel.ts`), plus the
   `omnetpp.nedPath` setting and the install dir — not just open workspace folders.
 - **INI config-option validation** uses a bundled snapshot at
   `resources/config/opp-config-options.json`, regenerated from an OMNeT++ source tree
-  via `node scripts/gen-config-options.mjs <omnetpp-src-dir>`.
+  via `bun scripts/gen-config-options.mjs <omnetpp-src-dir>`.
 
 ## Commands
 
-**Package manager / task runner is `bun`** (not npm); `node` is still the JS runtime
-for the esbuild bundling step. Tests use **Bun's test runner** (`bun:test`) over the
-TypeScript sources directly — no compile-to-JS needed to run them. `bunfig.toml` pins
-the test `root` to `shared/src/test`, so a bare `bun test` runs exactly that suite (and
-not the `shared/out/test/*.js` copies that `tsc --build` also emits). `bun run test`
-additionally runs `tsc --build` first so type errors surface alongside test failures.
+**The dev toolchain is `bun` only — no Node.js or npm required to install, build, test,
+or package.** Because bun runs a tool's `#!/usr/bin/env node` bin via Node (not itself),
+JS tools are invoked by file path so they run under bun: `compile`/`watch` run
+`bun ./node_modules/typescript/bin/tsc`, `package`/`deploy` run
+`bun ./node_modules/@vscode/vsce/vsce`, and the `.mjs` build scripts / `esbuild.mjs` are
+run as `bun ./script.mjs`. `trustedDependencies` is intentionally empty so `bun install`
+runs no dependency postinstall (they are all `node install.js`); esbuild's binary comes
+from its `@esbuild/<platform>` package and the native `tree-sitter` binary is fetched on
+demand by `scripts/build-wasm.mjs` (via `fetch`). vsce's prepublish hook is avoided by
+naming the build step `prepackage` (not `vscode:prepublish`) and calling it from
+`package`/`deploy`, so vsce never shells out to npm. **Node still runs the *shipped*
+code** — the extension + LSP server run in VS Code's bundled Node extension host, so
+esbuild keeps `platform: node`; and `dist/opp_lint.js` carries a `#!/usr/bin/env node`
+shebang for end users running the CLI standalone.
+
+Tests use **Bun's test runner** (`bun:test`) over the TypeScript sources directly — no
+compile-to-JS needed to run them. `bunfig.toml` pins the test `root` to `shared/src/test`,
+so a bare `bun test` runs exactly that suite (and not the `shared/out/test/*.js` copies
+that `tsc --build` also emits). `bun run test` additionally runs `tsc --build` first so
+type errors surface alongside test failures.
 
 ```bash
 # First-time setup (grammars live in git submodules under subprojects/)
 refresh_submodules          # or: git submodule update --init --recursive
 bun install
 bun run build:wasm          # compile NED/MSG tree-sitter grammars to WASM
-                            # (needs emscripten `emcc` on PATH, or Docker)
+                            # (needs emscripten `emcc` on PATH, or Docker; the native
+                            #  tree-sitter binary is auto-downloaded if missing)
 
 # Develop
 bun run compile             # tsc --build (type-check all workspaces)
@@ -102,11 +118,12 @@ the server debug port is `6009`.
 
 ### Debugging / smoke scripts
 
-`scripts/` holds standalone Node smoke/check scripts (e.g. `lsp-smoke.mjs`,
+`scripts/` holds standalone smoke/check scripts (e.g. `lsp-smoke.mjs`,
 `workspace-diag-smoke.mjs` (asserts unopened workspace files still get diagnostics),
 `semantic-check.mjs`, `ini-param-check.mjs`, `dump-tree.mjs`) useful for exercising the
-parser/analyzers or an LSP feature outside VS Code. Run them with `node scripts/<file>.mjs`
-after `bun run compile`. For the MCP feature (after `bun run dev:build`):
+parser/analyzers or an LSP feature outside VS Code. Run them with `bun scripts/<file>.mjs`
+after `bun run compile` (they spawn the bundled servers via `process.execPath`, i.e. bun).
+For the MCP feature (after `bun run dev:build`):
 `mcp-smoke.mjs <projectDir>` drives the standalone `dist/opp_ide_mcp.js` over MCP stdio;
 `mcp-live-smoke.mjs <projectDir>` drives `dist/server.js` and exercises the
 `omnetpp/mcp/*` live-index requests (incl. unsaved-buffer reflection). Note: MCP stdio is

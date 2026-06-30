@@ -1,6 +1,6 @@
 // Dumps the named-node tree of a NED/MSG snippet for grammar exploration.
-//   node scripts/dump-tree.mjs ned "simple Foo {}"
-//   node scripts/dump-tree.mjs ned-file path/to/file.ned
+//   bun scripts/dump-tree.mjs ned "simple Foo {}"
+//   bun scripts/dump-tree.mjs ned-file path/to/file.ned
 import { readFileSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';

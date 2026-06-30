@@ -1,7 +1,7 @@
 // Generates resources/config/opp-config-options.json by parsing the
 // Register_*ConfigOption[U] macros in an OMNeT++ source tree. Deterministic and
 // reproducible (no need to run opp_run). Usage:
-//   node scripts/gen-config-options.mjs [omnetppSrcDir]
+//   bun scripts/gen-config-options.mjs [omnetppSrcDir]
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';

@@ -1,6 +1,6 @@
 // Extracts built-in MSG/sim type names from an OMNeT++ sim_std.msg into
 // resources/config/msg-builtin-types.json. Usage:
-//   node scripts/gen-msg-builtins.mjs [omnetppSrcDir]
+//   bun scripts/gen-msg-builtins.mjs [omnetppSrcDir]
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';

@@ -1,6 +1,6 @@
 // Builds a NED index over a project dir and reports semantic diagnostics, to
 // measure false-positive rate against real code. Usage:
-//   node scripts/semantic-check.mjs <projectDir>
+//   bun scripts/semantic-check.mjs <projectDir>
 import { readdirSync, statSync, readFileSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';

@@ -89,8 +89,8 @@ Options: `--ned-path=<dirs>` (extra source roots, indexed but not linted),
 found, `0` otherwise, `2` on usage/runtime errors.
 
 The runtime artifact is `dist/opp_lint.js` (produced by `bun run dev:build`);
-run it directly with `node dist/opp_lint.js …`, or install the extension's
-package to get the `opp_lint` command on your `PATH`.
+run it directly with `bun dist/opp_lint.js …` (or `node dist/opp_lint.js …`), or
+install the extension's package to get the `opp_lint` command on your `PATH`.
 
 ## Settings
 
@@ -106,9 +106,11 @@ VS Code version 1.92 or higher.
 
 ## Building locally
 
-[Bun](https://bun.sh) is the package manager, task runner, and test runner
-(`bun:test`); Node.js is still required as the runtime for the esbuild bundling
-step. Building the tree-sitter WASM grammars requires `emscripten` (emcc) or Docker.
+[Bun](https://bun.sh) is the only toolchain runtime — installing, building, testing,
+and packaging the extension need **no Node.js or npm**. (Node still runs the *shipped*
+code, since the extension and language server execute in VS Code's bundled Node
+extension host.) Building the tree-sitter WASM grammars requires `emscripten` (emcc)
+or Docker; the native `tree-sitter` binary is downloaded automatically if missing.
 
 - Clone this repo and run `refresh_submodules` to fetch the grammar submodules
 - `bun install`
@@ -119,7 +121,7 @@ step. Building the tree-sitter WASM grammars requires `emscripten` (emcc) or Doc
 The architecture is split into Bun workspaces: `client/` (the VS Code language
 client), `server/` (the LSP server), and `shared/` (the host-agnostic semantic
 core: parsers, type model, analyzers). The config-option snapshot is regenerated
-with `node scripts/gen-config-options.mjs <omnetpp-src-dir>`.
+with `bun scripts/gen-config-options.mjs <omnetpp-src-dir>`.
 
 ## Installing
 

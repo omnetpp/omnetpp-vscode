@@ -1,6 +1,6 @@
 // Parses every .ned/.msg file under the given corpus directory with the WASM
 // grammars and reports files containing ERROR/MISSING nodes. Usage:
-//   node scripts/smoke-test.mjs [corpusDir]
+//   bun scripts/smoke-test.mjs [corpusDir]
 import { readdirSync, statSync, readFileSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';

@@ -17,7 +17,7 @@ writeFileSync(join(proj, 'Net.ned'), 'network Net {\n  submodules:\n    h: Nonex
 writeFileSync(join(proj, 'Ok.ned'), 'simple Ok {\n  parameters:\n    int k;\n    int k; //# suppress(duplicate)\n}\n');
 
 function run(args) {
-  const r = spawnSync('node', [cli, '--no-color', ...args], { encoding: 'utf8' });
+  const r = spawnSync(process.execPath, [cli, '--no-color', ...args], { encoding: 'utf8' });
   return { code: r.status, out: r.stdout, err: r.stderr };
 }
 function cleanup() {

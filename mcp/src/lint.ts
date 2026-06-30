@@ -162,7 +162,7 @@ async function main(): Promise<void> {
   const wasmDir = process.env.OMNETPP_WASM_DIR || join(__dirname, 'wasm');
   const configDir = process.env.OMNETPP_CONFIG_DIR || join(__dirname, 'config');
   if (!existsSync(join(wasmDir, 'tree-sitter-ned.wasm'))) {
-    fail(`grammar wasm not found in ${wasmDir}. Run "npm run dev:build" or set OMNETPP_WASM_DIR.`);
+    fail(`grammar wasm not found in ${wasmDir}. Run "bun run dev:build" or set OMNETPP_WASM_DIR.`);
   }
 
   const parsers = await ParserService.create({

@@ -16,11 +16,6 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v3
 
-    - name: Set up Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '20' # node is still the build/test runtime; bun is the package manager
-
     - name: Set up Bun
       uses: oven-sh/setup-bun@v2
 

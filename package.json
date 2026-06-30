@@ -31,17 +31,17 @@
     "mcp"
   ],
   "scripts": {
-    "build:wasm": "node ./scripts/build-wasm.mjs",
-    "compile": "tsc --build",
-    "watch": "tsc --build --watch",
-    "bundle": "node ./esbuild.mjs",
-    "bundle:watch": "node ./esbuild.mjs --watch",
+    "build:wasm": "bun ./scripts/build-wasm.mjs",
+    "compile": "bun ./node_modules/typescript/bin/tsc --build",
+    "watch": "bun ./node_modules/typescript/bin/tsc --build --watch",
+    "bundle": "bun ./esbuild.mjs",
+    "bundle:watch": "bun ./esbuild.mjs --watch",
     "dev:build": "bun run copy:assets && bun run bundle",
-    "copy:assets": "node ./scripts/copy-assets.mjs",
-    "vscode:prepublish": "bun run build:wasm && bun run copy:assets && node ./esbuild.mjs --production",
+    "copy:assets": "bun ./scripts/copy-assets.mjs",
+    "prepackage": "bun run build:wasm && bun run copy:assets && bun ./esbuild.mjs --production",
     "test": "bun run compile && bun test shared/src/test",
-    "package": "vsce package --no-dependencies",
-    "deploy": "vsce publish --no-dependencies"
+    "package": "bun run prepackage && bun ./node_modules/@vscode/vsce/vsce package --no-dependencies",
+    "deploy": "bun run prepackage && bun ./node_modules/@vscode/vsce/vsce publish --no-dependencies"
   },
   "contributes": {
     "mcpServerDefinitionProviders": [
@@ -409,11 +409,8 @@
       }
     }
   },
-  "trustedDependencies": [
-    "@vscode/vsce-sign",
-    "esbuild",
-    "tree-sitter-cli"
-  ],
+  "comment:trustedDependencies": "Intentionally empty: dependency postinstall scripts (esbuild, tree-sitter-cli, @vscode/vsce-sign) are all `node install.js`, which would require Node.js during `bun install`. esbuild ships its binary via the @esbuild/<platform> package, the tree-sitter binary is fetched by scripts/build-wasm.mjs via fetch, and vsce-sign signing is unused (token-based publish). Keeping this empty lets `bun install` run with no Node.js.",
+  "trustedDependencies": [],
   "devDependencies": {
     "@types/bun": "^1.3.0",
     "@types/node": "^20.14.0",
