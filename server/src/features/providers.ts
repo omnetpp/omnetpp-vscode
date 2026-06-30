@@ -521,9 +521,14 @@ function symbolAt(parsed: ParsedDocument, pos: Position, ctx: IndexContext): Sym
  * workspaces, which must never run on an auto-firing view. Use Find All References
  * on the parameter for its INI assignment sites.
  */
-export function computeUsedBy(parsed: ParsedDocument, pos: Position, ctx: IndexContext): { groups: UsedByGroup[] } {
+export function computeUsedBy(
+  parsed: ParsedDocument,
+  pos: Position,
+  ctx: IndexContext,
+): { target?: string; groups: UsedByGroup[] } {
   const sym = symbolAt(parsed, pos, ctx);
-  return { groups: sym ? groupEdges(ctx.db.index.inboundOf(sym)) : [] };
+  if (!sym) return { groups: [] };
+  return { target: refName(sym), groups: groupEdges(ctx.db.index.inboundOf(sym)) };
 }
 
 export interface ImpactResult {

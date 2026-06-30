@@ -176,6 +176,14 @@ abstract class FocusTreeProvider<T extends object> implements vscode.TreeDataPro
   pinnedType(): string | undefined {
     return this.pinnedFqName;
   }
+  /**
+   * The fq-name the tree is currently focused on — the pin when pinned, else the
+   * type resolved from the editor selection (`focusKey`, set during reload). Used
+   * to title the view after the selected/pinned type.
+   */
+  focusedFqName(): string | undefined {
+    return this.pinnedFqName ?? this.focusKey;
+  }
 
   /** Drop the focus cache so the next reload rebuilds (used on pin/config change). */
   protected invalidateFocus(): void {
@@ -717,12 +725,19 @@ class UsedByProvider implements vscode.TreeDataProvider<UsedByNode> {
   private readonly emitter = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this.emitter.event;
   private roots: UsedByNode[] = [];
+  private target?: string;
 
   constructor(private readonly client: LanguageClient) {}
+
+  /** Simple name of the symbol the view is reporting on, for the view title. */
+  focusedName(): string | undefined {
+    return this.target;
+  }
 
   async update(): Promise<void> {
     const focus = activeContext();
     if (!focus) {
+      this.target = undefined;
       if (this.roots.length) {
         this.roots = [];
         this.emitter.fire();
@@ -731,10 +746,12 @@ class UsedByProvider implements vscode.TreeDataProvider<UsedByNode> {
     }
     let groups: UsedByGroupData[] = [];
     try {
-      const res = await this.client.sendRequest<{ groups: UsedByGroupData[] }>('omnetpp/usedBy', focus);
+      const res = await this.client.sendRequest<{ target?: string; groups: UsedByGroupData[] }>('omnetpp/usedBy', focus);
       groups = res?.groups ?? [];
+      this.target = res?.target;
     } catch {
       groups = [];
+      this.target = undefined;
     }
     this.roots = groups.map((g) => ({
       kind: 'group' as const,
@@ -804,15 +821,17 @@ export function registerViews(context: vscode.ExtensionContext, client: Language
     void vscode.commands.executeCommand('setContext', 'omnetpp.paramPinned', moduleParams.isPinned());
   };
 
-  // reflect the pinned type in each view's header ("<Base title> of <Type>")
-  const simpleName = (fq: string) => fq.slice(fq.lastIndexOf('.') + 1);
-  const syncTitle = (view: vscode.TreeView<unknown>, base: string, pinned?: string) => {
-    view.title = pinned ? `${base} of ${simpleName(pinned)}` : base;
-  };
+  // Title each view after the selected/pinned type ("<Type> <Noun>"), falling
+  // back to the generic name when nothing is focused. `name` may be a NED
+  // (`pkg.Type`) or MSG (`ns::Type`) fq-name, so strip up to the last separator.
+  const simpleName = (name: string) => name.replace(/^.*[.:]/, '');
+  const focusTitle = (generic: string, noun: string, name?: string) =>
+    name ? `${simpleName(name)} ${noun}` : generic;
   const syncTitles = () => {
-    syncTitle(inheritanceView, 'NED Inheritance', inheritance.pinnedType());
-    syncTitle(moduleHierarchyView, 'Module Hierarchy', moduleHierarchy.pinnedType());
-    syncTitle(moduleParamsView, 'Module Parameters', moduleParams.pinnedType());
+    inheritanceView.title = focusTitle('NED Inheritance', 'Inheritance', inheritance.focusedFqName());
+    moduleHierarchyView.title = focusTitle('Module Hierarchy', 'Hierarchy', moduleHierarchy.focusedFqName());
+    moduleParamsView.title = focusTitle('Module Parameters', 'Parameters', moduleParams.focusedFqName());
+    usedByView.title = focusTitle('Used By', 'Usage', usedBy.focusedName());
   };
 
   syncPinContext();
@@ -907,45 +926,39 @@ export function registerViews(context: vscode.ExtensionContext, client: Language
       inheritance.pin(it.fqName); // single pin: replaces any previous
       void persistPin();
       syncPinContext();
-      syncTitles();
-      void inheritance.update();
+      void inheritance.update().then(syncTitles);
     }),
     vscode.commands.registerCommand('omnetpp.unpinType', () => {
       inheritance.unpin();
       void persistPin();
       syncPinContext();
-      syncTitles();
-      void inheritance.update();
+      void inheritance.update().then(syncTitles);
     }),
     vscode.commands.registerCommand('omnetpp.pinModule', (n?: ModuleHierNode) => {
       if (!n?.typeFqName) return;
       moduleHierarchy.pin(n.typeFqName);
       void persistModulePin();
       syncPinContext();
-      syncTitles();
-      void moduleHierarchy.update();
+      void moduleHierarchy.update().then(syncTitles);
     }),
     vscode.commands.registerCommand('omnetpp.unpinModule', () => {
       moduleHierarchy.unpin();
       void persistModulePin();
       syncPinContext();
-      syncTitles();
-      void moduleHierarchy.update();
+      void moduleHierarchy.update().then(syncTitles);
     }),
     vscode.commands.registerCommand('omnetpp.pinParam', (n?: ParamHierNode) => {
       if (!n?.typeFqName) return;
       moduleParams.pin(n.typeFqName);
       void persistParamPin();
       syncPinContext();
-      syncTitles();
-      void moduleParams.update();
+      void moduleParams.update().then(syncTitles);
     }),
     vscode.commands.registerCommand('omnetpp.unpinParam', () => {
       moduleParams.unpin();
       void persistParamPin();
       syncPinContext();
-      syncTitles();
-      void moduleParams.update();
+      void moduleParams.update().then(syncTitles);
     }),
     vscode.commands.registerCommand('omnetpp.setActiveConfiguration', () => {
       const ed = vscode.window.activeTextEditor;
@@ -999,12 +1012,15 @@ export function registerViews(context: vscode.ExtensionContext, client: Language
     iniWatcher.onDidChange(refreshConfigs),
   );
 
-  // all views follow the editor unless individually pinned
+  // all views follow the editor unless individually pinned; re-title once the
+  // updates resolve (the focused type is only known after the reload completes).
   const followEditor = () => {
-    if (!inheritance.isPinned()) void inheritance.update();
-    if (!moduleHierarchy.isPinned()) void moduleHierarchy.update();
-    if (!moduleParams.isPinned()) void moduleParams.update();
-    void usedBy.update();
+    void Promise.all([
+      inheritance.isPinned() ? undefined : inheritance.update(),
+      moduleHierarchy.isPinned() ? undefined : moduleHierarchy.update(),
+      moduleParams.isPinned() ? undefined : moduleParams.update(),
+      usedBy.update(),
+    ]).then(syncTitles);
   };
 
   let timer: NodeJS.Timeout | undefined;
@@ -1022,4 +1038,8 @@ export function registerViews(context: vscode.ExtensionContext, client: Language
       if (OMNETPP_LANGS.has(e.document.languageId)) debounced();
     }),
   );
+
+  // Populate the views and titles for the already-active editor: activation does
+  // not fire onDidChangeActiveTextEditor for an editor that is open at startup.
+  followEditor();
 }
