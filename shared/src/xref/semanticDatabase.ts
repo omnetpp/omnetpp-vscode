@@ -222,7 +222,7 @@ export class SemanticDatabase {
         return t ? msgTypeSym(t.fqName) : null;
       }
       case 'ini-network': {
-        const t = resolveNetworkType(this.nedCache, e.rawTarget);
+        const t = resolveNetworkType(this.nedCache, e.rawTarget, e.src?.uri);
         return t ? nedTypeSym(t.fqName) : null;
       }
       case 'ini-extends':

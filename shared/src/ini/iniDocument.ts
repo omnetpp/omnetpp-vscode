@@ -36,6 +36,9 @@ export interface IniInclude {
 export interface IniDocument {
   sections: IniSection[];
   includes: IniInclude[];
+  /** The document's own URI, when known — used to resolve an unqualified
+   *  `network=` name via the ini folder's NED package, as OMNeT++ does. */
+  uri?: string;
 }
 
 /** Whether the character at index i is escaped by an odd run of backslashes. */
@@ -83,7 +86,7 @@ const INCLUDE_RE = /^\s*include\s+(.+?)\s*$/;
  * backslash line continuation, `[General]`/`[Config X]` sections, `include`
  * directives, and recognizes `extends=` for section inheritance.
  */
-export function parseIni(text: string): IniDocument {
+export function parseIni(text: string, uri?: string): IniDocument {
   const lines = text.split(/\r?\n/);
   const sections: IniSection[] = [];
   const includes: IniInclude[] = [];
@@ -200,7 +203,7 @@ export function parseIni(text: string): IniDocument {
     sec.range.end = valueEnd;
   }
 
-  return { sections, includes };
+  return { sections, includes, uri };
 }
 
 /** A config section summarized for the Configurations view / run selectors. */

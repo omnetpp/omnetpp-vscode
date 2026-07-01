@@ -45,16 +45,16 @@ const noMatch = (ini: string, cache: NedResourceCache) =>
 test('NED default typename (inherited) resolves the like slot', async () => {
   const cache = await cacheWith(NED);
   // BMacIf inherits `radio` from WirelessIf and sets `radio.typename = default("ApskRadio")`.
-  const paths = reachableParamPaths(parseIni('network = NetB\n'), cache, parseIni('network = NetB\n').sections[0]).map((p) => p.path);
+  const paths = reachableParamPaths(parseIni('network = t.NetB\n'), cache, parseIni('network = t.NetB\n').sections[0]).map((p) => p.path);
   assert.ok(paths.includes('NetB.h.radio.freq'), JSON.stringify(paths.filter((p) => p.includes('radio'))));
-  assert.deepEqual(noMatch('network = NetB\n*.h.radio.freq = 5\n', cache), []);
+  assert.deepEqual(noMatch('network = t.NetB\n*.h.radio.freq = 5\n', cache), []);
   // gain belongs to UnitRadio, not the resolved ApskRadio -> flagged
-  assert.ok(noMatch('network = NetB\n*.h.radio.gain = 5\n', cache).length > 0);
+  assert.ok(noMatch('network = t.NetB\n*.h.radio.gain = 5\n', cache).length > 0);
 });
 
 test('INI typename overrides a NED default assignment', async () => {
   const cache = await cacheWith(NED);
-  const ini = 'network = NetB\n*.h.radio.typename = "UnitRadio"\n';
+  const ini = 'network = t.NetB\n*.h.radio.typename = "UnitRadio"\n';
   assert.deepEqual(noMatch(ini + '*.h.radio.gain = 5\n', cache), []);       // now UnitRadio
   assert.ok(noMatch(ini + '*.h.radio.freq = 5\n', cache).length > 0);       // ApskRadio's freq gone
 });
@@ -62,14 +62,14 @@ test('INI typename overrides a NED default assignment', async () => {
 test('a NED fixed (non-default) typename assignment beats INI', async () => {
   const cache = await cacheWith(NED);
   // FixedNedIf sets `radio.typename = "UnitRadio"` (fixed) — INI cannot override it.
-  const ini = 'network = NetFN\n*.h.radio.typename = "ApskRadio"\n';
+  const ini = 'network = t.NetFN\n*.h.radio.typename = "ApskRadio"\n';
   assert.deepEqual(noMatch(ini + '*.h.radio.gain = 5\n', cache), []);       // stays UnitRadio
   assert.ok(noMatch(ini + '*.h.radio.freq = 5\n', cache).length > 0);
 });
 
 test('a fixed <"X"> bracket beats INI', async () => {
   const cache = await cacheWith(NED);
-  const ini = 'network = NetFB\n*.h.radio.typename = "ApskRadio"\n';
+  const ini = 'network = t.NetFB\n*.h.radio.typename = "ApskRadio"\n';
   assert.deepEqual(noMatch(ini + '*.h.radio.gain = 5\n', cache), []);       // stays UnitRadio
   assert.ok(noMatch(ini + '*.h.radio.freq = 5\n', cache).length > 0);
 });
@@ -77,9 +77,9 @@ test('a fixed <"X"> bracket beats INI', async () => {
 test('a <default("X")> bracket is used absent INI, but overridden by INI', async () => {
   const cache = await cacheWith(NED);
   // no INI typename -> ApskRadio (freq)
-  assert.deepEqual(noMatch('network = NetD\n*.h.radio.freq = 5\n', cache), []);
+  assert.deepEqual(noMatch('network = t.NetD\n*.h.radio.freq = 5\n', cache), []);
   // INI typename -> UnitRadio (gain)
-  const ini = 'network = NetD\n*.h.radio.typename = "UnitRadio"\n';
+  const ini = 'network = t.NetD\n*.h.radio.typename = "UnitRadio"\n';
   assert.deepEqual(noMatch(ini + '*.h.radio.gain = 5\n', cache), []);
   assert.ok(noMatch(ini + '*.h.radio.freq = 5\n', cache).length > 0);
 });

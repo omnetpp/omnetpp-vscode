@@ -140,16 +140,50 @@ export function configResolver(entries: IniEntry[]): ConfigResolve {
   return (normPath: string) => compiled.find((c) => c.re.test(normPath))?.entry;
 }
 
-export function resolveNetworkType(cache: NedResourceCache, name: string): NedTypeInfo | undefined {
+/** The directory portion of a file URI (everything before the last '/'). */
+function dirOf(uri: string): string {
+  const i = uri.lastIndexOf('/');
+  return i < 0 ? '' : uri.slice(0, i);
+}
+
+/**
+ * The NED package of the folder containing the ini file, or `undefined` if it
+ * cannot be determined. OMNeT++ derives this from the ini folder's NED source
+ * root (`getNedPackageForFolder`); a NED file sharing the ini file's directory
+ * carries the identical folder-derived package, so we read it off a co-located
+ * NED file. Only such a file could declare a `<package>.Name` network anyway, so
+ * this is behaviourally equivalent to OMNeT++'s package-prefix lookup.
+ */
+function iniFolderPackage(cache: NedResourceCache, iniUri: string): string | undefined {
+  const dir = dirOf(iniUri);
+  for (const f of cache.allFiles()) {
+    if (dirOf(f.uri) === dir) return f.packageName;
+  }
+  return undefined;
+}
+
+/**
+ * Resolve a `network=` value to its NED type, matching OMNeT++'s
+ * `EnvirBase::resolveNetwork`: an unqualified name is looked up first as
+ * `<ini-folder-package>.Name` and then verbatim (`Name`, i.e. the root package),
+ * both by exact fully-qualified name; a qualified name is looked up directly.
+ * The returned type may not be a network — callers validate that separately, just
+ * as OMNeT++ finds the module type first and then checks `isNetwork()`.
+ */
+export function resolveNetworkType(
+  cache: NedResourceCache,
+  name: string,
+  iniUri?: string,
+): NedTypeInfo | undefined {
   if (name.includes('.')) return cache.getType(name);
-  let fallback: NedTypeInfo | undefined;
-  for (const t of cache.allTypes()) {
-    if (t.simpleName === name && !t.isInnerType && t.isModuleType()) {
-      if (t.kind === 'network') return t;
-      fallback = fallback ?? t;
+  if (iniUri) {
+    const pkg = iniFolderPackage(cache, iniUri);
+    if (pkg) {
+      const inPkg = cache.getType(`${pkg}.${name}`);
+      if (inPkg) return inPkg;
     }
   }
-  return fallback;
+  return cache.getType(name);
 }
 
 // expansion cache, scoped per resource-cache instance and keyed by (generation, fqName)
@@ -200,7 +234,7 @@ export function iniParamDiagnostics(
   for (const section of doc.sections) {
     const netName = effectiveNetwork(doc, section);
     if (!netName) continue;
-    const net = resolveNetworkType(cache, netName);
+    const net = resolveNetworkType(cache, netName, doc.uri);
     if (!net) continue;
 
     const typenameEntries = collectTypenameEntries(doc, section);
@@ -358,7 +392,7 @@ export function addMissingKeys(
   for (const section of doc.sections) {
     const netName = effectiveNetwork(doc, section);
     if (!netName) continue;
-    const net = resolveNetworkType(cache, netName);
+    const net = resolveNetworkType(cache, netName, doc.uri);
     if (!net) continue;
     const bindings = buildTypenameBindings(collectTypenameEntries(doc, section));
     const slots = paramSlots(getExpansion(cache, net, bindings));
@@ -408,7 +442,7 @@ export function matchedParamModules(
 ): MatchedParamModule[] {
   const netName = effectiveNetwork(doc, section) ?? fallbackNetwork;
   if (!netName) return [];
-  const net = resolveNetworkType(cache, netName);
+  const net = resolveNetworkType(cache, netName, doc.uri);
   if (!net) return [];
   const re = iniKeyToRegex(key);
   const out: MatchedParamModule[] = [];
@@ -460,7 +494,7 @@ export function matchedModules(
   const prefix = key.slice(0, dot);
   const netName = effectiveNetwork(doc, section) ?? fallbackNetwork;
   if (!netName) return [];
-  const net = resolveNetworkType(cache, netName);
+  const net = resolveNetworkType(cache, netName, doc.uri);
   if (!net) return [];
   const re = iniKeyToRegex(prefix);
   const out: { path: string; typeFqName: string; decl: Location }[] = [];
@@ -565,7 +599,7 @@ export function findParamAssignments(
       if (!netName) continue;
       const tnEntries = collectTypenameEntries(doc, section);
       if (relevant && !sectionMaybeRelevant(netName, tnEntries, relevant)) continue;
-      const net = resolveNetworkType(cache, netName);
+      const net = resolveNetworkType(cache, netName, doc.uri);
       if (!net) continue;
       const bindings = buildTypenameBindings(tnEntries);
       const expansion = getExpansion(cache, net, bindings);
@@ -630,7 +664,7 @@ export function reachableParamPaths(
 ): { path: string; type?: string }[] {
   const netName = effectiveNetwork(doc, section);
   if (!netName) return [];
-  const net = resolveNetworkType(cache, netName);
+  const net = resolveNetworkType(cache, netName, doc.uri);
   if (!net) return [];
   const bindings = buildTypenameBindings(collectTypenameEntries(doc, section));
   return paramSlots(getExpansion(cache, net, bindings)).map((p) => ({ path: p.path, type: p.type }));

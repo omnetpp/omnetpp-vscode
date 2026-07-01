@@ -3,26 +3,12 @@ import { ConfigRegistry } from './configRegistry';
 import { classifyKey } from './iniConfigChecks';
 import type { IniDocument, IniSection } from './iniDocument';
 import { NedResourceCache } from '../ned/nedResourceCache';
-import { NedTypeInfo } from '../ned/nedTypeInfo';
+import { resolveNetworkType } from './iniParamResolution';
 
 /** The bare section name (config name), e.g. "General" or "Foo" for [Config Foo]/[Foo]. */
 export function sectionName(sec: IniSection): string {
   if (sec.type === 'general') return 'General';
   return sec.configName ?? sec.rawName;
-}
-
-/** Look up a NED type for a `network=` value, of any kind (for diagnostics). */
-function resolveAnyType(cache: NedResourceCache, name: string): NedTypeInfo | undefined {
-  if (name.includes('.')) return cache.getType(name);
-  let module: NedTypeInfo | undefined;
-  let other: NedTypeInfo | undefined;
-  for (const t of cache.allTypes()) {
-    if (t.simpleName !== name || t.isInnerType) continue;
-    if (t.isNetworkType()) return t;
-    if (t.isModuleType()) module = module ?? t;
-    else other = other ?? t;
-  }
-  return module ?? other;
 }
 
 /**
@@ -98,7 +84,7 @@ export function iniStructureDiagnostics(
             code: 'config-placement',
           });
         }
-        if (e.key === 'network') validateNetwork(cache, e, out);
+        if (e.key === 'network') validateNetwork(cache, e, doc.uri, out);
       }
     }
   }
@@ -108,11 +94,15 @@ export function iniStructureDiagnostics(
 function validateNetwork(
   cache: NedResourceCache,
   e: { value: string; valueRange: import('../model/location').Range },
+  iniUri: string | undefined,
   out: Diagnostic[],
 ): void {
   const value = e.value;
   if (!value || value.includes('$')) return; // empty or variable-driven: skip
-  const t = resolveAnyType(cache, value);
+
+  // Resolve exactly as OMNeT++ does (`<ini-folder-package>.Name`, then verbatim);
+  // report a "not found" / "not a network" error only for what it would actually pick.
+  const t = resolveNetworkType(cache, value, iniUri);
   let msg: string | undefined;
   if (!t) msg = `No such NED type: ${value}`;
   else if (!t.isModuleType()) msg = `Not a module type: ${value}`;

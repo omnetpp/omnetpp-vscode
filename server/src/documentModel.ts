@@ -49,7 +49,7 @@ export class DocumentModelStore {
       tree = this.parsers.parse(language as GrammarId, text, undefined);
       prev?.tree?.delete();
     } else if (language === 'ini') {
-      ini = parseIni(text);
+      ini = parseIni(text, doc.uri);
     }
     const parsed: ParsedDocument = {
       uri: doc.uri,

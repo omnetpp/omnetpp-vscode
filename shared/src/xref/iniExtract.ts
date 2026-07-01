@@ -27,7 +27,7 @@ export function extractIniEdges(nedCache: NedResourceCache, uri: string, doc: In
 
     for (const e of sec.entries) {
       if (e.key !== 'network' || !e.value) continue;
-      const resolved = resolveNetworkType(nedCache, e.value);
+      const resolved = resolveNetworkType(nedCache, e.value, uri);
       out.push({
         kind: 'ini-network',
         from: fromSym,

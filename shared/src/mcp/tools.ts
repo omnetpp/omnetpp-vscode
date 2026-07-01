@@ -188,7 +188,7 @@ export async function lintFile(uri: string, ctx: ToolContext): Promise<{ uri: st
     }
   } else if (uri.endsWith('.ini')) {
     const text = await readText(uri, ctx);
-    const doc = parseIni(text);
+    const doc = parseIni(text, uri);
     diags.push(
       ...iniLocalDiagnostics(doc),
       ...iniVariableDiagnostics(doc),
@@ -413,7 +413,7 @@ const TOOLS: ToolDef[] = [
     },
     handler: async (a, ctx) => {
       const uri = ctx.toUri(a.uri);
-      const doc = parseIni(await readText(uri, ctx));
+      const doc = parseIni(await readText(uri, ctx), uri);
       return configSummaries(doc).map((c) => {
         const section = doc.sections.find((s) => s.configName === c.name);
         return {
@@ -440,14 +440,14 @@ const TOOLS: ToolDef[] = [
     },
     handler: async (a, ctx) => {
       const uri = ctx.toUri(a.uri);
-      const doc = parseIni(await readText(uri, ctx));
+      const doc = parseIni(await readText(uri, ctx), uri);
       const section = a.config
         ? doc.sections.find((s) => s.configName === a.config)
         : doc.sections.find((s) => s.type === 'general');
       if (!section) return { error: `section not found: ${a.config ?? 'General'}` };
       const netName = effectiveNetwork(doc, section);
       if (!netName) return { network: null, resolved: false, params: [] };
-      const net = resolveNetworkType(ctx.nedCache, netName);
+      const net = resolveNetworkType(ctx.nedCache, netName, uri);
       if (!net) return { network: netName, resolved: false, params: [] };
       const expansion = expandNetwork(ctx.nedCache, net);
       const resolve = configResolver(configEntriesInScope(doc, section, ctx.configRegistry));

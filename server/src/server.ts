@@ -763,7 +763,7 @@ async function iniDocFor(uri: string): Promise<IniDocument | undefined> {
   const p = safeFsPath(uri);
   if (!p) return undefined;
   try {
-    return parseIni(await fsp.readFile(p, 'utf8'));
+    return parseIni(await fsp.readFile(p, 'utf8'), uri);
   } catch {
     return undefined;
   }

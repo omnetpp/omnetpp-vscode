@@ -5,7 +5,7 @@ import { BUILTIN_NED_TEXT, BUILTIN_URI, NedResourceCache } from '../ned/nedResou
 import { ConfigRegistry } from '../ini/configRegistry';
 import { iniStructureDiagnostics } from '../ini/iniStructureChecks';
 import { iniVariableDiagnostics } from '../ini/iniVariables';
-import { iniParamDiagnostics } from '../ini/iniParamResolution';
+import { iniParamDiagnostics, resolveNetworkType } from '../ini/iniParamResolution';
 import { nedRename } from '../ned/nedRename';
 import { nedReferences } from '../ned/nedNavigation';
 import { prepareTypeHierarchy, typeSupertypes, typeSubtypes, inheritanceSpineFor } from '../ned/nedHierarchy';
@@ -85,6 +85,56 @@ test('network= unknown / not-a-module / not-a-network', async () => {
 
   const ok = iniStructureDiagnostics(parseIni('[General]\nnetwork = Net\n'), cache, registry);
   assert.ok(!ok.some((d) => d.code === 'network-type'));
+});
+
+test('network= unqualified name resolves via the ini folder package, like OMNeT++', async () => {
+  const cache = await nedCache({
+    'file:///proj/a/net.ned': { text: 'package a;\nnetwork Dup { }', pkg: 'a' },
+    'file:///proj/b/net.ned': { text: 'package b;\nnetwork Dup { }', pkg: 'b' },
+  });
+  // ini in a/ resolves Dup to a.Dup; ini in b/ resolves the same name to b.Dup
+  assert.equal(resolveNetworkType(cache, 'Dup', 'file:///proj/a/omnetpp.ini')?.fqName, 'a.Dup');
+  assert.equal(resolveNetworkType(cache, 'Dup', 'file:///proj/b/omnetpp.ini')?.fqName, 'b.Dup');
+
+  // neither is flagged: OMNeT++ has no "ambiguous network" concept
+  const inA = iniStructureDiagnostics(parseIni('[General]\nnetwork = Dup\n', 'file:///proj/a/omnetpp.ini'), cache, registry);
+  assert.ok(!inA.some((d) => d.code === 'ambiguous-network' || d.code === 'network-type'), JSON.stringify(inA));
+
+  // a fully qualified name is looked up directly
+  assert.equal(resolveNetworkType(cache, 'b.Dup', 'file:///proj/a/omnetpp.ini')?.fqName, 'b.Dup');
+  const qualified = iniStructureDiagnostics(parseIni('[General]\nnetwork = a.Dup\n', 'file:///proj/a/omnetpp.ini'), cache, registry);
+  assert.ok(!qualified.some((d) => d.code === 'network-type'), JSON.stringify(qualified));
+});
+
+test('network= unqualified name with no co-located NED falls back to the root package', async () => {
+  const cache = await nedCache({
+    'file:///proj/a/net.ned': { text: 'package a;\nnetwork Dup { }', pkg: 'a' },
+    'file:///Root.ned': { text: 'network Root { }', pkg: '' },
+  });
+  // ini folder has no NED file: only the verbatim (root-package) lookup applies
+  assert.equal(resolveNetworkType(cache, 'Root', 'file:///proj/x/omnetpp.ini')?.fqName, 'Root');
+  assert.equal(resolveNetworkType(cache, 'Dup', 'file:///proj/x/omnetpp.ini'), undefined);
+});
+
+test('param resolution uses the ini-folder network for an unqualified name', async () => {
+  const cache = await nedCache({
+    'file:///proj/a/net.ned': { text: 'package a;\nnetwork Dup { parameters: int aOnly = 0; }', pkg: 'a' },
+    'file:///proj/b/net.ned': { text: 'package b;\nnetwork Dup { parameters: int bOnly = 0; }', pkg: 'b' },
+  });
+  // ini next to package a → Dup.aOnly matches a.Dup, no warning
+  const nearA = iniParamDiagnostics(
+    parseIni('[General]\nnetwork = Dup\nDup.aOnly = 1\n', 'file:///proj/a/omnetpp.ini'),
+    cache,
+    registry,
+  );
+  assert.deepEqual(nearA.filter((d) => d.code === 'no-matching-param'), [], JSON.stringify(nearA));
+  // the very same key against package b resolves to b.Dup, where aOnly does not exist
+  const nearB = iniParamDiagnostics(
+    parseIni('[General]\nnetwork = Dup\nDup.aOnly = 1\n', 'file:///proj/b/omnetpp.ini'),
+    cache,
+    registry,
+  );
+  assert.ok(nearB.some((d) => d.code === 'no-matching-param'), JSON.stringify(nearB));
 });
 
 // ---- Phase 2: iteration variables ----

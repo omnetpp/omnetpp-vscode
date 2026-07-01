@@ -15,7 +15,7 @@ export class IniResourceCache {
   private docs = new Map<string, { doc: IniDocument; text: string }>();
 
   addFile(uri: string, text: string): void {
-    this.docs.set(uri, { doc: parseIni(text), text });
+    this.docs.set(uri, { doc: parseIni(text, uri), text });
     this.generation++;
   }
 
