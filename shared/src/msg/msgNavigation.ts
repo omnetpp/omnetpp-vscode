@@ -104,7 +104,7 @@ export function msgHover(
 }
 
 const MSG_PRIMITIVE_ITEMS = [
-  'bool', 'char', 'short', 'int', 'long', 'double', 'string',
+  'bool', 'char', 'short', 'int', 'long', 'float', 'double', 'string',
   'unsigned int', 'unsigned long',
 ];
 

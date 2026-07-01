@@ -51,6 +51,20 @@ test('MSG unknown-type warning only for unresolved unqualified names', async () 
   assert.match(msgs[0], /Unknown type 'Mystery'/);
 });
 
+test('MSG float is a recognized primitive type', async () => {
+  const text = `message M {
+  float f = 0;
+  double d = 0;
+  float arr[];
+  const float *cf;
+}`;
+  const cache = await build({ 'file:///m.msg': text });
+  // float must not be flagged as an unknown type (parallel to double)
+  assert.equal(msgSemanticDiagnostics(cache, 'file:///m.msg').length, 0);
+  const m = cache.getType('M')!;
+  assert.deepEqual(m.fields().map((f) => f.name), ['f', 'd', 'arr', 'cf']);
+});
+
 test('MSG unknown-type respects cplusplus and forward decls', async () => {
   const text = `cplusplus {{ class ExternalThing; }}
 class Fwd;

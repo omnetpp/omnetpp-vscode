@@ -10,7 +10,7 @@ export interface MsgFileInfo {
 }
 
 export const MSG_PRIMITIVES = new Set([
-  'char', 'short', 'int', 'long', 'double', 'string', 'bool',
+  'char', 'short', 'int', 'long', 'float', 'double', 'string', 'bool',
   'unsigned char', 'unsigned short', 'unsigned int', 'unsigned long',
 ]);
 
