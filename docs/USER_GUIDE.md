@@ -141,10 +141,12 @@ line **before** the reported line or as a **trailing** comment on it.
 
 `suppress()` with no code silences every diagnostic on the target line; `suppress(a, b)`
 silences several. A lightbulb **Quick Fix** on any diagnostic inserts the matching
-directive for you.
+directive as a **trailing comment on that line**.
 
-> One limitation: for MSG, a trailing directive on a *type header* line isn't seen — put it
-> on the line above instead.
+> One MSG quirk: the grammar drops a trailing comment on a *type header* line, so a
+> directive there can't be trailing — it must go on the line above. The Quick Fix knows
+> this and, for MSG type-header diagnostics only, inserts the directive on the line above
+> instead.
 
 **How to use it.** Hover a diagnostic (or read the Problems view) to see its code, then add
 the directive — or use the quick fix.

@@ -85,6 +85,7 @@ import {
   nodeRange,
   nameNode,
   msgNameNode,
+  isMsgTypeHeaderLine,
   MsgTypeInfo,
   parseSymbolId,
   SymbolId,
@@ -732,7 +733,14 @@ export function computeCodeActions(
       kind: 'quickfix',
       edit: { changes: { [parsed.uri]: [{ range: { start: at, end: at }, newText }] } },
     });
-    out.push(insert(`Suppress '${code}' on this line`, { line, character: lineText.length }, `  ${directive}`));
+    // A trailing directive is dropped by the MSG grammar on a type-header line, so
+    // there it must go on the line above; everywhere else, keep it trailing.
+    if (parsed.language === 'msg' && parsed.tree && isMsgTypeHeaderLine(parsed.tree, line)) {
+      const indent = /^\s*/.exec(lineText)?.[0] ?? '';
+      out.push(insert(`Suppress '${code}' on the line above`, { line, character: 0 }, `${indent}${directive}\n`));
+    } else {
+      out.push(insert(`Suppress '${code}' on this line`, { line, character: lineText.length }, `  ${directive}`));
+    }
   }
   return out;
 }

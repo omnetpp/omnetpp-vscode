@@ -50,6 +50,23 @@ export function msgLeadingDocComment(node: SyntaxNode): string | undefined {
   return lines.length ? stripCommentMarkers(lines.join('\n')) : undefined;
 }
 
+/**
+ * True if `line` (0-based) falls on a MSG type *header* — from the type name
+ * through the opening `{` of its body. The MSG grammar drops a trailing comment
+ * placed here, so a `suppress(...)` directive can't be a trailing comment on such a
+ * line and must go on the line above instead (see the suppress-directive quick-fix).
+ */
+export function isMsgTypeHeaderLine(tree: Tree, line: number): boolean {
+  for (const t of msgTopLevelTypes(tree)) {
+    const name = msgNameNode(t);
+    const startRow = name ? name.startPosition.row : t.startPosition.row;
+    const body = msgBodyNode(t);
+    const endRow = body ? body.startPosition.row : t.endPosition.row;
+    if (line >= startRow && line <= endRow) return true;
+  }
+  return false;
+}
+
 export function msgTopLevelTypes(tree: Tree): SyntaxNode[] {
   const root = tree.rootNode;
   const out: SyntaxNode[] = [];
