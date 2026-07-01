@@ -7,5 +7,8 @@
     "types": ["node"]
   },
   "references": [{ "path": "../shared" }],
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  // Tests run via `bun test server/src/test/...` directly over the TS sources (they
+  // import `bun:test`, which isn't in the `node`-only build types); exclude from tsc.
+  "exclude": ["src/test/**"]
 }

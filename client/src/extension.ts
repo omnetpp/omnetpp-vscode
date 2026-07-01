@@ -1,5 +1,14 @@
 import * as path from 'node:path';
-import { ExtensionContext, workspace, lm, McpHttpServerDefinition } from 'vscode';
+import {
+  ExtensionContext,
+  workspace,
+  window,
+  extensions,
+  RelativePattern,
+  lm,
+  McpHttpServerDefinition,
+  Disposable,
+} from 'vscode';
 import {
   DidChangeConfigurationNotification,
   LanguageClient,
@@ -11,6 +20,19 @@ import { registerViews } from './views';
 import { startMcpBridge } from './mcpBridge';
 
 let client: LanguageClient | undefined;
+
+/** The slice of VS Code's built-in Git extension API we use, so we can react to
+ *  HEAD changes without a hard dependency on its `git.d.ts` types. */
+interface GitRepository {
+  readonly state: { onDidChange(listener: () => void): Disposable };
+}
+interface GitAPI {
+  readonly repositories: GitRepository[];
+  onDidOpenRepository(listener: (repo: GitRepository) => void): Disposable;
+}
+interface GitExtensionExports {
+  getAPI(version: 1): GitAPI;
+}
 
 /** The `omnetpp.*` settings the server consumes; read on activation and on change. */
 function readSettings() {
@@ -48,6 +70,7 @@ export function activate(context: ExtensionContext): void {
       fileEvents: [
         workspace.createFileSystemWatcher('**/*.ned'),
         workspace.createFileSystemWatcher('**/*.msg'),
+        workspace.createFileSystemWatcher('**/*.ini'),
         workspace.createFileSystemWatcher('**/{.nedfolders,.nedexclusions,package.ned}'),
       ],
     },
@@ -62,6 +85,7 @@ export function activate(context: ExtensionContext): void {
 
   void client.start();
   registerViews(context, client);
+  registerRevalidationTriggers(context);
 
   // Push setting changes to the server so they apply without a window reload.
   // (The LanguageClient handles `omnetpp.trace.server` live on its own.)
@@ -75,6 +99,49 @@ export function activate(context: ExtensionContext): void {
   );
 
   registerMcpProvider(context);
+}
+
+/**
+ * Ask the server to reconcile its index against disk when a background process may
+ * have changed files without reliable watch events — chiefly git operations
+ * (checkout/reset/stash) and returning focus to the window after external edits.
+ * All triggers are coalesced through one debounce.
+ */
+function registerRevalidationTriggers(context: ExtensionContext): void {
+  let timer: NodeJS.Timeout | undefined;
+  const poke = (): void => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = undefined;
+      void client?.sendNotification('omnetpp/revalidate');
+    }, 250);
+  };
+
+  // Window focus regained: a `git checkout` run in a terminal or another editor may
+  // have rewritten files while VS Code was unfocused (and dropped watch events).
+  context.subscriptions.push(
+    window.onDidChangeWindowState((e) => {
+      if (e.focused) poke();
+    }),
+  );
+
+  // Git HEAD changes (checkout/reset/stash) — the most reliable bulk-change signal.
+  const gitExports = extensions.getExtension<GitExtensionExports>('vscode.git')?.exports;
+  const api = gitExports?.getAPI(1);
+  if (api) {
+    const hook = (repo: GitRepository): void => {
+      context.subscriptions.push(repo.state.onDidChange(poke));
+    };
+    api.repositories.forEach(hook);
+    context.subscriptions.push(api.onDidOpenRepository(hook));
+  } else {
+    // Fallback when the Git extension is unavailable: watch `.git/HEAD` per folder.
+    // (A bare `**` glob never matches dotfolders, so anchor it with a RelativePattern.)
+    for (const folder of workspace.workspaceFolders ?? []) {
+      const w = workspace.createFileSystemWatcher(new RelativePattern(folder, '.git/HEAD'));
+      context.subscriptions.push(w, w.onDidChange(poke), w.onDidCreate(poke));
+    }
+  }
 }
 
 /**

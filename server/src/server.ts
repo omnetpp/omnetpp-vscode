@@ -15,6 +15,9 @@ import {
   TypeHierarchyItem,
   SymbolKind,
   CodeLens as LspCodeLens,
+  DidChangeWatchedFilesNotification,
+  WatchKind,
+  type Disposable,
 } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { promises as fsp } from 'node:fs';
@@ -89,6 +92,7 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
     if (p) workspaceFolders = [p];
   }
   applySettings(params.initializationOptions);
+  canRegisterWatchers = !!params.capabilities.workspace?.didChangeWatchedFiles?.dynamicRegistration;
 
   const wasmDir = join(__dirname, 'wasm');
   parsers = await ParserService.create({
@@ -186,6 +190,7 @@ connection.onInitialized(async () => {
   try {
     await index.initialize(workspaceFolders, currentNedPathDirs());
     logIndexStatus();
+    await registerExternalWatchers();
   } catch (e) {
     connection.console.error(`OMNeT++ indexing failed: ${(e as Error).message}`);
   }
@@ -349,6 +354,36 @@ function isProjectConfigFile(uri: string): boolean {
   return /\/(\.nedfolders|\.nedexclusions|package\.ned)$/.test(uri);
 }
 
+// ---- external-root file watching ------------------------------------------
+// VS Code's client-declared `synchronize.fileEvents` globs only watch files
+// inside the open workspace folders. Source roots from `omnetpp.nedPath` (and any
+// install-dir roots) live elsewhere, so the server registers watchers for them via
+// LSP dynamic registration. Re-run whenever the resolved roots may have changed
+// (startup and after every reindex) so setting changes re-scope the watchers.
+let canRegisterWatchers = false;
+let externalWatchers: Disposable | undefined;
+
+async function registerExternalWatchers(): Promise<void> {
+  if (!index || !canRegisterWatchers) return;
+  const dirs = index.externalRootDirs(workspaceFolders);
+  externalWatchers?.dispose(); // drop the previous set before installing a new one
+  externalWatchers = undefined;
+  if (!dirs.length) return;
+  const watchers = dirs.map((dir) => ({
+    globPattern: { baseUri: pathToFileURL(dir).toString(), pattern: '**/*.{ned,msg,ini}' },
+    kind: WatchKind.Create | WatchKind.Change | WatchKind.Delete,
+  }));
+  try {
+    externalWatchers = await connection.client.register(DidChangeWatchedFilesNotification.type, {
+      watchers,
+    });
+  } catch (e) {
+    connection.console.warn(
+      `OMNeT++ external-root watch registration failed: ${(e as Error).message}`,
+    );
+  }
+}
+
 let reindexTimer: NodeJS.Timeout | undefined;
 function scheduleReindex(): void {
   if (reindexTimer) clearTimeout(reindexTimer);
@@ -358,6 +393,7 @@ function scheduleReindex(): void {
     try {
       await index.reindex(workspaceFolders, currentNedPathDirs());
       logIndexStatus();
+      await registerExternalWatchers(); // roots may have changed → re-scope watchers
       // re-apply open buffers (the scan skips them) then refresh everything
       for (const doc of documents.all()) refresh(doc);
       publishWorkspaceDiagnostics();
@@ -366,6 +402,51 @@ function scheduleReindex(): void {
     }
   }, 400);
 }
+
+// ---- self-healing revalidation --------------------------------------------
+// A trigger-driven reconciliation of the index against disk, for changes that
+// file-watch events miss (bulk `git checkout`/`reset`/`stash`, a build script).
+// Debounced and single-flighted so a storm of triggers collapses to one pass.
+let revalidateTimer: NodeJS.Timeout | undefined;
+let revalidateRunning = false;
+let revalidatePending = false;
+function scheduleRevalidate(): void {
+  if (revalidateTimer) clearTimeout(revalidateTimer);
+  revalidateTimer = setTimeout(() => void runRevalidate(), 300);
+}
+async function runRevalidate(): Promise<void> {
+  revalidateTimer = undefined;
+  if (!index) return;
+  if (revalidateRunning) {
+    revalidatePending = true; // a trigger arrived mid-pass → run once more after
+    return;
+  }
+  revalidateRunning = true;
+  try {
+    const r = await index.revalidate(workspaceFolders, currentNedPathDirs());
+    if (r.needsReindex) {
+      scheduleReindex(); // roots/exclusions changed → full rebuild
+    } else if (r.nedChanged || r.msgChanged || r.iniChanged) {
+      // reconciled closed files may change cross-file diagnostics for open docs
+      if (r.nedChanged) refreshAll('ned');
+      if (r.msgChanged) refreshAll('msg');
+      logIndexStatus();
+      scheduleWorkspaceDiagnostics();
+    }
+  } catch (e) {
+    connection.console.error(`OMNeT++ revalidate failed: ${(e as Error).message}`);
+  } finally {
+    revalidateRunning = false;
+    if (revalidatePending) {
+      revalidatePending = false;
+      scheduleRevalidate();
+    }
+  }
+}
+
+// The client pokes this on git HEAD changes and window-focus regain (see the
+// extension), where a background process may have rewritten files on disk.
+connection.onNotification('omnetpp/revalidate', () => scheduleRevalidate());
 
 connection.onDidChangeConfiguration((change) => {
   const before = `${nedPathSetting}\0${installDir}`;
@@ -387,6 +468,7 @@ connection.onDidChangeWatchedFiles(async (params) => {
   if (!index) return;
   let nedChanged = false;
   let msgChanged = false;
+  let iniChanged = false;
   let layoutChanged = false;
   for (const change of params.changes) {
     if (isProjectConfigFile(change.uri)) {
@@ -395,19 +477,22 @@ connection.onDidChangeWatchedFiles(async (params) => {
     }
     const isNed = change.uri.endsWith('.ned');
     const isMsg = change.uri.endsWith('.msg');
-    if (!isNed && !isMsg) continue;
+    const isIni = change.uri.endsWith('.ini');
+    if (!isNed && !isMsg && !isIni) continue;
     // skip files that are open (their state comes from the editor)
     if (documents.get(change.uri)) continue;
     await index.onFileChanged(change.uri, change.type === FileChangeType.Deleted);
     if (isNed) nedChanged = true;
-    else msgChanged = true;
+    else if (isMsg) msgChanged = true;
+    else iniChanged = true;
   }
   if (layoutChanged) {
     scheduleReindex(); // re-discovers .nedfolders/.nedexclusions/package.ned
   } else {
     if (nedChanged) refreshAll('ned');
     if (msgChanged) refreshAll('msg');
-    if (nedChanged || msgChanged) scheduleWorkspaceDiagnostics();
+    // closed INI files have no open-doc refresh path; the workspace pass covers them
+    if (nedChanged || msgChanged || iniChanged) scheduleWorkspaceDiagnostics();
   }
 });
 

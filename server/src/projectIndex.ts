@@ -19,6 +19,15 @@ import {
   rootForPath,
 } from '@omnetpp/shared';
 
+/** Outcome of a `revalidate()` pass: whether a full reindex is required and,
+ *  if not, which languages had at least one file added/removed/changed. */
+export interface RevalidateResult {
+  needsReindex: boolean;
+  nedChanged: boolean;
+  msgChanged: boolean;
+  iniChanged: boolean;
+}
+
 /** Per-source-root index statistics, reported in the server log. */
 export interface RootStats {
   dir: string;
@@ -43,6 +52,12 @@ export class ProjectIndex {
   private layout: ProjectLayout = { roots: [], excludedPackages: [] };
   /** Scanned INI files → number of named [Config] sections (for status reporting). */
   private iniConfigCounts = new Map<string, number>();
+  /**
+   * Disk-indexed files → their last-seen {mtimeMs,size}. Populated only for files
+   * read from disk (never for open buffers, which the editor owns), so it doubles
+   * as the authoritative set of disk-backed URIs for `revalidate()` reconciliation.
+   */
+  private fileMeta = new Map<string, { mtimeMs: number; size: number }>();
 
   /** Predicate: is this uri currently open in an editor? Open docs are driven by
    *  the document store, so the disk scanner must not overwrite them. */
@@ -61,6 +76,7 @@ export class ProjectIndex {
   /** Discover source roots and index all NED and MSG files on disk. */
   async initialize(workspaceFolders: string[], nedPathDirs: string[]): Promise<void> {
     this.iniConfigCounts.clear();
+    this.fileMeta.clear();
 
     // built-in NED declarations (ned.IdealChannel, ...)
     this.cache.addFile(BUILTIN_URI, this.parsers.parse('ned', BUILTIN_NED_TEXT), 'ned');
@@ -116,6 +132,16 @@ export class ProjectIndex {
     }
   }
 
+  /** Stat `fsPath` and remember its {mtimeMs,size} for `revalidate()`. */
+  private async recordMeta(uri: string, fsPath: string): Promise<void> {
+    try {
+      const st = await this.fs.stat(fsPath);
+      this.fileMeta.set(uri, { mtimeMs: st.mtimeMs ?? 0, size: st.size ?? 0 });
+    } catch {
+      /* stat failed (raced deletion); leave meta absent so revalidate re-checks */
+    }
+  }
+
   /** Index an INI file into the workspace INI cache + record its config count. */
   async indexIniFile(fsPath: string): Promise<void> {
     const uri = pathToFileURL(fsPath).toString();
@@ -129,6 +155,7 @@ export class ProjectIndex {
     this.iniCache.addFile(uri, text);
     this.iniConfigCounts.set(uri, configSummaries(parseIni(text)).length);
     this.db.onIniFile(uri);
+    await this.recordMeta(uri, fsPath);
   }
 
   /** Update the INI index from an open document's text (for reverse queries). */
@@ -150,6 +177,7 @@ export class ProjectIndex {
     }
     this.msgCache.addFile(uri, this.parsers.parse('msg', text));
     this.db.onMsgFile(uri);
+    await this.recordMeta(uri, fsPath);
   }
 
   /** Read and index a single NED file from disk (by absolute fs path). */
@@ -166,6 +194,7 @@ export class ProjectIndex {
     }
     this.cache.addFile(uri, this.parsers.parse('ned', text), pkg);
     this.db.onNedFile(uri);
+    await this.recordMeta(uri, fsPath);
   }
 
   /**
@@ -212,6 +241,7 @@ export class ProjectIndex {
         this.cache.removeFile(uri);
         this.db.dropFile(uri);
       }
+      this.fileMeta.delete(uri);
       return;
     }
     if (isMsg) await this.indexMsgFile(fsPath);
@@ -226,6 +256,111 @@ export class ProjectIndex {
     this.iniCache.clear();
     this.db.clear();
     await this.initialize(workspaceFolders, nedPathDirs);
+  }
+
+  /** Serialize a layout to a stable key for cheap equality checks. */
+  private static layoutKey(l: ProjectLayout): string {
+    const roots = l.roots.map((r) => `${r.dir}\0${r.rootPackage}`).sort().join('\n');
+    const excl = [...l.excludedPackages].sort().join('\n');
+    return `${roots}\0\0${excl}`;
+  }
+
+  /**
+   * Source roots that live outside every workspace folder (`nedPath` dirs and any
+   * install-dir roots). VS Code's workspace-glob watchers don't cover these, so the
+   * server registers watchers for them explicitly (see `registerExternalWatchers`).
+   */
+  externalRootDirs(workspaceFolders: string[]): string[] {
+    const inWorkspace = (dir: string): boolean =>
+      workspaceFolders.some((w) => dir === w || dir.startsWith(w.endsWith('/') ? w : `${w}/`));
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const r of this.layout.roots) {
+      if (inWorkspace(r.dir) || seen.has(r.dir)) continue;
+      seen.add(r.dir);
+      out.push(r.dir);
+    }
+    return out;
+  }
+
+  /** Recursively collect indexable files under `dir` (stat-only, no parse), keyed
+   *  by URI. Mirrors `scanDir`'s skip rules so the disk view matches the index. */
+  private async collectDiskFiles(
+    dir: string,
+    out: Map<string, { mtimeMs: number; size: number }>,
+  ): Promise<void> {
+    let entries: string[];
+    try {
+      entries = await this.fs.readDirectory(dir);
+    } catch {
+      return;
+    }
+    for (const name of entries) {
+      if (name.startsWith('.') || name === 'node_modules' || name === 'out') continue;
+      const full = `${dir}/${name}`;
+      let stat;
+      try {
+        stat = await this.fs.stat(full);
+      } catch {
+        continue;
+      }
+      if (stat.isDirectory) {
+        await this.collectDiskFiles(full, out);
+      } else if (name.endsWith('.ned') || name.endsWith('.msg') || name.endsWith('.ini')) {
+        out.set(pathToFileURL(full).toString(), { mtimeMs: stat.mtimeMs ?? 0, size: stat.size ?? 0 });
+      }
+    }
+  }
+
+  /**
+   * Self-healing reconciliation against disk, independent of file-watch events.
+   * Catches changes missed when a background process (git checkout/reset, a build)
+   * rewrites many files and the editor's watcher drops or coalesces events.
+   *
+   * If the project *layout* changed (roots/exclusions), a full reindex is needed,
+   * so this returns `{ needsReindex: true }` and does nothing else. Otherwise it
+   * stats every root, then adds/removes/re-reads only the files that actually
+   * differ from `fileMeta`. Open buffers are never touched (the editor owns them).
+   */
+  async revalidate(
+    workspaceFolders: string[],
+    nedPathDirs: string[],
+  ): Promise<RevalidateResult> {
+    const fresh = await discoverProjectLayout(this.fs, workspaceFolders, nedPathDirs);
+    if (ProjectIndex.layoutKey(fresh) !== ProjectIndex.layoutKey(this.layout)) {
+      return { needsReindex: true, nedChanged: false, msgChanged: false, iniChanged: false };
+    }
+
+    const disk = new Map<string, { mtimeMs: number; size: number }>();
+    for (const root of this.layout.roots) await this.collectDiskFiles(root.dir, disk);
+
+    const result: RevalidateResult = {
+      needsReindex: false,
+      nedChanged: false,
+      msgChanged: false,
+      iniChanged: false,
+    };
+    const mark = (uri: string): void => {
+      if (uri.endsWith('.msg')) result.msgChanged = true;
+      else if (uri.endsWith('.ini')) result.iniChanged = true;
+      else if (uri.endsWith('.ned')) result.nedChanged = true;
+    };
+
+    // added or modified (present on disk, missing from / differing in fileMeta)
+    for (const [uri, cur] of disk) {
+      if (this.isOpen(uri)) continue; // editor owns open buffers
+      const prev = this.fileMeta.get(uri);
+      if (prev && prev.mtimeMs === cur.mtimeMs && prev.size === cur.size) continue;
+      await this.onFileChanged(uri, false);
+      mark(uri);
+    }
+    // deleted (tracked in fileMeta but gone from disk)
+    for (const uri of [...this.fileMeta.keys()]) {
+      if (disk.has(uri) || this.isOpen(uri)) continue;
+      await this.onFileChanged(uri, true);
+      mark(uri);
+    }
+    return result;
   }
 
   folderPackageForUri(uri: string): string {
