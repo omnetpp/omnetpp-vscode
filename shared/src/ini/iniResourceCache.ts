@@ -9,10 +9,13 @@ import type { IniDocument } from './iniDocument';
 
 export class IniResourceCache {
   generation = 0;
-  private docs = new Map<string, IniDocument>();
+  // The raw source `text` is kept alongside the parsed doc so callers that need
+  // the original bytes (e.g. inline `suppress(...)` directive scanning) don't have
+  // to re-read the file from disk.
+  private docs = new Map<string, { doc: IniDocument; text: string }>();
 
   addFile(uri: string, text: string): void {
-    this.docs.set(uri, parseIni(text));
+    this.docs.set(uri, { doc: parseIni(text), text });
     this.generation++;
   }
 
@@ -26,10 +29,14 @@ export class IniResourceCache {
   }
 
   getDoc(uri: string): IniDocument | undefined {
-    return this.docs.get(uri);
+    return this.docs.get(uri)?.doc;
   }
 
-  allDocs(): { uri: string; doc: IniDocument }[] {
-    return [...this.docs.entries()].map(([uri, doc]) => ({ uri, doc }));
+  getText(uri: string): string | undefined {
+    return this.docs.get(uri)?.text;
+  }
+
+  allDocs(): { uri: string; doc: IniDocument; text: string }[] {
+    return [...this.docs.entries()].map(([uri, { doc, text }]) => ({ uri, doc, text }));
   }
 }

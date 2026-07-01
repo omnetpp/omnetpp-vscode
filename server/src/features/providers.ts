@@ -716,7 +716,7 @@ export function computeCodeActions(
     }
   }
   // "Suppress this diagnostic" — insert a //# (ned/msg) or ### (ini) suppress(code)
-  // directive, either trailing on the line or on the line above. Works for all langs.
+  // directive as a trailing comment on the reported line. Works for all langs.
   const seenSuppress = new Set<string>();
   for (const d of contextDiagnostics ?? []) {
     const code = typeof d.code === 'string' ? d.code : undefined;
@@ -727,14 +727,12 @@ export function computeCodeActions(
     seenSuppress.add(key);
     const directive = formatSuppressDirective(parsed.language, code);
     const lineText = lineAt(parsed.text, line);
-    const indent = /^\s*/.exec(lineText)?.[0] ?? '';
     const insert = (title: string, at: Position, newText: string): CodeActionResult => ({
       title,
       kind: 'quickfix',
       edit: { changes: { [parsed.uri]: [{ range: { start: at, end: at }, newText }] } },
     });
     out.push(insert(`Suppress '${code}' on this line`, { line, character: lineText.length }, `  ${directive}`));
-    out.push(insert(`Suppress '${code}' on the line above`, { line, character: 0 }, `${indent}${directive}\n`));
   }
   return out;
 }

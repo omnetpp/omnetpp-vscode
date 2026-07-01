@@ -259,15 +259,19 @@ function publishWorkspaceDiagnostics(): void {
     nextNonEmpty.add(uri);
     connection.sendDiagnostics({ uri, diagnostics: diags });
   };
+  // Pass the real source `text` (not '') so inline `suppress(...)` directives are
+  // honored for closed files too — the suppress filter reads directives from it
+  // (and short-circuits on `text` lacking "suppress"). NED/MSG text comes free from
+  // the tree; INI text is retained by the cache.
   for (const f of index.cache.allFiles()) {
     if (f.uri === BUILTIN_URI) continue;
-    publish(f.uri, { uri: f.uri, language: 'ned', version: 0, text: '', tree: f.tree });
+    publish(f.uri, { uri: f.uri, language: 'ned', version: 0, text: f.tree.rootNode.text, tree: f.tree });
   }
   for (const f of index.msgCache.allFiles()) {
-    publish(f.uri, { uri: f.uri, language: 'msg', version: 0, text: '', tree: f.tree });
+    publish(f.uri, { uri: f.uri, language: 'msg', version: 0, text: f.tree.rootNode.text, tree: f.tree });
   }
-  for (const { uri, doc } of index.iniCache.allDocs()) {
-    publish(uri, { uri, language: 'ini', version: 0, text: '', ini: doc });
+  for (const { uri, doc, text } of index.iniCache.allDocs()) {
+    publish(uri, { uri, language: 'ini', version: 0, text, ini: doc });
   }
   // anything previously dirty but now clean (or gone from the index) → clear it,
   // unless it is open (then `refresh()` owns its markers)
