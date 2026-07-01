@@ -6,6 +6,7 @@ import {
   NedTypeKind,
   ParamInfo,
   SubmoduleInfo,
+  TypenamePattern,
   connectionInfo,
   connectionNodes,
   extendsNodes,
@@ -18,6 +19,7 @@ import {
   propertyNodes,
   submoduleInfo,
   submoduleNodes,
+  typenamePatternsOf,
 } from './nedAst';
 
 /**
@@ -30,6 +32,37 @@ export class NedTypeInfo {
   private directExtends: NedTypeInfo[] = [];
   private directInterfaces: NedTypeInfo[] = [];
   private extendsName0?: string; // raw primary base name (for diagnostics)
+
+  // Generation-gated memoization of the member accessors below. These are hit
+  // once per module *instance* during network expansion (thousands of times for
+  // a large network), and each computation walks the ancestor chain and re-parses
+  // tree nodes — so caching them per generation is a large win. All returned
+  // collections are treated as read-only by callers (verified), so sharing them
+  // is safe; they are dropped whenever the cache generation bumps (any NED edit).
+  private memoGen = -1;
+  private ancestorsCache?: NedTypeInfo[];
+  private localParamsCache?: Map<string, ParamInfo>;
+  private localGatesCache?: Map<string, GateInfo>;
+  private localSubmodulesCache?: Map<string, SubmoduleInfo>;
+  private paramsCache?: Map<string, ParamInfo>;
+  private gatesCache?: Map<string, GateInfo>;
+  private submodulesCache?: Map<string, SubmoduleInfo>;
+  private localTypenamePatternsCache?: TypenamePattern[];
+  private typenamePatternsCache?: TypenamePattern[];
+
+  private freshMemo(): void {
+    if (this.memoGen === this.cache.generation) return;
+    this.memoGen = this.cache.generation;
+    this.ancestorsCache = undefined;
+    this.localParamsCache = undefined;
+    this.localGatesCache = undefined;
+    this.localSubmodulesCache = undefined;
+    this.paramsCache = undefined;
+    this.gatesCache = undefined;
+    this.submodulesCache = undefined;
+    this.localTypenamePatternsCache = undefined;
+    this.typenamePatternsCache = undefined;
+  }
 
   constructor(
     public readonly cache: NedResourceCache,
@@ -84,6 +117,8 @@ export class NedTypeInfo {
 
   /** Transitive ancestors (primary chain + additional extends), nearest first. */
   ancestors(): NedTypeInfo[] {
+    this.freshMemo();
+    if (this.ancestorsCache) return this.ancestorsCache;
     const out: NedTypeInfo[] = [];
     const seen = new Set<string>();
     const visit = (t: NedTypeInfo) => {
@@ -97,6 +132,7 @@ export class NedTypeInfo {
       }
     };
     visit(this);
+    this.ancestorsCache = out;
     return out;
   }
 
@@ -122,51 +158,92 @@ export class NedTypeInfo {
 
   // ---- members (local) ----
   localParams(): Map<string, ParamInfo> {
+    this.freshMemo();
+    if (this.localParamsCache) return this.localParamsCache;
     const m = new Map<string, ParamInfo>();
     for (const p of paramNodes(this.node)) {
       const info = paramInfo(p);
       if (info.name && info.type && !info.isPattern) m.set(info.name, info);
     }
+    this.localParamsCache = m;
     return m;
   }
   localGates(): Map<string, GateInfo> {
+    this.freshMemo();
+    if (this.localGatesCache) return this.localGatesCache;
     const m = new Map<string, GateInfo>();
     for (const g of gateNodes(this.node)) {
       const info = gateInfo(g);
       if (info.name) m.set(info.name, info);
     }
+    this.localGatesCache = m;
     return m;
   }
   localSubmodules(): Map<string, SubmoduleInfo> {
+    this.freshMemo();
+    if (this.localSubmodulesCache) return this.localSubmodulesCache;
     const m = new Map<string, SubmoduleInfo>();
     for (const s of submoduleNodes(this.node)) {
       const info = submoduleInfo(s);
       if (info.name) m.set(info.name, info);
     }
+    this.localSubmodulesCache = m;
     return m;
   }
 
   // ---- members (merged with inherited; local overrides base) ----
   params(): Map<string, ParamInfo> {
+    this.freshMemo();
+    if (this.paramsCache) return this.paramsCache;
     const m = new Map<string, ParamInfo>();
     const chain = [...this.ancestors()].reverse();
     for (const base of chain) for (const [k, v] of base.localParams()) m.set(k, v);
     for (const [k, v] of this.localParams()) m.set(k, v);
+    this.paramsCache = m;
     return m;
   }
   gates(): Map<string, GateInfo> {
+    this.freshMemo();
+    if (this.gatesCache) return this.gatesCache;
     const m = new Map<string, GateInfo>();
     const chain = [...this.ancestors()].reverse();
     for (const base of chain) for (const [k, v] of base.localGates()) m.set(k, v);
     for (const [k, v] of this.localGates()) m.set(k, v);
+    this.gatesCache = m;
     return m;
   }
   submodules(): Map<string, SubmoduleInfo> {
+    this.freshMemo();
+    if (this.submodulesCache) return this.submodulesCache;
     const m = new Map<string, SubmoduleInfo>();
     const chain = [...this.ancestors()].reverse();
     for (const base of chain) for (const [k, v] of base.localSubmodules()) m.set(k, v);
     for (const [k, v] of this.localSubmodules()) m.set(k, v);
+    this.submodulesCache = m;
     return m;
+  }
+
+  /** `<sub>.typename = ...` assignments in this type's own `parameters:` section. */
+  localTypenamePatterns(): TypenamePattern[] {
+    this.freshMemo();
+    if (!this.localTypenamePatternsCache) this.localTypenamePatternsCache = typenamePatternsOf(this.node);
+    return this.localTypenamePatternsCache;
+  }
+
+  /**
+   * `<sub>.typename = ...` assignments visible on this type, base-first then local.
+   * These select the concrete type of a (possibly inherited) `like` submodule — e.g.
+   * `BMacInterface`'s `radio.typename = default("ApskRadio")` applies to the `radio`
+   * slot declared in its base `WirelessInterface`. All apply at the same instance level.
+   */
+  typenamePatterns(): TypenamePattern[] {
+    this.freshMemo();
+    if (this.typenamePatternsCache) return this.typenamePatternsCache;
+    const out: TypenamePattern[] = [];
+    for (const base of [...this.ancestors()].reverse()) out.push(...base.localTypenamePatterns());
+    out.push(...this.localTypenamePatterns());
+    this.typenamePatternsCache = out;
+    return out;
   }
 
   /** Connections declared directly in this type's `connections:` section. */

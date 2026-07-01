@@ -146,3 +146,62 @@ test('reachableParamPaths includes nested params', async () => {
   assert.ok(paths.includes('Net.numHosts'));
   assert.ok(paths.includes('Net.queue.capacity'));
 });
+
+// A `like` submodule that names its concrete type inline in the NED `<...>` slot
+// (the fixed `<"X">` form or the default `<default("X")>` form) must be expanded
+// to that type when no INI `typename` override is present — mirroring how INET
+// wires e.g. `ipv4: <default("Ipv4NetworkLayer")> like INetworkLayer`, so that a
+// deep key like `*.A1.ipv4.routingTable.routerId` resolves.
+const DFLT_NED = `
+moduleinterface INet2 { parameters: int dummy; }
+simple RTable2 { parameters: string routerId = default("auto"); }
+module DfltLayer like INet2 { parameters: int dummy; submodules: routingTable: RTable2; }
+module FixedLayer like INet2 { parameters: int dummy; submodules: routingTable: RTable2; }
+module Router2 {
+  submodules:
+    ipv4: <default("DfltLayer")> like INet2;
+    ip6: <"FixedLayer"> like INet2;
+    open: <> like INet2;
+}
+network RouterNet { submodules: A1: Router2; }`;
+
+test('like default type: deep param through <default("X")> resolves and is reachable', async () => {
+  const cache = await cacheWith(DFLT_NED);
+  const doc = parseIni('network = RouterNet\n*.A1.ipv4.routingTable.routerId = "1.2.3.4"\n');
+  const diags = iniParamDiagnostics(doc, cache, reg);
+  // routerId is a real param on the default type's nested routingTable -> clean
+  assert.deepEqual(diags.filter((d) => d.code === 'no-matching-param'), [], JSON.stringify(diags));
+  const paths = reachableParamPaths(doc, cache, doc.sections[0]).map((p) => p.path);
+  assert.ok(paths.includes('RouterNet.A1.ipv4.routingTable.routerId'), JSON.stringify(paths));
+});
+
+test('like default type: <default("X")> subtree is fully known -> typo is flagged', async () => {
+  const cache = await cacheWith(DFLT_NED);
+  const doc = parseIni('network = RouterNet\n*.A1.ipv4.routingTable.bogusId = "x"\n');
+  const diags = iniParamDiagnostics(doc, cache, reg);
+  // discriminating case: only fires if the default type was expanded as non-open
+  assert.ok(diags.some((d) => d.code === 'no-matching-param'), JSON.stringify(diags));
+});
+
+test('like default type: fixed <"X"> form behaves the same', async () => {
+  const cache = await cacheWith(DFLT_NED);
+  const clean = iniParamDiagnostics(parseIni('network = RouterNet\n*.A1.ip6.routingTable.routerId = "1.2.3.4"\n'), cache, reg);
+  assert.deepEqual(clean.filter((d) => d.code === 'no-matching-param'), [], JSON.stringify(clean));
+  const flagged = iniParamDiagnostics(parseIni('network = RouterNet\n*.A1.ip6.routingTable.bogusId = "x"\n'), cache, reg);
+  assert.ok(flagged.some((d) => d.code === 'no-matching-param'), JSON.stringify(flagged));
+});
+
+test('like with no inline type (`<>`) stays open -> deep key not falsely flagged', async () => {
+  const cache = await cacheWith(DFLT_NED);
+  const doc = parseIni('network = RouterNet\n*.A1.open.routingTable.routerId = "x"\n');
+  const diags = iniParamDiagnostics(doc, cache, reg);
+  assert.deepEqual(diags.filter((d) => d.code === 'no-matching-param'), [], JSON.stringify(diags));
+});
+
+test('like default type: an INI typename override still wins over the NED default', async () => {
+  const cache = await cacheWith(DFLT_NED);
+  // override ipv4 to FixedLayer; its routingTable.routerId must still resolve
+  const doc = parseIni('network = RouterNet\n*.A1.ipv4.typename = "FixedLayer"\n*.A1.ipv4.routingTable.routerId = "1.2.3.4"\n');
+  const diags = iniParamDiagnostics(doc, cache, reg);
+  assert.deepEqual(diags.filter((d) => d.code === 'no-matching-param'), [], JSON.stringify(diags));
+});

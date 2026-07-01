@@ -12,6 +12,7 @@ import {
   implementsNodes,
   submoduleInfo,
   submoduleNodes,
+  typenamePatternsOf,
 } from './nedAst';
 
 function err(node: SyntaxNode, message: string, code: string, severity = DiagnosticSeverity.Error): Diagnostic {
@@ -77,9 +78,19 @@ function checkType(info: NedTypeInfo, cache: NedResourceCache, out: Diagnostic[]
     if (sub.isLike) {
       // resolve interface name
       const likeNode = childByType(s, 'like_type');
-      if (sub.likeType && likeNode) {
-        const iface = cache.lookupType(sub.likeType, info.file, enclosing);
-        if (!iface) out.push(err(likeNode, `Unknown interface '${sub.likeType}'`, 'unknown-type'));
+      const iface = sub.likeType ? cache.lookupType(sub.likeType, info.file, enclosing) : undefined;
+      if (sub.likeType && likeNode && !iface) {
+        out.push(err(likeNode, `Unknown interface '${sub.likeType}'`, 'unknown-type'));
+      }
+      // ambiguous inline type: `<"X">` / `<default("X")>` where an unqualified X is
+      // implemented by more than one type (OMNeT++ rejects it as ambiguous).
+      const inline = sub.likeFixedType ?? sub.likeDefaultType;
+      if (inline && iface && !inline.includes('.')) {
+        const cands = cache.lookupLikeCandidates(inline, iface);
+        if (cands.length > 1) {
+          const anchor = firstChildOfType(s, 'like_expr') ?? likeNode ?? s;
+          out.push(err(anchor, ambiguousMsg(inline, sub.likeType!, cands), 'ambiguous-typename', DiagnosticSeverity.Warning));
+        }
       }
     } else if (sub.type) {
       const typeNode = childByType(s, 'type');
@@ -92,7 +103,27 @@ function checkType(info: NedTypeInfo, cache: NedResourceCache, out: Diagnostic[]
     }
   }
 
+  // ambiguous `<sub>.typename = "X"` deep assignments targeting a direct `like`
+  // submodule (nested/wildcard patterns are not resolved statically — see plan).
+  for (const tp of typenamePatternsOf(info.node)) {
+    if (!tp.typeName || tp.typeName.includes('.') || /[.*[\]]/.test(tp.prefixPattern)) continue;
+    const target = info.getSubmodule(tp.prefixPattern);
+    if (!target?.isLike || !target.likeType) continue;
+    const iface = cache.lookupType(target.likeType, info.file, info.fqName);
+    if (!iface) continue;
+    const cands = cache.lookupLikeCandidates(tp.typeName, iface);
+    if (cands.length > 1) {
+      const anchor = firstChildOfType(tp.node, 'value') ?? tp.node;
+      out.push(err(anchor, ambiguousMsg(tp.typeName, target.likeType, cands), 'ambiguous-typename', DiagnosticSeverity.Warning));
+    }
+  }
+
   checkConnections(info, cache, out);
+}
+
+/** Message for an ambiguous unqualified `like` type name. */
+function ambiguousMsg(name: string, ifaceName: string, candidates: NedTypeInfo[]): string {
+  return `Ambiguous typename '${name}': ${candidates.length} types implement '${ifaceName}' (${candidates.map((t) => t.fqName).join(', ')}). Use a fully qualified name to disambiguate.`;
 }
 
 function childByType(node: SyntaxNode, type: string): SyntaxNode | null {

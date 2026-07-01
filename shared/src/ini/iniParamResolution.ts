@@ -11,27 +11,9 @@ import type { IniDocument, IniSection, IniEntry } from './iniDocument';
 import { parseExpression } from '../expr/exprParser';
 import { inferType, isTypeMismatch } from '../expr/infer';
 import { unitsCompatible } from '../expr/units';
+import { iniKeyToRegex, normIndices } from './keyMatch';
 
-/** Collapse vector indices to [] for pattern comparison. */
-function normIndices(s: string): string {
-  return s.replace(/\[[^\]]*\]/g, '[]');
-}
-
-/** Compile an ini key (OMNeT++ wildcard pattern) to an anchored RegExp. */
-export function iniKeyToRegex(key: string): RegExp {
-  const norm = normIndices(key);
-  let out = '';
-  for (let i = 0; i < norm.length; i++) {
-    const c = norm[i];
-    if (c === '*' && norm[i + 1] === '*') { out += '.*'; i++; }
-    else if (c === '*') out += '[^.]*';
-    else if (c === '?') out += '[^.]';
-    else if (c === '[' && norm[i + 1] === ']') { out += '\\[\\]'; i++; }
-    else if (/[a-zA-Z0-9_]/.test(c)) out += c;
-    else out += '\\' + c;
-  }
-  return new RegExp('^' + out + '$');
-}
+export { iniKeyToRegex, normIndices };
 
 function findSection(doc: IniDocument, configName: string): IniSection | undefined {
   return doc.sections.find((s) => s.configName === configName);
@@ -221,9 +203,33 @@ export function iniParamDiagnostics(
     const net = resolveNetworkType(cache, netName);
     if (!net) continue;
 
-    const bindings = buildTypenameBindings(collectTypenameEntries(doc, section));
+    const typenameEntries = collectTypenameEntries(doc, section);
+    const bindings = buildTypenameBindings(typenameEntries);
     const expansion = getExpansion(cache, net, bindings);
     const params = paramSlots(expansion);
+
+    // An INI `**.x.typename = "Name"` that matched >1 implementers of the slot's
+    // interface is ambiguous (OMNeT++ rejects it) — flag the offending entry's value.
+    const flagged = new Set<string>();
+    for (const amb of expansion.ambiguities) {
+      const slotNorm = normIndices(amb.path);
+      for (const e of typenameEntries) {
+        const dot = e.key.lastIndexOf('.');
+        const prefix = dot < 0 ? '' : e.key.slice(0, dot);
+        if (e.value.replace(/^"|"$/g, '').trim() !== amb.typeName) continue;
+        if (!iniKeyToRegex(prefix).test(slotNorm)) continue;
+        const dedupe = `${e.valueRange.start.line}:${e.valueRange.start.character}:${amb.typeName}`;
+        if (flagged.has(dedupe)) continue;
+        flagged.add(dedupe);
+        out.push({
+          range: e.valueRange,
+          severity: DiagnosticSeverity.Warning,
+          message: `Ambiguous typename '${amb.typeName}': ${amb.candidates.length} types implement the interface (${amb.candidates.join(', ')}). Use a fully qualified name to disambiguate.`,
+          source: 'omnetpp',
+          code: 'ambiguous-typename',
+        });
+      }
+    }
 
     for (const e of section.entries) {
       if (classifyKey(registry, e.key).kind !== 'param-assignment') continue;

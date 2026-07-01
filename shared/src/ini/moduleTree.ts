@@ -1,8 +1,9 @@
 import { NedResourceCache } from '../ned/nedResourceCache';
 import { NedTypeInfo } from '../ned/nedTypeInfo';
-import { nameNode } from '../ned/nedAst';
+import { nameNode, SubmoduleInfo } from '../ned/nedAst';
 import { nodeRange } from '../parser/treeUtils';
 import type { Range } from '../model/location';
+import { iniKeyToRegex } from './keyMatch';
 
 /** Extra per-parameter metadata used for value-level checks. */
 export interface ParamMeta {
@@ -42,9 +43,32 @@ export interface ModuleNode {
   open: boolean;
 }
 
+/** An INI `**.x.typename = "Name"` that resolved a `like` slot to >1 candidate
+ *  types (ambiguous — OMNeT++ rejects it). Surfaced as a diagnostic on the entry. */
+export interface LikeAmbiguity {
+  /** the resolved slot's instance path. */
+  path: string;
+  /** the unqualified type name that matched several implementers. */
+  typeName: string;
+  /** fq-names of the matching candidate types. */
+  candidates: string[];
+}
+
 export interface ExpandResult {
   modules: ModuleNode[];
   truncated: boolean;
+  /** INI-sourced ambiguous `typename` resolutions (for diagnostics). */
+  ambiguities: LikeAmbiguity[];
+}
+
+/** A NED `<sub>.typename = ...` deep assignment, compiled relative to the instance
+ *  where its declaring type was expanded. Accumulated down the traversal so that
+ *  deeper (later-added) rules win for the non-default case and the shallowest wins
+ *  for the default case — matching OMNeT++'s parent-chain walk. */
+interface NedTypeRule {
+  re: RegExp;
+  typeName: string;
+  isDefault: boolean;
 }
 
 export interface ParamSlot {
@@ -68,12 +92,54 @@ function norm(s: string): string {
   return s.replace(/\[[^\]]*\]/g, '[]');
 }
 
+/** Append `type`'s `<sub>.typename = ...` deep assignments to the accumulated rules,
+ *  compiled against this instance's normalized path so they match descendant slots. */
+function compileNedRules(type: NedTypeInfo, instanceNorm: string, base: NedTypeRule[]): NedTypeRule[] {
+  const patterns = type.typenamePatterns();
+  if (!patterns.length) return base;
+  const rules = base.slice();
+  for (const p of patterns) {
+    if (!p.typeName || !p.prefixPattern) continue; // non-literal or bare `typename` → skip
+    rules.push({ re: iniKeyToRegex(`${instanceNorm}.${p.prefixPattern}`), typeName: p.typeName, isDefault: p.isDefault });
+  }
+  return rules;
+}
+
+/** Choose the concrete type name(s) for a `like` slot, in OMNeT++ precedence order.
+ *  Returns the candidate names plus whether they came from the INI `typename` source
+ *  (the only source whose ambiguity we surface via INI diagnostics). */
+function resolveLikeTypeNames(
+  sub: SubmoduleInfo,
+  slotNorm: string,
+  nedRules: NedTypeRule[],
+  typenamesFor?: (slotNorm: string) => string[],
+): { names: string[]; fromIni: boolean } {
+  // 1. fixed angle-bracket `<"X">` — highest, not overridable
+  if (sub.likeFixedType) return { names: [sub.likeFixedType], fromIni: false };
+  // 2. NED non-default `<sub>.typename = "X"` deep assignment — innermost (deepest) wins
+  let nonDefault: string | undefined;
+  for (const r of nedRules) if (!r.isDefault && r.re.test(slotNorm)) nonDefault = r.typeName;
+  if (nonDefault !== undefined) return { names: [nonDefault], fromIni: false };
+  // 3. INI `typename` binding
+  const ini = typenamesFor?.(slotNorm) ?? [];
+  if (ini.length) return { names: ini, fromIni: true };
+  // 4. NED `<sub>.typename = default("X")` deep assignment — outermost (shallowest) wins
+  for (const r of nedRules) if (r.isDefault && r.re.test(slotNorm)) return { names: [r.typeName], fromIni: false };
+  // 5. default angle-bracket `<default("X")>` — lowest
+  if (sub.likeDefaultType) return { names: [sub.likeDefaultType], fromIni: false };
+  return { names: [], fromIni: false };
+}
+
 /**
  * Expand the module tree of a network into module nodes with their parameters.
- * When `typenameFor` is supplied, a `like` submodule whose `typename` is bound
- * (typically by an INI `**.x.typename = T` assignment) is resolved to its concrete
- * type and expanded fully (the subtree is no longer `open`), while still exposing
- * `typename` as an assignable pseudo-parameter.
+ *
+ * A `like` submodule's concrete type is resolved with OMNeT++'s exact precedence
+ * (`getSubmoduleTypeName`): (1) a fixed `<"X">` bracket, (2) a non-`default()` NED
+ * `<sub>.typename` deep assignment (innermost wins), (3) the INI `typename` binding
+ * (`typenamesFor`), (4) a `default()` NED deep assignment (outermost wins), (5) the
+ * `<default("X")>` bracket. The chosen name is resolved against the `like` interface;
+ * if it resolves the subtree is expanded fully (no longer `open`), with `typename`
+ * kept as an assignable pseudo-parameter.
  */
 export function expandNetwork(
   cache: NedResourceCache,
@@ -81,10 +147,11 @@ export function expandNetwork(
   typenamesFor?: (slotNorm: string) => string[],
 ): ExpandResult {
   const modules: ModuleNode[] = [];
+  const ambiguities: LikeAmbiguity[] = [];
   let nodeCount = 0;
   let truncated = false;
 
-  const visit = (type: NedTypeInfo | undefined, path: string, stack: Set<string>, depth: number, open: boolean): void => {
+  const visit = (type: NedTypeInfo | undefined, path: string, stack: Set<string>, depth: number, open: boolean, nedRules: NedTypeRule[]): void => {
     if (truncated) return;
     if (depth > MAX_DEPTH || nodeCount > MAX_NODES) {
       truncated = true;
@@ -114,27 +181,34 @@ export function expandNetwork(
     if (!type || recursive) return;
     const nextStack = new Set(stack).add(type.fqName);
 
+    // Accumulate this type's `<sub>.typename = ...` deep assignments, compiled
+    // relative to this instance path (they target descendant `like` slots). Later
+    // (deeper) rules are appended after inherited/ancestor ones.
+    const myRules = compileNedRules(type, norm(path), nedRules);
+
     for (const [subName, sub] of type.submodules()) {
       const vec = sub.isVector ? '[*]' : '';
       const subPath = `${path}.${subName}${vec}`;
       // 'typename' is assignable for `like` submodules
       if (sub.isLike) {
         const iface = sub.likeType ? cache.lookupType(sub.likeType, type.file, type.fqName) : undefined;
-        // The concrete type may be bound (e.g. via an INI typename assignment).
-        // Because vector indices are normalized to [], a single `like` slot can
-        // match several typename bindings (e.g. `app[0]="UdpSink"` and
-        // `app[*]="UdpBasicApp"`) — treat it as possibly ANY of them and expose the
-        // union of their parameters, so a param declared on only one candidate type
-        // still matches.
-        const chosen = typenamesFor?.(norm(subPath)) ?? [];
+        const slotNorm = norm(subPath);
+        const { names, fromIni } = resolveLikeTypeNames(sub, slotNorm, myRules, typenamesFor);
+        // Because vector indices are normalized to [], a single `like` slot can match
+        // several INI typename bindings (e.g. `app[0]="UdpSink"` and `app[*]="UdpBasicApp"`)
+        // — treat it as possibly ANY of them and expose the union of their parameters.
         const concretes: NedTypeInfo[] = [];
-        for (const name of chosen) {
+        for (const name of names) {
           const c = cache.lookupLikeType(name, iface);
           if (c && !concretes.some((t) => t.fqName === c.fqName)) concretes.push(c);
+          else if (!c && fromIni && !name.includes('.')) {
+            const cands = cache.lookupLikeCandidates(name, iface);
+            if (cands.length > 1) ambiguities.push({ path: subPath, typeName: name, candidates: cands.map((t) => t.fqName) });
+          }
         }
         if (concretes.length) {
           const idx = modules.length;
-          visit(concretes[0], subPath, nextStack, depth + 1, false);
+          visit(concretes[0], subPath, nextStack, depth + 1, false, myRules);
           const node = modules[idx];
           if (node && node.path === subPath) {
             for (let i = 1; i < concretes.length; i++) mergeParams(node, concretes[i]);
@@ -143,12 +217,12 @@ export function expandNetwork(
           }
           continue;
         }
-        // otherwise the submodule node is open (concrete type unknown), typename valid
+        // Unresolved concrete type: emit an open interface node (typename assignable).
         visitLike(iface, subPath, nextStack, depth + 1);
         continue;
       }
       const subType = sub.type ? cache.lookupType(sub.type, type.file, type.fqName) : undefined;
-      visit(subType, subPath, nextStack, depth + 1, false);
+      visit(subType, subPath, nextStack, depth + 1, false, myRules);
     }
   };
 
@@ -187,13 +261,13 @@ export function expandNetwork(
       const ns = new Set(stack).add(iface.fqName);
       for (const [subName, sub] of iface.submodules()) {
         const vec = sub.isVector ? '[*]' : '';
-        visit(undefined, `${path}.${subName}${vec}`, ns, depth + 1, true);
+        visit(undefined, `${path}.${subName}${vec}`, ns, depth + 1, true, []);
       }
     }
   };
 
-  visit(root, root.simpleName, new Set(), 0, false);
-  return { modules, truncated };
+  visit(root, root.simpleName, new Set(), 0, false, []);
+  return { modules, truncated, ambiguities };
 }
 
 /** A parameter of a module node (for the Module Parameters view). */
@@ -254,6 +328,7 @@ export function networkModuleTree(cache: NedResourceCache, root: NedTypeInfo): M
     stack: Set<string>,
     depth: number,
     isLike: boolean,
+    nedRules: NedTypeRule[],
   ): ModuleTreeNode => {
     const nn = type ? nameNode(type.node) : undefined;
     const node: ModuleTreeNode = {
@@ -271,21 +346,28 @@ export function networkModuleTree(cache: NedResourceCache, root: NedTypeInfo): M
     if (depth > MAX_DEPTH || nodeCount > MAX_NODES || stack.has(type.fqName)) return node;
     nodeCount++;
     const nextStack = new Set(stack).add(type.fqName);
+    const myRules = compileNedRules(type, norm(path), nedRules);
     for (const [subName, sub] of type.submodules()) {
       const label = subName + (sub.isVector ? '[]' : '');
       const subPath = `${path}.${subName}${sub.isVector ? '[*]' : ''}`;
       if (sub.isLike) {
         const iface = sub.likeType ? cache.lookupType(sub.likeType, type.file, type.fqName) : undefined;
-        node.children.push(build(iface, label, subPath, nextStack, depth + 1, true));
+        // Resolve the concrete type via the NED-intrinsic precedence (no INI context here):
+        // fixed bracket, NED deep typename assignments, then default bracket.
+        const { names } = resolveLikeTypeNames(sub, norm(subPath), myRules);
+        const concrete = names.length ? cache.lookupLikeType(names[0], iface) : undefined;
+        node.children.push(concrete
+          ? build(concrete, label, subPath, nextStack, depth + 1, false, myRules)
+          : build(iface, label, subPath, nextStack, depth + 1, true, myRules));
       } else {
         const subType = sub.type ? cache.lookupType(sub.type, type.file, type.fqName) : undefined;
-        node.children.push(build(subType, label, subPath, nextStack, depth + 1, false));
+        node.children.push(build(subType, label, subPath, nextStack, depth + 1, false, myRules));
       }
     }
     return node;
   };
 
-  return build(root, root.simpleName, root.simpleName, new Set(), 0, false);
+  return build(root, root.simpleName, root.simpleName, new Set(), 0, false, []);
 }
 
 /** Flatten module nodes into individual parameter slots. */

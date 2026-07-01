@@ -1,5 +1,5 @@
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
-import { childrenOfType, firstChildOfType, childByField } from '../parser/treeUtils';
+import { childrenOfType, firstChildOfType, childByField, walk } from '../parser/treeUtils';
 
 /** tree-sitter node types for the six NED type definitions. */
 export const NED_TYPE_NODES = [
@@ -230,20 +230,100 @@ export interface SubmoduleInfo {
   name?: string;
   type?: string; // concrete type (when not 'like')
   likeType?: string; // interface name (when 'like')
+  /**
+   * For a `like` submodule with a FIXED inline type — `sub: <"Bgp"> like IFoo`
+   * (angle-bracket expression that is NOT `default(...)`). OMNeT++ treats this as
+   * the highest-priority type source (not overridable by typename). Set only when
+   * the expression is a plain string literal; undefined for a non-literal `<expr>`.
+   */
+  likeFixedType?: string;
+  /**
+   * For a `like` submodule with a DEFAULT inline type — `sub: <default("Foo")> like IFoo`.
+   * OMNeT++ treats this as the lowest-priority fallback (overridable by any typename
+   * assignment). Set only when the default expression is a plain string literal;
+   * undefined for `<>`, `<default("")>`, or a non-literal `<default(expr)>`.
+   */
+  likeDefaultType?: string;
   isVector: boolean;
   isLike: boolean;
 }
 
+/** The first string-literal descendant of a node, unquoted (or undefined). */
+function firstStringLiteral(node: SyntaxNode): string | undefined {
+  for (const n of walk(node)) {
+    if (n.type === 'string') {
+      const s = n.text.replace(/^["']|["']$/g, '').trim();
+      return s || undefined;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Extract the inline concrete type named in a `like` slot's `<...>` expression,
+ * distinguishing the fixed form `<"X">` from the default form `<default("X")>`
+ * (OMNeT++ gives them opposite precedence). Only plain string literals resolve.
+ */
+function likeInlineType(node: SyntaxNode): { fixed?: string; dflt?: string } {
+  const expr = firstChildOfType(node, 'like_expr');
+  if (!expr) return {};
+  const literal = firstStringLiteral(expr);
+  if (!literal) return {};
+  // The `default` keyword is an anonymous token, so detect it from the text.
+  return /^<\s*default\b/.test(expr.text) ? { dflt: literal } : { fixed: literal };
+}
+
 export function submoduleInfo(node: SyntaxNode): SubmoduleInfo {
   const likeType = firstChildOfType(node, 'like_type');
+  const inline = likeType ? likeInlineType(node) : {};
   return {
     node,
     name: nameText(node),
     type: firstChildOfType(node, 'type')?.text,
     likeType: likeType?.text,
+    likeFixedType: inline.fixed,
+    likeDefaultType: inline.dflt,
     isVector: !!firstChildOfType(node, 'vector'),
     isLike: !!likeType,
   };
+}
+
+/**
+ * A `typename` assignment written in a type's `parameters:` section that selects
+ * the concrete type of a (possibly deep) `like` submodule, e.g.
+ * `radio.typename = default("ApskRadio")` or `mac.typename = "BMac"`.
+ */
+export interface TypenamePattern {
+  node: SyntaxNode;
+  /** the assignment key with the trailing `.typename` removed (e.g. `radio`, `wlan[*].mgmt`). */
+  prefixPattern: string;
+  /** the concrete type name, iff the RHS is a static string literal (else undefined → skip). */
+  typeName?: string;
+  /** whether the RHS is wrapped in `default(...)`. */
+  isDefault: boolean;
+}
+
+/** Extract `<path>.typename = ...` assignments from a type's `parameters:` section. */
+export function typenamePatternsOf(typeNode: SyntaxNode): TypenamePattern[] {
+  const out: TypenamePattern[] = [];
+  for (const p of paramNodes(typeNode)) {
+    const pattern = firstChildOfType(p, 'pattern');
+    if (!pattern) continue; // only pattern/deep assignments select submodule types
+    const key = pattern.text.replace(/\s+/g, ''); // e.g. `radio.typename`, `wlan[*].mgmt.typename`
+    if (key !== 'typename' && !key.endsWith('.typename')) continue;
+    const prefixPattern = key === 'typename' ? '' : key.slice(0, -'.typename'.length);
+    const value = (firstChildOfType(p, 'value')?.text ?? '').trim();
+    // static string literal only: `"X"` or `default("X")` — anything else stays unresolved
+    let typeName: string | undefined;
+    let isDefault = false;
+    const dflt = /^default\s*\(\s*("(?:[^"\\]|\\.)*")\s*\)$/.exec(value);
+    const fixed = /^("(?:[^"\\]|\\.)*")$/.exec(value);
+    if (dflt) { isDefault = true; typeName = dflt[1].slice(1, -1).trim() || undefined; }
+    else if (fixed) { typeName = fixed[1].slice(1, -1).trim() || undefined; }
+    else if (/^default\s*\(/.test(value)) { isDefault = true; } // non-literal default → unresolved
+    out.push({ node: p, prefixPattern, typeName, isDefault });
+  }
+  return out;
 }
 
 // ---- properties (@class, @signal, @namespace, ...) ------------------------
