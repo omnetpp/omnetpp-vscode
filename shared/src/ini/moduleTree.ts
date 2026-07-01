@@ -24,6 +24,13 @@ export interface ModuleNode {
   params: Map<string, string | undefined>;
   /** param name -> unit/enum/default metadata. */
   paramMeta: Map<string, ParamMeta>;
+  /**
+   * param name -> the concrete NED type that declares it. Usually `typeInfo`, but
+   * for a `like` slot whose typename resolves to several candidate types (one per
+   * vector index) this records the actual owner of each unioned parameter, so
+   * navigation/references can find the right NED declaration.
+   */
+  paramOwner: Map<string, NedTypeInfo>;
   /** names of params that have a default value in NED (no ini assignment required). */
   defaulted: Set<string>;
   /**
@@ -71,7 +78,7 @@ function norm(s: string): string {
 export function expandNetwork(
   cache: NedResourceCache,
   root: NedTypeInfo,
-  typenameFor?: (slotNorm: string) => string | undefined,
+  typenamesFor?: (slotNorm: string) => string[],
 ): ExpandResult {
   const modules: ModuleNode[] = [];
   let nodeCount = 0;
@@ -87,12 +94,14 @@ export function expandNetwork(
 
     const params = new Map<string, string | undefined>();
     const paramMeta = new Map<string, ParamMeta>();
+    const paramOwner = new Map<string, NedTypeInfo>();
     const defaulted = new Set<string>();
     let nodeOpen = open || !type;
     if (type) {
       for (const [name, info] of type.params()) {
         params.set(name, info.type);
         paramMeta.set(name, { unit: info.unit, enumValues: info.enumValues, default: info.value });
+        paramOwner.set(name, type);
         if (info.value !== undefined) defaulted.add(name);
       }
     }
@@ -100,7 +109,7 @@ export function expandNetwork(
     const recursive = type ? stack.has(type.fqName) : false;
     if (recursive) nodeOpen = true;
 
-    modules.push({ path, norm: norm(path), type: type?.fqName, typeInfo: type, params, paramMeta, defaulted, open: nodeOpen });
+    modules.push({ path, norm: norm(path), type: type?.fqName, typeInfo: type, params, paramMeta, paramOwner, defaulted, open: nodeOpen });
 
     if (!type || recursive) return;
     const nextStack = new Set(stack).add(type.fqName);
@@ -111,15 +120,24 @@ export function expandNetwork(
       // 'typename' is assignable for `like` submodules
       if (sub.isLike) {
         const iface = sub.likeType ? cache.lookupType(sub.likeType, type.file, type.fqName) : undefined;
-        // if the concrete type is bound (e.g. via an INI typename assignment),
-        // resolve through the `like` boundary and expand it fully.
-        const chosen = typenameFor?.(norm(subPath));
-        const concrete = chosen ? cache.lookupLikeType(chosen, iface) : undefined;
-        if (concrete) {
+        // The concrete type may be bound (e.g. via an INI typename assignment).
+        // Because vector indices are normalized to [], a single `like` slot can
+        // match several typename bindings (e.g. `app[0]="UdpSink"` and
+        // `app[*]="UdpBasicApp"`) — treat it as possibly ANY of them and expose the
+        // union of their parameters, so a param declared on only one candidate type
+        // still matches.
+        const chosen = typenamesFor?.(norm(subPath)) ?? [];
+        const concretes: NedTypeInfo[] = [];
+        for (const name of chosen) {
+          const c = cache.lookupLikeType(name, iface);
+          if (c && !concretes.some((t) => t.fqName === c.fqName)) concretes.push(c);
+        }
+        if (concretes.length) {
           const idx = modules.length;
-          visit(concrete, subPath, nextStack, depth + 1, false);
+          visit(concretes[0], subPath, nextStack, depth + 1, false);
           const node = modules[idx];
           if (node && node.path === subPath) {
+            for (let i = 1; i < concretes.length; i++) mergeParams(node, concretes[i]);
             node.params.set('typename', 'string'); // keep typename assignable
             node.defaulted.add('typename');
           }
@@ -134,6 +152,18 @@ export function expandNetwork(
     }
   };
 
+  /** Union another candidate concrete type's own params into a like-slot node
+   *  (first candidate wins for shared params' metadata). */
+  const mergeParams = (node: ModuleNode, type: NedTypeInfo): void => {
+    for (const [name, info] of type.params()) {
+      if (node.params.has(name)) continue;
+      node.params.set(name, info.type);
+      node.paramMeta.set(name, { unit: info.unit, enumValues: info.enumValues, default: info.value });
+      node.paramOwner.set(name, type);
+      if (info.value !== undefined) node.defaulted.add(name);
+    }
+  };
+
   const visitLike = (iface: NedTypeInfo | undefined, path: string, stack: Set<string>, depth: number): void => {
     // emit an open module node carrying interface params + a typename pseudo-param
     if (truncated) return;
@@ -144,12 +174,14 @@ export function expandNetwork(
     nodeCount++;
     const params = new Map<string, string | undefined>();
     const paramMeta = new Map<string, ParamMeta>();
+    const paramOwner = new Map<string, NedTypeInfo>();
     params.set('typename', 'string');
     if (iface) for (const [name, info] of iface.params()) {
       params.set(name, info.type);
       paramMeta.set(name, { unit: info.unit, enumValues: info.enumValues, default: info.value });
+      paramOwner.set(name, iface);
     }
-    modules.push({ path, norm: norm(path), type: iface?.fqName, typeInfo: iface, params, paramMeta, defaulted: new Set(['typename']), open: true });
+    modules.push({ path, norm: norm(path), type: iface?.fqName, typeInfo: iface, params, paramMeta, paramOwner, defaulted: new Set(['typename']), open: true });
     // recurse into interface submodules (rare) but keep open
     if (iface && !stack.has(iface.fqName)) {
       const ns = new Set(stack).add(iface.fqName);

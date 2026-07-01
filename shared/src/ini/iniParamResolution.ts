@@ -111,14 +111,21 @@ export function collectTypenameEntries(doc: IniDocument, section: IniSection): I
   return out;
 }
 
-/** A resolver from a `like`-slot norm path to its bound concrete type name. */
+/** A resolver from a `like`-slot norm path to its bound concrete type name(s). */
 export interface TypenameBindings {
+  /** the first (highest-precedence) matching typename, if any. */
   resolve: (slotNorm: string) => string | undefined;
+  /**
+   * ALL matching typenames in precedence order (deduped). A single normalized slot
+   * can match several bindings when vector indices differ (e.g. `x[0]` vs `x[*]`);
+   * the expansion unions the parameters of every candidate concrete type.
+   */
+  resolveAll: (slotNorm: string) => string[];
   /** stable digest of the bindings, for the expansion cache key. */
   digest: string;
 }
 
-/** Compile typename entries into bindings (first match wins, OMNeT++ precedence). */
+/** Compile typename entries into bindings (OMNeT++ precedence order). */
 export function buildTypenameBindings(entries: IniEntry[]): TypenameBindings {
   const compiled: { re: RegExp; value: string }[] = [];
   const parts: string[] = [];
@@ -130,8 +137,14 @@ export function buildTypenameBindings(entries: IniEntry[]): TypenameBindings {
     compiled.push({ re: iniKeyToRegex(prefix), value });
     parts.push(`${normIndices(prefix)}=${value}`);
   }
+  const resolveAll = (slotNorm: string) => {
+    const out: string[] = [];
+    for (const c of compiled) if (c.re.test(slotNorm) && !out.includes(c.value)) out.push(c.value);
+    return out;
+  };
   return {
-    resolve: (slotNorm) => compiled.find((c) => c.re.test(slotNorm))?.value,
+    resolve: (slotNorm) => resolveAll(slotNorm)[0],
+    resolveAll,
     digest: parts.join(';'),
   };
 }
@@ -173,7 +186,7 @@ function getExpansion(
   const key = `${cache.generation}:${net.fqName}:${bindings?.digest ?? ''}`;
   let r = perCache.get(key);
   if (!r) {
-    r = expandNetwork(cache, net, bindings?.resolve);
+    r = expandNetwork(cache, net, bindings?.resolveAll);
     perCache.set(key, r);
     // Bound memory by evicting the OLDEST entries (FIFO) rather than clearing the
     // whole cache — a single reverse-assignment scan reuses hundreds of distinct
@@ -398,7 +411,9 @@ export function matchedParamModules(
     if (!m.typeInfo) continue;
     for (const [name, ptype] of m.params) {
       if (!re.test(`${m.norm}.${name}`)) continue;
-      const decl = m.typeInfo.paramDecl(name);
+      // a unioned like-slot param may be declared by a non-primary candidate type
+      const owner = m.paramOwner.get(name) ?? m.typeInfo;
+      const decl = owner.paramDecl(name);
       let loc: Location | undefined;
       if (decl) {
         const nn = nameNode(decl.node) ?? decl.node;
@@ -408,7 +423,7 @@ export function matchedParamModules(
         path: m.path,
         paramName: name,
         paramType: ptype,
-        typeFqName: decl?.owner.fqName ?? m.typeInfo.fqName,
+        typeFqName: decl?.owner.fqName ?? owner.fqName,
         decl: loc,
       });
     }
@@ -552,7 +567,9 @@ export function findParamAssignments(
       // instance paths where (typeFqName, param) is declared
       const targetNorms = new Set<string>();
       for (const m of expansion.modules) {
-        const decl = m.typeInfo?.paramDecl(target.param);
+        if (!m.params.has(target.param)) continue;
+        const owner = m.paramOwner.get(target.param) ?? m.typeInfo;
+        const decl = owner?.paramDecl(target.param);
         if (decl && decl.owner.fqName === target.typeFqName) {
           targetNorms.add(`${m.norm}.${target.param}`);
         }

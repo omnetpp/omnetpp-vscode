@@ -22,6 +22,7 @@ const NED = `
 moduleinterface IApp { parameters: int dummy; }
 simple Queue { parameters: int capacity = 10; double rate @unit(bps); }
 simple ConcreteApp like IApp { parameters: int dummy; string addr; }
+simple SinkApp like IApp { parameters: int dummy; }
 network Net {
   parameters:
     int numHosts = 3;
@@ -72,6 +73,42 @@ test('like submodule subtree does not produce false no-match', async () => {
 *.host[*].addr = "x"`);
   const diags = iniParamDiagnostics(doc, cache, reg);
   assert.deepEqual(diags.filter((d) => d.code === 'no-matching-param'), []);
+});
+
+test('index-specific like typenames: param on any candidate type is not flagged', async () => {
+  const cache = await cacheWith(NED);
+  // host[0] is SinkApp (no `addr`), the rest are ConcreteApp (has `addr`). Because
+  // vector indices normalize to [], both bindings match the same slot -> the union
+  // of their params must be considered, so `addr` matches ConcreteApp and is clean.
+  const doc = parseIni(`network = Net
+*.host[0].typename = "SinkApp"
+*.host[*].typename = "ConcreteApp"
+*.host[*].addr = "x"`);
+  const diags = iniParamDiagnostics(doc, cache, reg);
+  assert.deepEqual(diags.filter((d) => d.code === 'no-matching-param'), [], JSON.stringify(diags));
+});
+
+test('index-specific like typenames: param on NO candidate type is still flagged', async () => {
+  const cache = await cacheWith(NED);
+  const doc = parseIni(`network = Net
+*.host[0].typename = "SinkApp"
+*.host[*].typename = "ConcreteApp"
+*.host[*].bogusPort = 1`);
+  const diags = iniParamDiagnostics(doc, cache, reg);
+  assert.ok(diags.some((d) => d.code === 'no-matching-param'), JSON.stringify(diags));
+});
+
+test('go-to-definition resolves a param that lives only on a non-primary candidate', async () => {
+  const cache = await cacheWith(NED);
+  const doc = parseIni(`network = Net
+*.host[0].typename = "SinkApp"
+*.host[*].typename = "ConcreteApp"
+*.host[*].addr = "x"`);
+  // `addr` is declared on ConcreteApp (the 2nd candidate); paramOwner must make
+  // navigation land on its real NED declaration, not fail.
+  const defs = iniParamDefinition(doc, cache, doc.sections[0], '*.host[*].addr');
+  assert.ok(defs.length >= 1, 'found a declaration for addr');
+  assert.equal(defs[0].uri, 'file:///net.ned');
 });
 
 test('deep wildcard never flagged (dynamic-safe)', async () => {
