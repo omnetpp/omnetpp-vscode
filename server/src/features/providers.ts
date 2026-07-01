@@ -54,7 +54,8 @@ import {
   iniVariableDiagnostics,
   iniParamDiagnostics,
   iniParamDefinition,
-  matchedParamType,
+  matchedParamModules,
+  MatchedParamModule,
   classifyKey,
   IniDocument,
   IniSection,
@@ -178,7 +179,20 @@ export function computeDefinition(
   parsed: ParsedDocument,
   pos: Position,
   ctx: IndexContext,
-): Location | null {
+  fallbackNetwork?: string,
+): Location | Location[] | null {
+  // INI has no tree — handle it before the tree guard below.
+  if (parsed.language === 'ini' && parsed.ini) {
+    const at = iniKeyAt(parsed.ini, pos);
+    if (at && classifyKey(ctx.registry, at.key).kind === 'param-assignment') {
+      // Jump to the matched NED parameter declaration(s); VS Code offers a picker
+      // when the pattern resolves to several distinct declarations.
+      const defs = iniParamDefinition(parsed.ini, ctx.nedCache, at.section, at.key, fallbackNetwork);
+      if (!defs.length) return null;
+      return defs.length === 1 ? defs[0] : defs;
+    }
+    return null;
+  }
   if (!parsed.tree) return null;
   if (parsed.language === 'ned') {
     const file = ctx.nedCache.getFile(parsed.uri);
@@ -190,13 +204,6 @@ export function computeDefinition(
   if (parsed.language === 'msg') {
     const file = ctx.msgCache.getFile(parsed.uri);
     return file ? msgDefinition(ctx.msgCache, file, file.tree, pos) : null;
-  }
-  if (parsed.language === 'ini' && parsed.ini) {
-    const at = iniKeyAt(parsed.ini, pos);
-    if (at && classifyKey(ctx.registry, at.key).kind === 'param-assignment') {
-      const defs = iniParamDefinition(parsed.ini, ctx.nedCache, at.section, at.key);
-      return defs[0] ?? null; // jump to the first matching NED parameter declaration
-    }
   }
   return null;
 }
@@ -239,26 +246,40 @@ export function computeHover(
   parsed: ParsedDocument,
   pos: Position,
   ctx: IndexContext,
+  fallbackNetwork?: string,
 ): HoverResult | null {
-  const h = computeHoverRaw(parsed, pos, ctx);
+  const h = computeHoverRaw(parsed, pos, ctx, fallbackNetwork);
   return h ? { ...h, markdown: padHoverMarkdown(h.markdown) } : null;
+}
+
+/** How many matched module paths to list in a param-line hover before eliding. */
+const HOVER_PATH_LIMIT = 12;
+
+/** Markdown for a param-assignment hover: parameter type(s) + the matched modules. */
+function paramAssignmentHover(matches: MatchedParamModule[], key: string, range: Range): HoverResult {
+  const types = [...new Set(matches.map((m) => m.paramType).filter((t): t is string => !!t))];
+  const typeStr = types.length === 1 ? ` — type \`${types[0]}\`` : types.length ? ` — types ${types.map((t) => `\`${t}\``).join(', ')}` : '';
+  const paths = matches.map((m) => m.path);
+  const shown = paths.slice(0, HOVER_PATH_LIMIT).map((p) => `- \`${p}\``);
+  if (paths.length > HOVER_PATH_LIMIT) shown.push(`- …and ${paths.length - HOVER_PATH_LIMIT} more`);
+  const header = `parameter \`${key}\`${typeStr} — **${matches.length}** matching module parameter${plural(matches.length)}`;
+  return { markdown: `${header}\n\n${shown.join('\n')}`, range };
 }
 
 function computeHoverRaw(
   parsed: ParsedDocument,
   pos: Position,
   ctx: IndexContext,
+  fallbackNetwork?: string,
 ): HoverResult | null {
   if (parsed.language === 'ini' && parsed.ini) {
     const h = iniHover(parsed.ini, ctx.registry, pos);
     if (h) return h;
-    // parameter assignment key: show the resolved NED parameter type
+    // parameter assignment key: show the resolved NED parameter type + matched modules
     const at = iniKeyAt(parsed.ini, pos);
     if (at && classifyKey(ctx.registry, at.key).kind === 'param-assignment') {
-      const ptype = matchedParamType(parsed.ini, ctx.nedCache, at.section, at.key);
-      if (ptype) {
-        return { markdown: `parameter \`${at.key}\` — type \`${ptype}\``, range: at.range };
-      }
+      const matches = matchedParamModules(parsed.ini, ctx.nedCache, at.section, at.key, fallbackNetwork);
+      if (matches.length) return paramAssignmentHover(matches, at.key, at.range);
     }
     return null;
   }
@@ -297,11 +318,24 @@ export function computeReferences(
   pos: Position,
   includeDeclaration: boolean,
   ctx: IndexContext,
+  fallbackNetwork?: string,
 ): Location[] {
   if (parsed.language === 'ned' && parsed.tree) return nedReferencesAt(parsed, pos, includeDeclaration, ctx);
   if (parsed.language === 'msg' && parsed.tree) return msgReferencesAt(parsed, pos, includeDeclaration, ctx);
-  if (parsed.language === 'ini' && parsed.ini) return iniReferencesAt(parsed, pos, includeDeclaration, ctx);
+  if (parsed.language === 'ini' && parsed.ini) return iniReferencesAt(parsed, pos, includeDeclaration, ctx, fallbackNetwork);
   return [];
+}
+
+function dedupLocations(locs: Location[]): Location[] {
+  const seen = new Set<string>();
+  const out: Location[] = [];
+  for (const l of locs) {
+    const k = `${l.uri}:${l.range.start.line}:${l.range.start.character}:${l.range.end.line}:${l.range.end.character}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(l);
+  }
+  return out;
 }
 
 function nedReferencesAt(parsed: ParsedDocument, pos: Position, includeDeclaration: boolean, ctx: IndexContext): Location[] {
@@ -346,9 +380,20 @@ function msgReferencesAt(parsed: ParsedDocument, pos: Position, includeDeclarati
   return refs;
 }
 
-/** Symmetric references from an INI `network=`: the NED type's usages + configs. */
-function iniReferencesAt(parsed: ParsedDocument, pos: Position, includeDeclaration: boolean, ctx: IndexContext): Location[] {
+/**
+ * References from an INI key: on a `network=` key, the NED type's usages + configs;
+ * on a param-assignment key, the matched NED parameter declaration(s) plus every
+ * other in-scope INI assignment targeting the same parameters.
+ */
+function iniReferencesAt(
+  parsed: ParsedDocument,
+  pos: Position,
+  includeDeclaration: boolean,
+  ctx: IndexContext,
+  fallbackNetwork?: string,
+): Location[] {
   if (!parsed.ini) return [];
+  // network= key: the NED type's usages + the configs selecting it.
   for (const section of parsed.ini.sections) {
     for (const e of section.entries) {
       if (e.key !== 'network' || !e.value) continue;
@@ -362,6 +407,26 @@ function iniReferencesAt(parsed: ParsedDocument, pos: Position, includeDeclarati
       }
       return refs;
     }
+  }
+  // param-assignment key: matched NED declarations + other INI assignment lines.
+  const at = iniKeyAt(parsed.ini, pos);
+  if (at && classifyKey(ctx.registry, at.key).kind === 'param-assignment') {
+    const matches = matchedParamModules(parsed.ini, ctx.nedCache, at.section, at.key, fallbackNetwork);
+    const refs: Location[] = [];
+    const targets = new Set<string>();
+    for (const m of matches) {
+      if (m.decl) refs.push(m.decl);
+      targets.add(`${m.typeFqName} ${m.paramName}`);
+    }
+    for (const t of targets) {
+      const [typeFqName, param] = t.split(' ');
+      const relevant = paramContainerSimpleNames(ctx.db, typeFqName);
+      for (const a of findParamAssignments(ctx.iniCache, ctx.nedCache, ctx.registry, { typeFqName, param }, undefined, relevant)) {
+        if (!includeDeclaration && a.uri === parsed.uri && a.keyRange.start.line === at.range.start.line) continue;
+        refs.push({ uri: a.uri, range: a.keyRange });
+      }
+    }
+    return dedupLocations(refs);
   }
   return [];
 }
@@ -390,10 +455,28 @@ function declLocation(ctx: IndexContext, sym: ReturnType<typeof nedTypeSym>): Lo
  * references, subtypes, and (NED) configs that use it as a network; per locally
  * declared NED parameter, the number of INI keys that assign it.
  */
-export function computeCodeLenses(parsed: ParsedDocument, ctx: IndexContext): CrossRefLens[] {
+export function computeCodeLenses(
+  parsed: ParsedDocument,
+  ctx: IndexContext,
+  opts?: { iniParamLens?: boolean; fallbackNetwork?: string },
+): CrossRefLens[] {
   const out: CrossRefLens[] = [];
   const lens = (range: Range, title: string, locations: Location[]) =>
     out.push({ range, title, uri: parsed.uri, position: range.start, locations });
+
+  if (parsed.language === 'ini' && parsed.ini) {
+    if (!opts?.iniParamLens) return out;
+    for (const section of parsed.ini.sections) {
+      for (const e of section.entries) {
+        if (classifyKey(ctx.registry, e.key).kind !== 'param-assignment') continue;
+        const matches = matchedParamModules(parsed.ini, ctx.nedCache, section, e.key, opts.fallbackNetwork);
+        if (!matches.length) continue;
+        const decls = dedupLocations(matches.map((m) => m.decl).filter((l): l is Location => !!l));
+        lens(e.keyRange, `${matches.length} module parameter${plural(matches.length)}`, decls);
+      }
+    }
+    return out;
+  }
 
   if (parsed.language === 'ned') {
     for (const t of ctx.nedCache.typesInFile(parsed.uri)) {

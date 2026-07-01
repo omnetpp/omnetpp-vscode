@@ -15,13 +15,14 @@ import {
   TypeHierarchyItem,
   SymbolKind,
   CodeLens as LspCodeLens,
+  CodeLensRefreshRequest,
   DidChangeWatchedFilesNotification,
   WatchKind,
   type Disposable,
 } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { promises as fsp } from 'node:fs';
-import { ParserService, parseIni, configSummaries, OMNETPP_TOOLS, handleTool, workspaceSymbols, BUILTIN_URI } from '@omnetpp/shared';
+import { ParserService, parseIni, configSummaries, effectiveNetwork, OMNETPP_TOOLS, handleTool, workspaceSymbols, BUILTIN_URI } from '@omnetpp/shared';
 import type { ToolContext, FileSystem } from '@omnetpp/shared';
 import { DocumentModelStore } from './documentModel';
 import type { ParsedDocument } from './documentModel';
@@ -71,16 +72,26 @@ let nedPathSetting = '';
 let installDir = '';
 /** Whether diagnostics are published for the whole workspace or only open files. */
 let diagnosticsScope: 'openFiles' | 'workspace' = 'workspace';
+/** Whether to emit code lenses on INI parameter-assignment lines. */
+let iniParamCodeLensEnabled = true;
 
 /** Read the `omnetpp.*` settings the server cares about from init/config options. */
 function applySettings(
-  opts: { nedPath?: string; installDir?: string; diagnostics?: { scope?: string } } | undefined,
+  opts:
+    | {
+        nedPath?: string;
+        installDir?: string;
+        diagnostics?: { scope?: string };
+        codeLens?: { iniParams?: boolean };
+      }
+    | undefined,
 ): void {
   nedPathSetting = opts?.nedPath ?? '';
   // explicit setting wins; otherwise fall back to the env vars an OMNeT++ shell exports
   installDir =
     opts?.installDir || process.env.OMNETPP_ROOT || process.env.__omnetpp_root_dir || '';
   diagnosticsScope = opts?.diagnostics?.scope === 'openFiles' ? 'openFiles' : 'workspace';
+  iniParamCodeLensEnabled = opts?.codeLens?.iniParams !== false;
 }
 
 connection.onInitialize(async (params: InitializeParams): Promise<InitializeResult> => {
@@ -451,9 +462,15 @@ connection.onNotification('omnetpp/revalidate', () => scheduleRevalidate());
 connection.onDidChangeConfiguration((change) => {
   const before = `${nedPathSetting}\0${installDir}`;
   const beforeScope = diagnosticsScope;
+  const beforeIniLens = iniParamCodeLensEnabled;
   applySettings(
     (change.settings as {
-      omnetpp?: { nedPath?: string; installDir?: string; diagnostics?: { scope?: string } };
+      omnetpp?: {
+        nedPath?: string;
+        installDir?: string;
+        diagnostics?: { scope?: string };
+        codeLens?: { iniParams?: boolean };
+      };
     })?.omnetpp,
   );
   const after = `${nedPathSetting}\0${installDir}`;
@@ -462,6 +479,8 @@ connection.onDidChangeConfiguration((change) => {
     if (diagnosticsScope === 'workspace') publishWorkspaceDiagnostics();
     else clearWorkspaceDiagnostics();
   }
+  // toggle the ini param lenses live (pull-based: ask the client to re-query)
+  if (iniParamCodeLensEnabled !== beforeIniLens) void connection.sendRequest(CodeLensRefreshRequest.type);
 });
 
 connection.onDidChangeWatchedFiles(async (params) => {
@@ -521,14 +540,14 @@ connection.onDefinition((params) => {
   const parsed = store?.get(params.textDocument.uri);
   const c = ctx();
   if (!parsed || !c) return null;
-  return computeDefinition(parsed, params.position, c);
+  return computeDefinition(parsed, params.position, c, currentActiveNetwork);
 });
 
 connection.onHover((params) => {
   const parsed = store?.get(params.textDocument.uri);
   const c = ctx();
   if (!parsed || !c) return null;
-  const h = computeHover(parsed, params.position, c);
+  const h = computeHover(parsed, params.position, c, currentActiveNetwork);
   if (!h) return null;
   return { contents: { kind: MarkupKind.Markdown, value: h.markdown }, range: h.range };
 });
@@ -537,7 +556,7 @@ connection.onReferences((params) => {
   const parsed = store?.get(params.textDocument.uri);
   const c = ctx();
   if (!parsed || !c) return [];
-  return computeReferences(parsed, params.position, params.context.includeDeclaration, c);
+  return computeReferences(parsed, params.position, params.context.includeDeclaration, c, currentActiveNetwork);
 });
 
 connection.onCompletion((params) => {
@@ -551,7 +570,10 @@ connection.onCodeLens((params): LspCodeLens[] => {
   const parsed = store?.get(params.textDocument.uri);
   const c = ctx();
   if (!parsed || !c) return [];
-  return computeCodeLenses(parsed, c).map((l) => ({
+  return computeCodeLenses(parsed, c, {
+    iniParamLens: iniParamCodeLensEnabled,
+    fallbackNetwork: currentActiveNetwork,
+  }).map((l) => ({
     range: l.range,
     command: {
       title: l.title,
@@ -663,6 +685,33 @@ interface ActiveConfig {
   uri: string;
   name: string;
 }
+
+/**
+ * The globally-selected active configuration, pushed by the client. Its effective
+ * network is the fallback context for INI param navigation on lines whose own
+ * section selects no network (e.g. `[General]`) — the "hybrid" rule.
+ */
+let currentActiveConfig: ActiveConfig | undefined;
+let currentActiveNetwork: string | undefined;
+
+/** Resolve (and cache) the active config's effective network name. */
+async function refreshActiveNetwork(): Promise<void> {
+  currentActiveNetwork = undefined;
+  const cfg = currentActiveConfig;
+  if (!cfg) return;
+  const ini = await iniDocFor(cfg.uri);
+  if (!ini) return;
+  const section =
+    cfg.name === 'General'
+      ? ini.sections.find((s) => s.type === 'general')
+      : ini.sections.find((s) => s.configName === cfg.name);
+  if (section) currentActiveNetwork = effectiveNetwork(ini, section);
+}
+
+connection.onNotification('omnetpp/activeConfigChanged', (cfg: ActiveConfig | null) => {
+  currentActiveConfig = cfg ?? undefined;
+  void refreshActiveNetwork();
+});
 
 /** Build the active-configuration value overlay; reads the ini from the open
  *  buffer or from disk (so it works even when the ini isn't open, e.g. on startup). */

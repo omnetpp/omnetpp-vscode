@@ -396,6 +396,11 @@
           "default": "workspace",
           "markdownDescription": "Which files contribute problem markers to the Problems view. `workspace` analyses the whole project so errors in unopened files stay visible; `openFiles` restricts diagnostics to the editors you have open."
         },
+        "omnetpp.codeLens.iniParams": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show a CodeLens on INI parameter-assignment lines with the count of matching module parameters (in the network of the section, or of the active configuration for `[General]` lines). Clicking it peeks the matched NED parameter declarations."
+        },
         "omnetpp.trace.server": {
           "type": "string",
           "enum": [

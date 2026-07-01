@@ -360,36 +360,122 @@ export function addMissingKeys(
   return edits;
 }
 
-/** Go-to-definition target(s) for an ini parameter key: the NED param declaration(s). */
+/** A concrete module parameter that an ini key pattern matches. */
+export interface MatchedParamModule {
+  /** full instance path, vector indices as [*], e.g. "Net.host[*].app". */
+  path: string;
+  paramName: string;
+  /** the NED type of the parameter, if known. */
+  paramType?: string;
+  /** fq-name of the NED type that declares the parameter. */
+  typeFqName: string;
+  /** the NED parameter declaration location. */
+  decl?: Location;
+}
+
+/**
+ * Every concrete module parameter that an ini key pattern matches, in the context
+ * of `section`'s effective network (falling back to `fallbackNetwork` — the active
+ * config's network — when the section itself selects none, e.g. `[General]`).
+ * Unlike {@link iniParamDefinition} this also handles wildcard leaves (e.g.
+ * `**.host.*`) and reports the matched instance path + parameter type.
+ */
+export function matchedParamModules(
+  doc: IniDocument,
+  cache: NedResourceCache,
+  section: IniSection,
+  key: string,
+  fallbackNetwork?: string,
+): MatchedParamModule[] {
+  const netName = effectiveNetwork(doc, section) ?? fallbackNetwork;
+  if (!netName) return [];
+  const net = resolveNetworkType(cache, netName);
+  if (!net) return [];
+  const re = iniKeyToRegex(key);
+  const out: MatchedParamModule[] = [];
+  const bindings = buildTypenameBindings(collectTypenameEntries(doc, section));
+  for (const m of getExpansion(cache, net, bindings).modules) {
+    if (!m.typeInfo) continue;
+    for (const [name, ptype] of m.params) {
+      if (!re.test(`${m.norm}.${name}`)) continue;
+      const decl = m.typeInfo.paramDecl(name);
+      let loc: Location | undefined;
+      if (decl) {
+        const nn = nameNode(decl.node) ?? decl.node;
+        loc = { uri: decl.owner.file.uri, range: nodeRange(nn) };
+      }
+      out.push({
+        path: m.path,
+        paramName: name,
+        paramType: ptype,
+        typeFqName: decl?.owner.fqName ?? m.typeInfo.fqName,
+        decl: loc,
+      });
+    }
+  }
+  return out;
+}
+
+/** The NED type-declaration location for a module (its name identifier). */
+function moduleDeclLocation(typeInfo: NedTypeInfo): Location {
+  const nn = nameNode(typeInfo.node) ?? typeInfo.node;
+  return { uri: typeInfo.file.uri, range: nodeRange(nn) };
+}
+
+/**
+ * Modules whose instance path matches the module-prefix of an ini key (the part
+ * before the leaf parameter name). Used as a navigation fallback when the leaf
+ * matches no actual parameter — jump to the module rather than nowhere.
+ */
+export function matchedModules(
+  doc: IniDocument,
+  cache: NedResourceCache,
+  section: IniSection,
+  key: string,
+  fallbackNetwork?: string,
+): { path: string; typeFqName: string; decl: Location }[] {
+  const dot = key.lastIndexOf('.');
+  if (dot < 0) return []; // no module prefix to match
+  const prefix = key.slice(0, dot);
+  const netName = effectiveNetwork(doc, section) ?? fallbackNetwork;
+  if (!netName) return [];
+  const net = resolveNetworkType(cache, netName);
+  if (!net) return [];
+  const re = iniKeyToRegex(prefix);
+  const out: { path: string; typeFqName: string; decl: Location }[] = [];
+  const bindings = buildTypenameBindings(collectTypenameEntries(doc, section));
+  for (const m of getExpansion(cache, net, bindings).modules) {
+    if (!m.typeInfo || !re.test(m.norm)) continue;
+    out.push({ path: m.path, typeFqName: m.typeInfo.fqName, decl: moduleDeclLocation(m.typeInfo) });
+  }
+  return out;
+}
+
+/**
+ * Go-to-definition target(s) for an ini parameter key: the NED param
+ * declaration(s). When the leaf matches no actual parameter, falls back to the
+ * first matching module's declaration so navigation still lands somewhere useful.
+ */
 export function iniParamDefinition(
   doc: IniDocument,
   cache: NedResourceCache,
   section: IniSection,
   key: string,
+  fallbackNetwork?: string,
 ): Location[] {
-  const dot = key.lastIndexOf('.');
-  const leaf = dot < 0 ? key : key.slice(dot + 1);
-  if (/[*?\]]/.test(leaf)) return []; // wildcard leaf cannot pinpoint a declaration
-  const netName = effectiveNetwork(doc, section);
-  if (!netName) return [];
-  const net = resolveNetworkType(cache, netName);
-  if (!net) return [];
-  const re = iniKeyToRegex(key);
   const out: Location[] = [];
   const seen = new Set<string>();
-  const bindings = buildTypenameBindings(collectTypenameEntries(doc, section));
-  for (const m of getExpansion(cache, net, bindings).modules) {
-    if (!m.typeInfo || !m.params.has(leaf)) continue;
-    if (!re.test(`${m.norm}.${leaf}`)) continue;
-    const decl = m.typeInfo.paramDecl(leaf);
-    if (!decl) continue;
-    const nn = nameNode(decl.node) ?? decl.node;
-    const locKey = `${decl.owner.file.uri}:${nn.startPosition.row}:${nn.startPosition.column}`;
+  for (const m of matchedParamModules(doc, cache, section, key, fallbackNetwork)) {
+    if (!m.decl) continue;
+    const locKey = `${m.decl.uri}:${m.decl.range.start.line}:${m.decl.range.start.character}`;
     if (seen.has(locKey)) continue;
     seen.add(locKey);
-    out.push({ uri: decl.owner.file.uri, range: nodeRange(nn) });
+    out.push(m.decl);
   }
-  return out;
+  if (out.length) return out;
+  // No parameter matched — navigate to the first matching module instead.
+  const mods = matchedModules(doc, cache, section, key, fallbackNetwork);
+  return mods.length ? [mods[0].decl] : [];
 }
 
 /** One INI assignment that targets a given NED parameter declaration. */

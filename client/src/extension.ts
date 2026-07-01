@@ -43,6 +43,9 @@ function readSettings() {
     diagnostics: {
       scope: config.get<string>('diagnostics.scope', 'workspace'),
     },
+    codeLens: {
+      iniParams: config.get<boolean>('codeLens.iniParams', true),
+    },
   };
 }
 

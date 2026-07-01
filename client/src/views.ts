@@ -918,6 +918,9 @@ export function registerViews(context: vscode.ExtensionContext, client: Language
     activeConfigState = cfg;
     activeConfigNetwork = undefined; // resolved asynchronously below
     void context.workspaceState.update(ACTIVE_CONFIG_KEY, cfg);
+    // let the server track the active config so INI param navigation (hover, refs,
+    // codelens, go-to-def) can use its network as the fallback for [General] lines.
+    void client.sendNotification('omnetpp/activeConfigChanged', cfg ?? null);
     void vscode.commands.executeCommand('setContext', 'omnetpp.hasActiveConfig', !!cfg);
     syncConfigTitle();
     configurations.rerender(); // re-highlight the active node + open its path
