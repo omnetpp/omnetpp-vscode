@@ -56,6 +56,25 @@ export function stripComment(line: string): string {
   return line;
 }
 
+/**
+ * Net bracket nesting of `s`, counting `([{` as +1 and `)]}` as -1, ignoring any
+ * that fall inside a double-quoted string. Used to detect a value that continues on
+ * the next physical line: OMNeT++ lets object/array values (e.g. `= [{...}, {...}]`)
+ * span several lines with no trailing backslash, as long as their brackets are open.
+ */
+export function bracketDepth(s: string): number {
+  let depth = 0;
+  let inStr = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === '"' && !isEscaped(s, i)) inStr = !inStr;
+    else if (inStr) continue;
+    else if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+  }
+  return depth;
+}
+
 const SECTION_RE = /^\s*\[(.*)\]\s*$/;
 const INCLUDE_RE = /^\s*include\s+(.+?)\s*$/;
 
@@ -138,9 +157,15 @@ export function parseIni(text: string): IniDocument {
     const valueStartChar = eq + 1 + (value.length - value.trimStart().length);
     let endLine = startLine;
 
-    // line continuation: a trailing backslash joins the next line
-    while (value.trimEnd().endsWith('\\') && i + 1 < lines.length) {
-      value = value.trimEnd().slice(0, -1);
+    // Line continuation joins the next physical line when the value so far either
+    // ends with a backslash, or has an unclosed bracket/brace/paren — object and
+    // array values (`= [{...}, {...}]`) routinely span several lines without any
+    // trailing backslash. Comments are stripped per physical line before joining.
+    while (
+      i + 1 < lines.length &&
+      (value.trimEnd().endsWith('\\') || bracketDepth(value) > 0)
+    ) {
+      if (value.trimEnd().endsWith('\\')) value = value.trimEnd().slice(0, -1);
       i++;
       raw = lines[i];
       value += '\n' + stripComment(raw);
