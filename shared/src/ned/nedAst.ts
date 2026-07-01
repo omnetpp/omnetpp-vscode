@@ -148,11 +148,49 @@ function paramUnit(text: string): string | undefined {
   return m ? m[1].replace(/^["']|["']$/g, '').trim() || undefined : undefined;
 }
 
-/** Extract the `@enum(...)` members from a parameter declaration's text. */
+/**
+ * Extract the `@enum(...)` members from a parameter declaration's text.
+ *
+ * The member list is scanned quote- and paren-aware: a `)` or `,` inside a quoted
+ * member (e.g. `@enum("g(erp)", "n(mixed-2.4Ghz)")`) neither closes the property nor
+ * separates a member. Surrounding quotes are stripped from each member.
+ */
 function paramEnum(text: string): string[] | undefined {
-  const m = /@enum\s*\(\s*([^)]*?)\s*\)/.exec(text);
-  if (!m) return undefined;
-  const vals = m[1].split(',').map((s) => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+  const kw = text.search(/@enum\s*\(/);
+  if (kw < 0) return undefined;
+  const open = text.indexOf('(', kw);
+  if (open < 0) return undefined;
+
+  // Walk from the opening paren to its match, tracking string state so brackets and
+  // separators inside quotes are ignored; collect members split on top-level commas.
+  const members: string[] = [];
+  let cur = '';
+  let depth = 0;
+  let quote: '"' | "'" | null = null;
+  let closed = false;
+  for (let i = open; i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      cur += c;
+      if (c === '\\' && i + 1 < text.length) cur += text[++i];
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'") { quote = c; cur += c; continue; }
+    if (c === '(') { depth++; if (depth > 1) cur += c; continue; }
+    if (c === ')') {
+      depth--;
+      if (depth === 0) { closed = true; break; }
+      cur += c;
+      continue;
+    }
+    if (c === ',' && depth === 1) { members.push(cur); cur = ''; continue; }
+    cur += c;
+  }
+  if (!closed) return undefined; // unterminated @enum(...) — treat as absent
+  members.push(cur);
+
+  const vals = members.map((s) => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
   return vals.length ? vals : undefined;
 }
 
