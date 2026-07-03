@@ -1,8 +1,12 @@
 import { test } from 'bun:test';
 import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { getParsers } from './helpers';
 import {
   NedResourceCache,
+  ConfigRegistry,
+  classifyKey,
   parseIni,
   matchedParamModules,
   matchedModules,
@@ -12,6 +16,10 @@ import {
   type IniDocument,
   type IniSection,
 } from '../index';
+
+const registry = new ConfigRegistry(
+  JSON.parse(readFileSync(join(__dirname, '..', '..', '..', 'resources', 'config', 'opp-config-options.json'), 'utf8')).options,
+);
 
 const NED = `
 moduleinterface IApp { }
@@ -161,4 +169,26 @@ test('typenameTypeTargets ignores non-module names and variable-driven values', 
   assert.deepEqual(typenameTypeTargets(nedCache, '"IApp"'), []); // an interface, not a module
   assert.deepEqual(typenameTypeTargets(nedCache, '"${t}"'), []); // variable-driven
   assert.deepEqual(typenameTypeTargets(nedCache, '"Nope"'), []); // unknown
+});
+
+// ---- pseudo-parameter keys (typename/display-name) navigate to the applied module type ----
+
+test('typename/display-name are per-object pseudo-parameters (drive module-type navigation)', () => {
+  // The navigation routing keys off this classification, so lock it down.
+  for (const key of ['**.host.app.typename', '**.host.display-name']) {
+    const cls = classifyKey(registry, key);
+    assert.equal(cls.kind, 'config', key);
+    assert.equal(cls.kind === 'config' && cls.option.scope, 'per-object', key);
+  }
+});
+
+test('a pseudo-parameter leaf resolves to the NED type of the module it applies to', async () => {
+  const { nedCache, doc } = await makeCtx();
+  const c = sec(doc, 'C');
+  // `**.host.display-name` applies to `host` -> Host
+  const host = modulesAtPath(doc, nedCache, c, '**.host', undefined);
+  assert.equal(host[0]?.typeFqName, 'Host');
+  // `**.host.app.typename` applies to `app` -> App (the module the pseudo-param is on)
+  const app = modulesAtPath(doc, nedCache, c, '**.host.app', undefined);
+  assert.equal(app[0]?.typeFqName, 'App');
 });

@@ -186,6 +186,23 @@ function isWildcardSegment(segment: string): boolean {
   return name === '' || /[*?]/.test(name);
 }
 
+/** The comma-separated `extends=` label under `pos`, if the cursor is on the value. */
+function extendsLabelAt(entry: IniEntry, pos: Position): string | undefined {
+  const r = entry.valueRange;
+  if (pos.line !== r.start.line) return undefined; // extends is always single-line
+  const rel = pos.character - r.start.character;
+  const v = entry.value;
+  if (rel < 0 || rel > v.length) return undefined;
+  let start = 0;
+  for (let i = 0; i <= v.length; i++) {
+    if (i === v.length || v[i] === ',') {
+      if (rel >= start && rel <= i) return v.slice(start, i).trim() || undefined;
+      start = i + 1;
+    }
+  }
+  return undefined;
+}
+
 /** Declaration location of a NED type (its name identifier). */
 function typeDeclLoc(t: NedTypeInfo): Location {
   return { uri: t.file.uri, range: nodeRange(nameNode(t.node) ?? t.node) };
@@ -244,7 +261,7 @@ export function computeDefinition(
 ): Location | Location[] | null {
   // INI has no tree — handle it before the tree guard below.
   if (parsed.language === 'ini' && parsed.ini) {
-    return iniDefinition(parsed.ini, pos, ctx, fallbackNetwork);
+    return iniDefinition(parsed.ini, parsed.uri, pos, ctx, fallbackNetwork);
   }
   if (!parsed.tree) return null;
   if (parsed.language === 'ned') {
@@ -268,12 +285,16 @@ const asDefResult = (locs: Location[]): Location | Location[] | null =>
  * Go-to-definition for a position inside an INI file:
  * - a `network=` key or value jumps to the resolved network's NED declaration;
  * - a `*.typename = "T"` value jumps to the type(s) `T` denotes;
+ * - an `extends=` label jumps to that section's header (same file);
  * - a param-assignment key is segment-aware: the leaf (param-name) segment jumps to
  *   the NED parameter declaration, while an earlier module-path segment jumps to the
- *   NED type of the module instance(s) at that path.
+ *   NED type of the module instance(s) at that path;
+ * - a per-object pseudo-parameter key (`.typename`, `.display-name`, …) — which has
+ *   no NED declaration of its own — jumps to the NED type of the module it applies to.
  */
 function iniDefinition(
   ini: IniDocument,
+  uri: string,
   pos: Position,
   ctx: IndexContext,
   fallbackNetwork?: string,
@@ -285,8 +306,16 @@ function iniDefinition(
   // network= : either the key or the value navigates to the network type.
   if (entry.key === 'network') {
     if (!entry.value) return null;
-    const net = resolveNetworkType(ctx.nedCache, entry.value, ini.uri);
+    const net = resolveNetworkType(ctx.nedCache, entry.value, uri);
     return net ? typeDeclLoc(net) : null;
+  }
+
+  // extends= : each comma-separated label navigates to that section's header.
+  if (entry.key === 'extends' && posInRange(pos, entry.valueRange)) {
+    const label = extendsLabelAt(entry, pos);
+    if (!label) return null;
+    const target = ini.sections.find((s) => sectionName(s) === label);
+    return target ? { uri, range: target.headerRange } : null;
   }
 
   // typename value: the string denotes a NED type — navigate to it.
@@ -294,18 +323,34 @@ function iniDefinition(
     return asDefResult(typenameTypeTargets(ctx.nedCache, entry.value));
   }
 
-  // param-assignment key: segment-aware navigation.
-  if (posInRange(pos, entry.keyRange) && classifyKey(ctx.registry, entry.key).kind === 'param-assignment') {
+  // dotted key: segment-aware navigation for both real params and per-object
+  // pseudo-parameters (typename/display-name/…).
+  if (posInRange(pos, entry.keyRange) && entry.key.includes('.')) {
+    const cls = classifyKey(ctx.registry, entry.key);
+    const isPseudo = cls.kind === 'config' && cls.option.scope === 'per-object';
+    if (cls.kind !== 'param-assignment' && !isPseudo) return null;
+
+    // The NED type of the module(s) at a dotted instance path (empty if the path's
+    // last segment is a wildcard, i.e. names no specific module).
+    const moduleTypeAt = (path: string): Location[] => {
+      if (isWildcardSegment(leafSegment(path))) return [];
+      return dedupLocations(modulesAtPath(ini, ctx.nedCache, section, path, fallbackNetwork).map((m) => m.decl));
+    };
+
     const seg = keySegmentPrefixAt(entry, pos);
-    // an earlier segment that names a concrete module -> that module's NED type
-    if (seg && !seg.isLast && !isWildcardSegment(seg.segment)) {
-      const mods = modulesAtPath(ini, ctx.nedCache, section, seg.prefix, fallbackNetwork);
-      const locs = dedupLocations(mods.map((m) => m.decl));
+    if (seg && !seg.isLast) {
+      // an earlier segment that names a concrete module -> that module's NED type
+      const locs = moduleTypeAt(seg.prefix);
       if (locs.length) return asDefResult(locs);
-      // wildcard / unresolved segment: fall through to the parameter target
+    } else if (seg && isPseudo) {
+      // the pseudo-parameter leaf -> the NED type of the module it is applied on
+      const locs = moduleTypeAt(entry.key.slice(0, entry.key.lastIndexOf('.')));
+      if (locs.length) return asDefResult(locs);
     }
-    // the leaf (param-name) segment -> the NED parameter declaration(s)
-    return asDefResult(iniParamDefinition(ini, ctx.nedCache, section, entry.key, fallbackNetwork));
+    // a real-param leaf (or an unresolved earlier segment) -> the NED param decl(s)
+    if (cls.kind === 'param-assignment')
+      return asDefResult(iniParamDefinition(ini, ctx.nedCache, section, entry.key, fallbackNetwork));
+    return null;
   }
   return null;
 }
