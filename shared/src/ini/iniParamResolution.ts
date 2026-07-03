@@ -478,6 +478,55 @@ function moduleDeclLocation(typeInfo: NedTypeInfo): Location {
 }
 
 /**
+ * Declaration location(s) of the NED type named by a `*.typename = "T"` value.
+ * The value is a string but denotes a type, resolved by OMNeT++'s `like` rules:
+ * a qualified name maps to that exact type; an unqualified (simple) name maps to
+ * every module type sharing it (callers may present a picker). Inner types and
+ * non-module types (interfaces, channels) are excluded.
+ */
+export function typenameTypeTargets(cache: NedResourceCache, value: string): Location[] {
+  const name = value.replace(/^"|"$/g, '').trim();
+  if (!name || name.includes('$') || name.includes('{')) return [];
+  const seen = new Set<string>();
+  const out: Location[] = [];
+  const push = (t: NedTypeInfo | undefined) => {
+    if (!t || t.isInnerType || !t.isModuleType() || seen.has(t.fqName)) return;
+    seen.add(t.fqName);
+    out.push(moduleDeclLocation(t));
+  };
+  if (name.includes('.')) push(cache.getType(name));
+  else for (const t of cache.allTypes()) if (t.simpleName === name) push(t);
+  return out;
+}
+
+/**
+ * Modules of the section's network whose instance path matches `pathPattern` (an
+ * ini-style dotted path, possibly with wildcards), each with its concrete NED
+ * type and that type's declaration location. Backs both "jump to the module
+ * behind an ini key" and per-segment navigation from a dotted key.
+ */
+export function modulesAtPath(
+  doc: IniDocument,
+  cache: NedResourceCache,
+  section: IniSection,
+  pathPattern: string,
+  fallbackNetwork?: string,
+): { path: string; typeFqName: string; decl: Location }[] {
+  const netName = effectiveNetwork(doc, section) ?? fallbackNetwork;
+  if (!netName) return [];
+  const net = resolveNetworkType(cache, netName, doc.uri);
+  if (!net) return [];
+  const re = iniKeyToRegex(pathPattern);
+  const out: { path: string; typeFqName: string; decl: Location }[] = [];
+  const bindings = buildTypenameBindings(collectTypenameEntries(doc, section));
+  for (const m of getExpansion(cache, net, bindings).modules) {
+    if (!m.typeInfo || !re.test(m.norm)) continue;
+    out.push({ path: m.path, typeFqName: m.typeInfo.fqName, decl: moduleDeclLocation(m.typeInfo) });
+  }
+  return out;
+}
+
+/**
  * Modules whose instance path matches the module-prefix of an ini key (the part
  * before the leaf parameter name). Used as a navigation fallback when the leaf
  * matches no actual parameter — jump to the module rather than nowhere.
@@ -491,19 +540,7 @@ export function matchedModules(
 ): { path: string; typeFqName: string; decl: Location }[] {
   const dot = key.lastIndexOf('.');
   if (dot < 0) return []; // no module prefix to match
-  const prefix = key.slice(0, dot);
-  const netName = effectiveNetwork(doc, section) ?? fallbackNetwork;
-  if (!netName) return [];
-  const net = resolveNetworkType(cache, netName, doc.uri);
-  if (!net) return [];
-  const re = iniKeyToRegex(prefix);
-  const out: { path: string; typeFqName: string; decl: Location }[] = [];
-  const bindings = buildTypenameBindings(collectTypenameEntries(doc, section));
-  for (const m of getExpansion(cache, net, bindings).modules) {
-    if (!m.typeInfo || !re.test(m.norm)) continue;
-    out.push({ path: m.path, typeFqName: m.typeInfo.fqName, decl: moduleDeclLocation(m.typeInfo) });
-  }
-  return out;
+  return modulesAtPath(doc, cache, section, key.slice(0, dot), fallbackNetwork);
 }
 
 /**

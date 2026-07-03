@@ -56,9 +56,12 @@ import {
   iniParamDefinition,
   matchedParamModules,
   MatchedParamModule,
+  modulesAtPath,
+  typenameTypeTargets,
   classifyKey,
   IniDocument,
   IniSection,
+  IniEntry,
   nedDocumentSymbols,
   iniDocumentSymbols,
   treeFoldingRanges,
@@ -130,6 +133,64 @@ function iniKeyAt(
   return undefined;
 }
 
+/** The ini section + entry whose key OR value range spans `pos`, if any. */
+function iniEntryAt(
+  doc: IniDocument,
+  pos: Position,
+): { section: IniSection; entry: IniEntry } | undefined {
+  for (const section of doc.sections) {
+    for (const e of section.entries) {
+      if (posInRange(pos, e.keyRange) || posInRange(pos, e.valueRange)) return { section, entry: e };
+    }
+  }
+  return undefined;
+}
+
+/** The leaf (last dotted segment) of an ini key, e.g. `typename` of `**.app.typename`. */
+function leafSegment(key: string): string {
+  const dot = key.lastIndexOf('.');
+  return dot < 0 ? key : key.slice(dot + 1);
+}
+
+/**
+ * For a cursor within a dotted key's range, the key truncated to the end of the
+ * segment under the cursor (its module-path prefix) and whether that segment is the
+ * last one (the leaf parameter name). The key is always single-line. Returns
+ * `undefined` when the cursor is not on the key line/range.
+ */
+function keySegmentPrefixAt(
+  entry: IniEntry,
+  pos: Position,
+): { prefix: string; segment: string; isLast: boolean } | undefined {
+  const r = entry.keyRange;
+  if (pos.line !== r.start.line) return undefined;
+  const rel = pos.character - r.start.character;
+  const key = entry.key;
+  if (rel < 0 || rel > key.length) return undefined;
+  const dots: number[] = [];
+  for (let i = 0; i < key.length; i++) if (key[i] === '.') dots.push(i);
+  let seg = 0;
+  for (const d of dots) {
+    if (rel > d) seg++;
+    else break;
+  }
+  const start = seg === 0 ? 0 : dots[seg - 1] + 1;
+  const end = seg < dots.length ? dots[seg] : key.length;
+  return { prefix: key.slice(0, end), segment: key.slice(start, end), isLast: seg === dots.length };
+}
+
+/** A dotted-key segment whose NAME (before any `[index]`) is a wildcard — it
+ *  targets no specific module type, so it should not drive type navigation. */
+function isWildcardSegment(segment: string): boolean {
+  const name = segment.split('[')[0];
+  return name === '' || /[*?]/.test(name);
+}
+
+/** Declaration location of a NED type (its name identifier). */
+function typeDeclLoc(t: NedTypeInfo): Location {
+  return { uri: t.file.uri, range: nodeRange(nameNode(t.node) ?? t.node) };
+}
+
 export function computeDiagnostics(parsed: ParsedDocument, ctx?: IndexContext): Diagnostic[] {
   const diags: Diagnostic[] = [];
   if (parsed.tree) {
@@ -183,15 +244,7 @@ export function computeDefinition(
 ): Location | Location[] | null {
   // INI has no tree — handle it before the tree guard below.
   if (parsed.language === 'ini' && parsed.ini) {
-    const at = iniKeyAt(parsed.ini, pos);
-    if (at && classifyKey(ctx.registry, at.key).kind === 'param-assignment') {
-      // Jump to the matched NED parameter declaration(s); VS Code offers a picker
-      // when the pattern resolves to several distinct declarations.
-      const defs = iniParamDefinition(parsed.ini, ctx.nedCache, at.section, at.key, fallbackNetwork);
-      if (!defs.length) return null;
-      return defs.length === 1 ? defs[0] : defs;
-    }
-    return null;
+    return iniDefinition(parsed.ini, pos, ctx, fallbackNetwork);
   }
   if (!parsed.tree) return null;
   if (parsed.language === 'ned') {
@@ -204,6 +257,55 @@ export function computeDefinition(
   if (parsed.language === 'msg') {
     const file = ctx.msgCache.getFile(parsed.uri);
     return file ? msgDefinition(ctx.msgCache, file, file.tree, pos) : null;
+  }
+  return null;
+}
+
+const asDefResult = (locs: Location[]): Location | Location[] | null =>
+  locs.length === 0 ? null : locs.length === 1 ? locs[0] : locs;
+
+/**
+ * Go-to-definition for a position inside an INI file:
+ * - a `network=` key or value jumps to the resolved network's NED declaration;
+ * - a `*.typename = "T"` value jumps to the type(s) `T` denotes;
+ * - a param-assignment key is segment-aware: the leaf (param-name) segment jumps to
+ *   the NED parameter declaration, while an earlier module-path segment jumps to the
+ *   NED type of the module instance(s) at that path.
+ */
+function iniDefinition(
+  ini: IniDocument,
+  pos: Position,
+  ctx: IndexContext,
+  fallbackNetwork?: string,
+): Location | Location[] | null {
+  const hit = iniEntryAt(ini, pos);
+  if (!hit) return null;
+  const { section, entry } = hit;
+
+  // network= : either the key or the value navigates to the network type.
+  if (entry.key === 'network') {
+    if (!entry.value) return null;
+    const net = resolveNetworkType(ctx.nedCache, entry.value, ini.uri);
+    return net ? typeDeclLoc(net) : null;
+  }
+
+  // typename value: the string denotes a NED type — navigate to it.
+  if (leafSegment(entry.key) === 'typename' && posInRange(pos, entry.valueRange)) {
+    return asDefResult(typenameTypeTargets(ctx.nedCache, entry.value));
+  }
+
+  // param-assignment key: segment-aware navigation.
+  if (posInRange(pos, entry.keyRange) && classifyKey(ctx.registry, entry.key).kind === 'param-assignment') {
+    const seg = keySegmentPrefixAt(entry, pos);
+    // an earlier segment that names a concrete module -> that module's NED type
+    if (seg && !seg.isLast && !isWildcardSegment(seg.segment)) {
+      const mods = modulesAtPath(ini, ctx.nedCache, section, seg.prefix, fallbackNetwork);
+      const locs = dedupLocations(mods.map((m) => m.decl));
+      if (locs.length) return asDefResult(locs);
+      // wildcard / unresolved segment: fall through to the parameter target
+    }
+    // the leaf (param-name) segment -> the NED parameter declaration(s)
+    return asDefResult(iniParamDefinition(ini, ctx.nedCache, section, entry.key, fallbackNetwork));
   }
   return null;
 }

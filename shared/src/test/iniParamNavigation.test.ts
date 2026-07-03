@@ -6,6 +6,8 @@ import {
   parseIni,
   matchedParamModules,
   matchedModules,
+  modulesAtPath,
+  typenameTypeTargets,
   iniParamDefinition,
   type IniDocument,
   type IniSection,
@@ -117,4 +119,46 @@ test('iniParamDefinition returns distinct decls, including for wildcard leaves',
   assert.equal(defs.length, 2);
   const lines = new Set(defs.map((d) => d.range.start.line));
   assert.equal(lines.size, 2, 'expected two distinct declaration locations');
+});
+
+// ---- segment-aware navigation: a module-path segment -> the module's NED type ----
+
+test('modulesAtPath resolves a path prefix to the module instance(s) and their type', async () => {
+  const { nedCache, doc } = await makeCtx();
+  const c = sec(doc, 'C');
+  // the `host` segment of `**.host.app.p`
+  const host = modulesAtPath(doc, nedCache, c, '**.host');
+  assert.deepEqual(paths(host), ['Net.host']);
+  assert.equal(host[0].typeFqName, 'Host');
+  // the `app` segment
+  const app = modulesAtPath(doc, nedCache, c, '**.host.app');
+  assert.deepEqual(paths(app), ['Net.host.app']);
+  assert.equal(app[0].typeFqName, 'App');
+  // the network root itself
+  const root = modulesAtPath(doc, nedCache, c, 'Net');
+  assert.deepEqual(paths(root), ['Net']);
+  assert.equal(root[0].typeFqName, 'Net');
+});
+
+test('modulesAtPath resolves a like slot to its typename-bound concrete type', async () => {
+  const { nedCache, doc } = await makeCtx();
+  const a = modulesAtPath(doc, nedCache, sec(doc, 'L'), '**.a');
+  assert.deepEqual(paths(a), ['LNet.a']);
+  assert.equal(a[0].typeFqName, 'LikeApp');
+});
+
+// ---- typename value navigation: the string denotes a NED type ----
+
+test('typenameTypeTargets resolves an unqualified typename value to the module type', async () => {
+  const { nedCache } = await makeCtx();
+  const locs = typenameTypeTargets(nedCache, '"LikeApp"');
+  assert.equal(locs.length, 1);
+  assert.equal(locs[0].uri, 'file:///net.ned');
+});
+
+test('typenameTypeTargets ignores non-module names and variable-driven values', async () => {
+  const { nedCache } = await makeCtx();
+  assert.deepEqual(typenameTypeTargets(nedCache, '"IApp"'), []); // an interface, not a module
+  assert.deepEqual(typenameTypeTargets(nedCache, '"${t}"'), []); // variable-driven
+  assert.deepEqual(typenameTypeTargets(nedCache, '"Nope"'), []); // unknown
 });
