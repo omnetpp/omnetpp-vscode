@@ -4,7 +4,7 @@ import { getParsers } from './helpers';
 import { NedResourceCache } from '../ned/nedResourceCache';
 import { ConfigRegistry } from '../ini/configRegistry';
 import { parseIni } from '../ini/iniDocument';
-import { iniKeyToRegex } from '../ini/keyMatch';
+import { iniKeyToRegex, normIndices } from '../ini/keyMatch';
 import { iniParamDiagnostics } from '../ini/iniParamResolution';
 
 // ---- iniKeyToRegex: OMNeT++ brace patterns ({set} and {num..num}) ----
@@ -49,11 +49,52 @@ test('{lo..up} is a numeric range on the digit run', () => {
   yes('h.a{0..3}', 'h.a03');
 });
 
+test('a numeric range consumes the whole digit run (OMNeT++ atol semantics)', () => {
+  // OMNeT++'s NUMRANGE greedily eats every consecutive digit, then value-checks — so an
+  // adjacent digit-matching element cannot steal trailing digits.
+  no('{..3}?', '03');       // {..3} eats "03"=3, leaving nothing for '?'
+  no('{0..3}{0..3}', '03'); // first range eats "03"; second gets no digits
+  no('{0..9}{0..9}', '05'); // adjacent ranges are unusable: the first eats both digits
+  no('2{..3}{..3}', '222'); // '2' then a range that eats "22"=22 (>3)
+  yes('{0..3}.x', '3.x');   // followed by a non-digit: fine
+  yes('{0..3}?', '3x');     // '?' matches the non-digit 'x' after the maximal run "3"
+  yes('a{10..25}b', 'a12b');
+  no('a{10..25}b', 'a123b'); // "123">25
+});
+
+test('backslash escapes the next character (literal), as in OMNeT++', () => {
+  yes('a\\*b', 'a*b'); no('a\\*b', 'axb');
+  yes('a\\{b', 'a{b');
+  yes('a\\.b', 'a.b'); no('a\\.b', 'axb');
+  yes('a\\?b', 'a?b'); no('a\\?b', 'axb');
+  yes('x\\\\y', 'x\\y');
+});
+
+test('a reversed character range matches nothing (never throws)', () => {
+  // OMNeT++ accepts {9-0}; isInSet is never true, so it matches nothing. Must not throw.
+  assert.doesNotThrow(() => iniKeyToRegex('h.{9-0}'));
+  no('h.{9-0}', 'h.5');
+  no('h.a{z-a}b', 'h.axb');
+  // a mixed set keeps its valid members
+  yes('h.{9-0a-c}', 'h.b');
+  no('h.{9-0a-c}', 'h.5');
+});
+
 test('brace forms compose with the other wildcards and do not disturb them', () => {
   yes('*.node0.mrp.mrpRole', 'Mrp8.node0.mrp.mrpRole');
   yes('**.mrp.mrpRole', 'Mrp8.node3.mrp.mrpRole');
   yes('*.host[*].app', 'Net.host[].app'); // callers normalize indices to [] on both sides
   no('*.node{3,5}.x', 'Mrp8.sub.node3.x'); // '*' does not cross a dot
+});
+
+test('vector index VALUES are normalized away (intentional divergence from OMNeT++)', () => {
+  // normIndices collapses every [i] to [], on both the key and the instance path, so the
+  // plugin matches a vector slot regardless of the concrete index. OMNeT++ matches indices
+  // precisely (`host[0]` != `host[5]`, and `host[0..3]` excludes `host[5]`); the plugin is
+  // deliberately index-insensitive because the module tree represents a vector as one slot.
+  assert.equal(normIndices('*.host[0].app'), '*.host[].app');
+  yes(normIndices('*.host[0].app'), normIndices('Net.host[5].app'));   // OMNeT++: no
+  yes(normIndices('*.host[0..3].app'), normIndices('Net.host[9].app')); // OMNeT++: no
 });
 
 // ---- end-to-end: the mrp-style keys resolve against the module tree ----

@@ -65,15 +65,19 @@ function boundedRange(lo: number, up: number): string {
 }
 
 /** Regex matching a digit run whose numeric value is in [lo, up] (null = unbounded).
- *  Leading zeros are allowed (OMNeT++ compares via atol), matching the C++ semantics. */
+ *  Leading zeros are allowed (OMNeT++ compares via atol). The trailing `(?![0-9])`
+ *  makes the range consume the WHOLE run of digits, as OMNeT++'s NUMRANGE does
+ *  (`atol` reads every consecutive digit before range-checking) — so an adjacent
+ *  digit-matching element cannot steal trailing digits. */
 function numRangeToRegex(lo: number | null, up: number | null): string {
-  if (lo === null && up === null) return '[0-9]+';
-  if (lo === null) return `0*(?:${boundedRange(0, up!)})`; // only nonnegative integers exist
-  const len = String(lo).length;
-  const sameLen = sameLenRange(String(lo), '9'.repeat(len));
-  const more = `[1-9][0-9]{${len},}`; // any number with more digits than lo is > lo
-  const body = up === null ? `${group(sameLen)}|${more}` : boundedRange(lo, up);
-  return `0*(?:${body})`;
+  if (lo === null && up === null) return '[0-9]+(?![0-9])';
+  const body =
+    lo === null
+      ? boundedRange(0, up!) // only nonnegative integers exist
+      : up === null
+        ? `${group(sameLenRange(String(lo), '9'.repeat(String(lo).length)))}|[1-9][0-9]{${String(lo).length},}`
+        : boundedRange(lo, up);
+  return `0*(?:${body})(?![0-9])`;
 }
 
 /** Parse a `{lo..up}` numeric range starting at `norm[i]==='{'`; null if not a range. */
@@ -109,7 +113,10 @@ function parseSet(norm: string, i: number): { regex: string; next: number } | nu
   let body = '';
   while (j < norm.length && (norm[j] !== '}' || j === sbeg)) {
     if (norm[j + 1] === '-' && norm[j + 2] !== undefined && norm[j + 2] !== '}') {
-      body += `${escInClass(norm[j])}-${escInClass(norm[j + 2])}`;
+      // a reversed range (lo > hi) matches nothing in OMNeT++ (isInSet is never true);
+      // drop it rather than emit an invalid JS regex range.
+      if (norm[j].charCodeAt(0) <= norm[j + 2].charCodeAt(0))
+        body += `${escInClass(norm[j])}-${escInClass(norm[j + 2])}`;
       j += 3;
     } else {
       body += escInClass(norm[j]);
@@ -117,6 +124,8 @@ function parseSet(norm: string, i: number): { regex: string; next: number } | nu
     }
   }
   if (norm[j] !== '}') return null; // unterminated: caller falls back to a literal '{'
+  // an empty positive set matches no character; an empty negated set matches any.
+  if (body === '') return { regex: negated ? '[\\s\\S]' : '[^\\s\\S]', next: j + 1 };
   return { regex: `[${negated ? '^' : ''}${body}]`, next: j + 1 };
 }
 
@@ -126,7 +135,8 @@ export function iniKeyToRegex(key: string): RegExp {
   let out = '';
   for (let i = 0; i < norm.length; i++) {
     const c = norm[i];
-    if (c === '*' && norm[i + 1] === '*') { out += '.*'; i++; }
+    if (c === '\\' && norm[i + 1] !== undefined) { out += escLiteral(norm[i + 1]); i++; }
+    else if (c === '*' && norm[i + 1] === '*') { out += '.*'; i++; }
     else if (c === '*') out += '[^.]*';
     else if (c === '?') out += '[^.]';
     else if (c === '[' && norm[i + 1] === ']') { out += '\\[\\]'; i++; }
