@@ -140,6 +140,45 @@ export function configResolver(entries: IniEntry[]): ConfigResolve {
   return (normPath: string) => compiled.find((c) => c.re.test(normPath))?.entry;
 }
 
+/** Whether a key pins a *concrete* vector index (`[0]`, `[0..3]`, `[$x]`) rather than
+ *  a full-cover one (`[*]`, `[]`, or no bracket). The module tree collapses every
+ *  vector index to `[]`, so a concrete-index key only *partially* covers its slot. */
+function hasConcreteVectorIndex(key: string): boolean {
+  const brackets = key.match(/\[[^\]]*\]/g);
+  return !!brackets && brackets.some((b) => {
+    const inner = b.slice(1, -1);
+    return inner !== '' && inner !== '*';
+  });
+}
+
+/**
+ * Whether an entry effectively assigns the parameter at a normalized path, under
+ * OMNeT++ first-match-wins — but a key with a concrete vector index only partially
+ * covers the index-normalized slot, so it neither fully shadows later keys nor is
+ * fully shadowed by earlier concrete-index keys. This exactly matches OMNeT++ for
+ * named (non-vector) submodules, and safely over-approximates for vectors the
+ * collapsed module tree cannot split per element (e.g. `*.node[0].x` before
+ * `**.x`: both stay effective, since `[0]` covers only one element).
+ */
+export type EffectiveResolve = (entry: IniEntry, normPath: string) => boolean;
+
+/** Build an {@link EffectiveResolve}: the first FULL-COVER matching entry shadows
+ *  later keys; concrete-index keys are co-effective. */
+export function effectiveResolver(entries: IniEntry[]): EffectiveResolve {
+  const compiled = entries.map((e) => ({
+    entry: e,
+    re: iniKeyToRegex(e.key),
+    fullCover: !hasConcreteVectorIndex(e.key),
+  }));
+  return (entry, normPath) => {
+    for (const c of compiled) {
+      if (c.entry === entry) return c.re.test(normPath); // reached it: effective iff it matches
+      if (c.fullCover && c.re.test(normPath)) return false; // an earlier full-cover key claims it
+    }
+    return false;
+  };
+}
+
 /** The directory portion of a file URI (everything before the last '/'). */
 function dirOf(uri: string): string {
   const i = uri.lastIndexOf('/');
@@ -265,13 +304,33 @@ export function iniParamDiagnostics(
       }
     }
 
+    // OMNeT++ resolves each parameter from the FIRST matching key in precedence
+    // order (own section file-order → extends → [General]); build that oracle once
+    // for the whole section (concrete vector indices only partially cover a slot).
+    const isEffective = effectiveResolver(configEntriesInScope(doc, section, registry));
+
     for (const e of section.entries) {
       if (classifyKey(registry, e.key).kind !== 'param-assignment') continue;
       const re = iniKeyToRegex(e.key);
       const matched = params.filter((p) => re.test(p.norm));
 
       if (matched.length > 0) {
-        typeCheck(e, matched, out);
+        // Only the parameters this key actually WINS are effectively assigned;
+        // type-check just those (a broader key does not set a parameter an earlier,
+        // higher-precedence key already claimed).
+        const won = matched.filter((p) => isEffective(e, p.norm));
+        if (won.length > 0) {
+          typeCheck(e, won, out);
+        } else {
+          out.push({
+            range: e.keyRange,
+            severity: DiagnosticSeverity.Information,
+            message:
+              'This assignment has no effect — every parameter it matches is already set by an earlier, higher-precedence key',
+            source: 'omnetpp',
+            code: 'shadowed-assignment',
+          });
+        }
         continue;
       }
 
@@ -469,6 +528,32 @@ export function matchedParamModules(
     }
   }
   return out;
+}
+
+/**
+ * Like {@link matchedParamModules}, but restricted to the parameters for which
+ * `entry` is the precedence winner — OMNeT++ assigns each parameter from the FIRST
+ * matching key (own section, file order → `extends` → `[General]`), so a broader
+ * key never claims a parameter an earlier, higher-precedence key already set. This
+ * is the forward-direction counterpart of {@link findParamAssignments}'s `isWinner`
+ * and reuses the same {@link configEntriesInScope} + {@link configResolver} oracle.
+ *
+ * Pass a precomputed `isEffective` (from `effectiveResolver(configEntriesInScope(...))`)
+ * to amortize the resolver build across every entry of a section.
+ */
+export function effectiveParamModules(
+  doc: IniDocument,
+  cache: NedResourceCache,
+  section: IniSection,
+  entry: IniEntry,
+  registry: ConfigRegistry,
+  fallbackNetwork?: string,
+  isEffective?: EffectiveResolve,
+): MatchedParamModule[] {
+  const eff = isEffective ?? effectiveResolver(configEntriesInScope(doc, section, registry));
+  return matchedParamModules(doc, cache, section, entry.key, fallbackNetwork).filter((m) =>
+    eff(entry, normIndices(`${m.path}.${m.paramName}`)),
+  );
 }
 
 /** The NED type-declaration location for a module (its name identifier). */

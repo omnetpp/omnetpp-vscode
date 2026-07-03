@@ -39,6 +39,7 @@ import {
   paramHierarchyChildren,
   configEntriesInScope,
   configResolver,
+  effectiveResolver,
   effectiveNetwork,
   resolveNetworkType,
   organizeImports,
@@ -54,7 +55,7 @@ import {
   iniVariableDiagnostics,
   iniParamDiagnostics,
   iniParamDefinition,
-  matchedParamModules,
+  effectiveParamModules,
   MatchedParamModule,
   modulesAtPath,
   typenameTypeTargets,
@@ -115,22 +116,6 @@ export interface IndexContext {
 
 function lineAt(text: string, line: number): string {
   return text.split(/\r?\n/)[line] ?? '';
-}
-
-/** The ini section + entry-key whose key spans `pos`, if any. */
-function iniKeyAt(
-  doc: IniDocument,
-  pos: Position,
-): { section: IniSection; key: string; range: Range } | undefined {
-  for (const section of doc.sections) {
-    for (const e of section.entries) {
-      const r = e.keyRange;
-      if (pos.line === r.start.line && pos.character >= r.start.character && pos.character <= r.end.character) {
-        return { section, key: e.key, range: r };
-      }
-    }
-  }
-  return undefined;
 }
 
 /** The ini section + entry whose key OR value range spans `pos`, if any. */
@@ -423,10 +408,11 @@ function computeHoverRaw(
     const h = iniHover(parsed.ini, ctx.registry, pos);
     if (h) return h;
     // parameter assignment key: show the resolved NED parameter type + matched modules
-    const at = iniKeyAt(parsed.ini, pos);
-    if (at && classifyKey(ctx.registry, at.key).kind === 'param-assignment') {
-      const matches = matchedParamModules(parsed.ini, ctx.nedCache, at.section, at.key, fallbackNetwork);
-      if (matches.length) return paramAssignmentHover(matches, at.key, at.range);
+    const hit = iniEntryAt(parsed.ini, pos);
+    if (hit && posInRange(pos, hit.entry.keyRange) && classifyKey(ctx.registry, hit.entry.key).kind === 'param-assignment') {
+      // only the parameters this key WINS (OMNeT++ first-match-wins precedence)
+      const matches = effectiveParamModules(parsed.ini, ctx.nedCache, hit.section, hit.entry, ctx.registry, fallbackNetwork);
+      if (matches.length) return paramAssignmentHover(matches, hit.entry.key, hit.entry.keyRange);
     }
     return null;
   }
@@ -556,9 +542,10 @@ function iniReferencesAt(
     }
   }
   // param-assignment key: matched NED declarations + other INI assignment lines.
-  const at = iniKeyAt(parsed.ini, pos);
-  if (at && classifyKey(ctx.registry, at.key).kind === 'param-assignment') {
-    const matches = matchedParamModules(parsed.ini, ctx.nedCache, at.section, at.key, fallbackNetwork);
+  // Restrict to the parameters this key actually WINS (OMNeT++ first-match-wins).
+  const at = iniEntryAt(parsed.ini, pos);
+  if (at && posInRange(pos, at.entry.keyRange) && classifyKey(ctx.registry, at.entry.key).kind === 'param-assignment') {
+    const matches = effectiveParamModules(parsed.ini, ctx.nedCache, at.section, at.entry, ctx.registry, fallbackNetwork);
     const refs: Location[] = [];
     const targets = new Set<string>();
     for (const m of matches) {
@@ -569,7 +556,7 @@ function iniReferencesAt(
       const [typeFqName, param] = t.split(' ');
       const relevant = paramContainerSimpleNames(ctx.db, typeFqName);
       for (const a of findParamAssignments(ctx.iniCache, ctx.nedCache, ctx.registry, { typeFqName, param }, undefined, relevant)) {
-        if (!includeDeclaration && a.uri === parsed.uri && a.keyRange.start.line === at.range.start.line) continue;
+        if (!includeDeclaration && a.uri === parsed.uri && a.keyRange.start.line === at.entry.keyRange.start.line) continue;
         refs.push({ uri: a.uri, range: a.keyRange });
       }
     }
@@ -614,9 +601,11 @@ export function computeCodeLenses(
   if (parsed.language === 'ini' && parsed.ini) {
     if (!opts?.iniParamLens) return out;
     for (const section of parsed.ini.sections) {
+      // OMNeT++ first-match-wins: attribute each parameter only to the key that wins it.
+      const isEffective = effectiveResolver(configEntriesInScope(parsed.ini, section, ctx.registry));
       for (const e of section.entries) {
         if (classifyKey(ctx.registry, e.key).kind !== 'param-assignment') continue;
-        const matches = matchedParamModules(parsed.ini, ctx.nedCache, section, e.key, opts.fallbackNetwork);
+        const matches = effectiveParamModules(parsed.ini, ctx.nedCache, section, e, ctx.registry, opts.fallbackNetwork, isEffective);
         if (!matches.length) continue;
         const decls = dedupLocations(matches.map((m) => m.decl).filter((l): l is Location => !!l));
         lens(e.keyRange, `${matches.length} module parameter${plural(matches.length)}`, decls);
