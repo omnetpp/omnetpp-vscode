@@ -22,6 +22,12 @@ export type EdgeKind =
   | 'msg-field-type'
   // NED → MSG / C++
   | 'ned-class'
+  // NED → C++ implementation class (Define_Module/Define_Channel)
+  | 'ned-impl'
+  // C++ → NED member (literal par()/gate()/getSubmodule() access)
+  | 'cpp-par-ref'
+  | 'cpp-gate-ref'
+  | 'cpp-submodule-ref'
   // INI → NED
   | 'ini-network'
   | 'ini-extends';
@@ -48,7 +54,7 @@ export interface XrefEdge {
   unresolved?: boolean;
 }
 
-export type SymbolLang = 'ned' | 'msg' | 'ini' | 'cfg' | 'cpp' | 'file';
+export type SymbolLang = 'ned' | 'nedmem' | 'msg' | 'ini' | 'cfg' | 'cpp' | 'file';
 
 export interface SymbolDef {
   id: SymbolId;

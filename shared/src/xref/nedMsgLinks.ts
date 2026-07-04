@@ -24,8 +24,54 @@ import {
   nedClassRefs,
   nedSignalTypeRefs,
 } from '../ned/nedAst';
-import { msgTypeSym, nedTypeSym } from './symbolId';
+import { cppSym, msgTypeSym, nedTypeSym } from './symbolId';
 import type { XrefEdge } from './xrefModel';
+import type { CppResourceCache } from '../cpp/cppResourceCache';
+
+/**
+ * The C++ implementation class a NED type maps to, or null when it has none: an
+ * explicit `@class(...)` wins for any kind; otherwise `simple` and `channel`
+ * types map implicitly to a class named after the type (OMNeT++'s convention).
+ * Compound modules/networks/interfaces without `@class` have no dedicated class.
+ */
+export function nedImplClassName(type: NedTypeInfo): string | null {
+  const explicit = nedClassRefs(type.node)[0]?.className;
+  if (explicit) return explicit;
+  if (type.kind === 'simple' || type.kind === 'channel') return type.simpleName;
+  return null;
+}
+
+/**
+ * `ned-impl` edges of a NED file: each type that maps to a C++ implementation
+ * class, resolved (via the file `@namespace`) to the class registered with
+ * `Define_Module`/`Define_Channel`. Unresolved when the class isn't indexed
+ * (hand-written C++ not yet scanned, or a header-only base) — bucketed for drain.
+ */
+export function extractNedImplEdges(
+  cppCache: CppResourceCache,
+  nedCache: NedResourceCache,
+  file: NedFileInfo,
+): XrefEdge[] {
+  const ns = fileNamespace(file.tree) ?? '';
+  const out: XrefEdge[] = [];
+  for (const type of nedCache.typesInFile(file.uri)) {
+    const className = nedImplClassName(type);
+    if (!className) continue;
+    const resolved = cppCache.lookupClass(className, ns);
+    const nn = nameNode(type.node) ?? type.node;
+    out.push({
+      kind: 'ned-impl',
+      from: nedTypeSym(type.fqName),
+      to: resolved ? cppSym(resolved.qualifiedName) : null,
+      rawTarget: className,
+      src: { uri: file.uri, range: nodeRange(nn) },
+      originUri: file.uri,
+      nsContext: ns,
+      unresolved: !resolved,
+    });
+  }
+  return out;
+}
 
 /** Resolve a NED `@class`/`@signal` class token to a MSG type via the file namespace. */
 export function resolveNedClass(

@@ -274,6 +274,18 @@ function rootOwner(type: NedTypeInfo, kind: MemberKind, name: string): NedTypeIn
   return root;
 }
 
+/**
+ * Canonical `MemberKey` for a member `name` visible on `type`, keyed to the
+ * most-base declaring type (so a member has one identity regardless of which
+ * subtype references it). Returns null when `type` has no such member. This is
+ * the single source of truth both cursor-side navigation and the C++ cross-
+ * reference extractor use, so their SymbolIds agree by construction.
+ */
+export function memberKeyFor(type: NedTypeInfo, kind: MemberKind, name: string): MemberKey | null {
+  const root = rootOwner(type, kind, name);
+  return root ? { kind, ownerFq: root.fqName, name } : null;
+}
+
 function ownerOfParamNode(
   cache: NedResourceCache,
   file: NedFileInfo,

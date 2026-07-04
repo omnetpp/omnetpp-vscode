@@ -43,6 +43,11 @@ export * from './xref/xrefDiagnostics';
 export * from './xref/impact';
 export * from './xref/paramContainers';
 export * from './xref/nedMsgLinks';
+export * from './xref/cppExtract';
+
+// C++ scanner + cache (lightweight cross-referencing of .cc/.h)
+export * from './cpp/cppScanner';
+export * from './cpp/cppResourceCache';
 
 // MCP tool layer (host-agnostic; no MCP SDK dependency)
 export * from './mcp/tools';

@@ -86,6 +86,9 @@ import {
   HoverResult,
   nedTypeSym,
   msgTypeSym,
+  nedMemberSym,
+  memberKeyFor,
+  MemberKey,
   iniSectionSym,
   nodeRange,
   nameNode,
@@ -254,7 +257,20 @@ export function computeDefinition(
     if (!file) return null;
     // a NED @class / @signal(type=) token jumps to its MSG type declaration
     const cls = nedClassDefinition(ctx.msgCache, ctx.nedCache, file, file.tree, pos);
-    return cls ?? nedDefinition(ctx.nedCache, file, file.tree, pos);
+    if (cls) return cls;
+    // a @class token naming a hand-written C++ class (no .msg) jumps to Define_Module
+    const clsRef = nedClassRefAt(ctx.msgCache, ctx.nedCache, file, file.tree, pos);
+    if (clsRef && !clsRef.target) {
+      const impl = ctx.db.findImplClass(clsRef.owner.fqName);
+      if (impl) return impl.decl;
+    }
+    // on a simple/channel type's own name, jump to its C++ implementation class
+    const tref = referenceAt(ctx.nedCache, file, file.tree, pos);
+    if (tref?.kind === 'typedef') {
+      const impl = ctx.db.findImplClass(tref.info.fqName);
+      if (impl) return impl.decl;
+    }
+    return nedDefinition(ctx.nedCache, file, file.tree, pos);
   }
   if (parsed.language === 'msg') {
     const file = ctx.msgCache.getFile(parsed.uri);
@@ -477,8 +493,10 @@ function nedReferencesAt(parsed: ParsedDocument, pos: Position, includeDeclarati
   const refs = nedReferences(ctx.nedCache, file, file.tree, pos, includeDeclaration, (fq) =>
     ctx.db.findTypeUsages(fq),
   );
-  // a NED parameter declaration also has references in INI files (assignments)
+  // a NED member is also accessed in C++ (par()/gate()/getSubmodule())
   const mref = memberRefAt(ctx.nedCache, file, file.tree, pos);
+  if (mref) refs.push(...ctx.db.findCppMemberAccesses(mref.key));
+  // a NED parameter declaration also has references in INI files (assignments)
   if (mref?.key.kind === 'param') {
     const relevant = paramContainerSimpleNames(ctx.db, mref.key.ownerFq);
     for (const a of findParamAssignments(
@@ -630,6 +648,27 @@ export function computeCodeLenses(
 
       const configs = ctx.db.findConfigsForNetwork(fq);
       if (configs.length) lens(range, `${configs.length} config${plural(configs.length)}`, configs);
+
+      // the C++ class implementing this type (Define_Module/Define_Channel)
+      const impl = ctx.db.findImplClass(fq);
+      if (impl) {
+        const shortName = impl.qualifiedName.split('::').pop() ?? impl.qualifiedName;
+        lens(range, `implemented by ${shortName}`, [impl.decl]);
+      }
+
+      // per-member "N C++ access(es)" — only for members this type declares, and
+      // only when there is at least one access (absence is the unused-hint's job)
+      const memberLens = (info: { node: Parameters<typeof nodeRange>[0] }, kind: MemberKey['kind'], name: string) => {
+        const key = memberKeyFor(t, kind, name);
+        if (!key || key.ownerFq !== fq) return;
+        const accesses = ctx.db.findCppMemberAccesses(key);
+        if (!accesses.length) return;
+        const r = nodeRange(nameNode(info.node) ?? info.node);
+        lens(r, `${accesses.length} C++ access${accesses.length === 1 ? '' : 'es'}`, accesses);
+      };
+      for (const [name, info] of t.localParams()) memberLens(info, 'param', name);
+      for (const [name, info] of t.localGates()) memberLens(info, 'gate', name);
+      for (const [name, info] of t.localSubmodules()) memberLens(info, 'submodule', name);
     }
   } else if (parsed.language === 'msg') {
     const msgTypes = ctx.msgCache.allTypes().filter((t: MsgTypeInfo) => t.file.uri === parsed.uri);
@@ -675,12 +714,17 @@ const EDGE_GROUP_LABEL: Record<EdgeKind, string> = {
   'msg-extends': 'Extended by',
   'msg-field-type': 'Field type in',
   'ned-class': 'Backing class for',
+  'ned-impl': 'Implemented by',
+  'cpp-par-ref': 'Parameter read in',
+  'cpp-gate-ref': 'Gate accessed in',
+  'cpp-submodule-ref': 'Submodule accessed in',
   'ini-network': 'Network for config',
   'ini-extends': 'Extended by config',
 };
 const GROUP_ORDER: EdgeKind[] = [
   'extends', 'implements', 'msg-extends', 'like-iface', 'submodule-type', 'channel-type',
-  'msg-field-type', 'ned-class', 'ini-network', 'ini-extends', 'import', 'gate-ref', 'submodule-ref',
+  'msg-field-type', 'ned-class', 'ned-impl', 'cpp-par-ref', 'cpp-gate-ref', 'cpp-submodule-ref',
+  'ini-network', 'ini-extends', 'import', 'gate-ref', 'submodule-ref',
 ];
 
 const baseName = (uri: string) => uri.split('/').pop() ?? uri;
@@ -691,6 +735,7 @@ function refName(from: SymbolId): string {
   if (p.lang === 'ned' || p.lang === 'msg') return p.fqName.split(/[.:]/).pop() ?? p.fqName;
   if (p.lang === 'ini') return p.rawName;
   if (p.lang === 'nedmem') return p.member.name;
+  if (p.lang === 'cpp') return p.qualifiedName.split('::').pop() ?? p.qualifiedName;
   if (p.lang === 'file') return baseName(p.uri);
   return String(from);
 }
@@ -717,7 +762,9 @@ function symbolAt(parsed: ParsedDocument, pos: Position, ctx: IndexContext): Sym
     if (!file) return undefined;
     const tref = referenceAt(ctx.nedCache, file, file.tree, pos);
     const fq = tref?.kind === 'typedef' ? tref.info.fqName : tref?.kind === 'typeref' ? tref.target?.fqName : undefined;
-    return fq ? nedTypeSym(fq) : undefined;
+    if (fq) return nedTypeSym(fq);
+    const mref = memberRefAt(ctx.nedCache, file, file.tree, pos);
+    return mref ? nedMemberSym(mref.key) : undefined;
   }
   if (parsed.language === 'msg' && parsed.tree) {
     const file = ctx.msgCache.getFile(parsed.uri);

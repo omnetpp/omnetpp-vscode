@@ -17,18 +17,34 @@ import type { IniResourceCache } from '../ini/iniResourceCache';
 import type { ConfigRegistry } from '../ini/configRegistry';
 import type { NedTypeInfo } from '../ned/nedTypeInfo';
 import type { MsgTypeInfo } from '../msg/msgTypeInfo';
-import { isTypeRefNode, enclosingContextFor } from '../ned/nedNavigation';
+import {
+  isTypeRefNode,
+  enclosingContextFor,
+  memberKeyFor,
+  type MemberKind,
+  type MemberKey,
+} from '../ned/nedNavigation';
 import { nameNode } from '../ned/nedAst';
 import { msgNameNode } from '../msg/msgAst';
 import { resolveNetworkType } from '../ini/iniParamResolution';
 import { nodeRange } from '../parser/treeUtils';
+import { CppResourceCache } from '../cpp/cppResourceCache';
 import { XrefIndex } from './xrefIndex';
 import { extractNedEdges } from './xrefExtract';
 import { extractMsgEdges } from './msgExtract';
 import { extractIniEdges } from './iniExtract';
-import { extractNedClassEdges, findMsgUsagesInNed } from './nedMsgLinks';
-import { nedTypeSym, msgTypeSym, iniSectionSym, parseSymbolId, type SymbolId } from './symbolId';
-import type { XrefEdge } from './xrefModel';
+import { extractNedClassEdges, extractNedImplEdges, findMsgUsagesInNed } from './nedMsgLinks';
+import { cppClassSymbols, extractCppMemberEdges } from './cppExtract';
+import {
+  nedTypeSym,
+  nedMemberSym,
+  msgTypeSym,
+  cppSym,
+  iniSectionSym,
+  parseSymbolId,
+  type SymbolId,
+} from './symbolId';
+import type { EdgeKind, XrefEdge } from './xrefModel';
 
 export class SemanticDatabase {
   /** The cross-reference graph. */
@@ -39,6 +55,7 @@ export class SemanticDatabase {
     readonly msgCache: MsgResourceCache,
     readonly configRegistry: ConfigRegistry,
     readonly iniCache: IniResourceCache,
+    readonly cppCache: CppResourceCache = new CppResourceCache(),
   ) {}
 
   getNedType(fq: string): NedTypeInfo | undefined {
@@ -156,15 +173,35 @@ export class SemanticDatabase {
     if (!file) return;
 
     const declared = this.nedCache.typesInFile(uri);
+    const memberNames: string[] = [];
     for (const t of declared) {
       const declNode = nameNode(t.node) ?? t.node;
       this.index.setDef({ id: nedTypeSym(t.fqName), lang: 'ned', decl: { uri: t.file.uri, range: nodeRange(declNode) } });
       this.index.addDeclares(uri, nedTypeSym(t.fqName));
+      // Declare each member this type is the canonical (most-base) owner of, so a
+      // C++ access edge targeting it is demoted to pending when the type is dropped.
+      const localMembers: [MemberKind, Iterable<string>][] = [
+        ['param', t.localParams().keys()],
+        ['gate', t.localGates().keys()],
+        ['submodule', t.localSubmodules().keys()],
+      ];
+      for (const [kind, names] of localMembers) {
+        for (const name of names) {
+          const key = memberKeyFor(t, kind, name);
+          if (key && key.ownerFq === t.fqName) {
+            this.index.addDeclares(uri, nedMemberSym(key));
+            memberNames.push(name);
+          }
+        }
+      }
     }
     for (const e of extractNedEdges(this.nedCache, file)) this.index.addEdge(uri, e);
     for (const e of extractNedClassEdges(this.msgCache, this.nedCache, file)) this.index.addEdge(uri, e);
+    for (const e of extractNedImplEdges(this.cppCache, this.nedCache, file)) this.index.addEdge(uri, e);
 
-    this.drainDeclared(declared.map((t) => t.simpleName));
+    // Draining member names re-resolves any C++ access edges now that this type's
+    // members (and their `ned-impl` link) exist; type names cover NED/impl edges.
+    this.drainDeclared([...declared.map((t) => t.simpleName), ...memberNames]);
   }
 
   /** (Re)index a MSG file's `extends` / field-type edges. Call after `msgCache.addFile`. */
@@ -199,6 +236,32 @@ export class SemanticDatabase {
     // forward references are drained when the NED network file is (re)indexed.
   }
 
+  /**
+   * (Re)index a C++ file. Call after `cppCache.addFile`. Registers each
+   * `Define_Module`/`Define_Channel` class as a `cppSym` (the target of NED
+   * `ned-impl` edges), then adds the file's literal member-access edges. Draining
+   * class names first resolves NED `ned-impl` edges (establishing which NED type a
+   * class implements); draining member names then resolves the access edges to
+   * their NED members.
+   */
+  onCppFile(uri: string): void {
+    this.index.dropFile(uri);
+    if (!this.cppCache.getFile(uri)) return;
+
+    const classNames: string[] = [];
+    for (const c of cppClassSymbols(this.cppCache, uri)) {
+      this.index.setDef({ id: c.sym, lang: 'cpp', decl: c.decl });
+      this.index.addDeclares(uri, c.sym);
+      classNames.push(c.simpleName);
+    }
+    const memberNames: string[] = [];
+    for (const e of extractCppMemberEdges(this.cppCache, uri)) {
+      this.index.addEdge(uri, e);
+      memberNames.push(e.rawTarget);
+    }
+    this.drainDeclared([...classNames, ...memberNames]);
+  }
+
   /** Re-resolve pending edges referencing any of the given simple names. */
   private drainDeclared(simpleNames: Iterable<string>): void {
     const seen = new Set<string>();
@@ -227,6 +290,14 @@ export class SemanticDatabase {
       }
       case 'ini-extends':
         return null; // same-file; resolved at extraction
+      case 'ned-impl': {
+        const c = this.cppCache.lookupClass(e.rawTarget, e.nsContext ?? '');
+        return c ? cppSym(c.qualifiedName) : null;
+      }
+      case 'cpp-par-ref':
+      case 'cpp-gate-ref':
+      case 'cpp-submodule-ref':
+        return this.resolveCppMemberEdge(e);
       default: {
         const f = this.nedCache.getFile(e.originUri);
         if (!f) return null;
@@ -234,6 +305,49 @@ export class SemanticDatabase {
         return r ? nedTypeSym(r.fqName) : null;
       }
     }
+  }
+
+  /**
+   * Resolve a `cpp-*-ref` edge to the NED member it references: follow the
+   * accessing class's resolved `ned-impl` edge(s) to the NED type, then key the
+   * member canonically (so the SymbolId matches the one navigation produces).
+   */
+  private resolveCppMemberEdge(e: XrefEdge): SymbolId | null {
+    const kind: MemberKind =
+      e.kind === 'cpp-par-ref' ? 'param' : e.kind === 'cpp-gate-ref' ? 'gate' : 'submodule';
+    for (const impl of this.index.inboundOf(e.from)) {
+      if (impl.kind !== 'ned-impl') continue;
+      const p = parseSymbolId(impl.from);
+      if (p?.lang !== 'ned') continue;
+      const type = this.nedCache.getType(p.fqName);
+      if (!type) continue;
+      const key = memberKeyFor(type, kind, e.rawTarget);
+      if (key) return nedMemberSym(key);
+    }
+    return null;
+  }
+
+  // ---- cross-language queries (C++ ⇆ NED, graph-backed) -------------------
+
+  /** Locations where a NED member is accessed in C++ (`par`/`gate`/`getSubmodule`). */
+  findCppMemberAccesses(key: MemberKey): Location[] {
+    const cppKinds = new Set<EdgeKind>(['cpp-par-ref', 'cpp-gate-ref', 'cpp-submodule-ref']);
+    return this.index
+      .inboundOf(nedMemberSym(key))
+      .filter((e) => cppKinds.has(e.kind))
+      .map((e) => e.src);
+  }
+
+  /** The C++ implementation class a NED type resolves to, if indexed. */
+  findImplClass(fq: string): { qualifiedName: string; decl: Location } | null {
+    for (const e of this.index.outboundOf(nedTypeSym(fq))) {
+      if (e.kind !== 'ned-impl' || !e.to) continue;
+      const p = parseSymbolId(e.to);
+      if (p?.lang !== 'cpp') continue;
+      const c = this.cppCache.classByQualifiedName(p.qualifiedName);
+      if (c) return { qualifiedName: c.qualifiedName, decl: c.decl };
+    }
+    return null;
   }
 
   /** Forget a file's contribution to the cross-reference graph. */

@@ -44,6 +44,7 @@ import { resolveNedClass, nedClassReferences } from '../xref/nedMsgLinks';
 import { impactOf } from '../xref/impact';
 import { paramContainerSimpleNames } from '../xref/paramContainers';
 import { nedTypeSym, msgTypeSym } from '../xref/symbolId';
+import { memberKeyFor, type MemberKind } from '../ned/nedNavigation';
 import type { ConnectionInfo, ConnEndpoint } from '../ned/nedAst';
 import type { Node as SyntaxNode } from 'web-tree-sitter';
 
@@ -613,6 +614,33 @@ const TOOLS: ToolDef[] = [
       if (dir === 'in' || dir === 'both') out.push(...pick(ctx.db.index.inboundOf(sym), 'in'));
       if (dir === 'out' || dir === 'both') out.push(...pick(ctx.db.index.outboundOf(sym), 'out'));
       return out;
+    },
+  },
+  {
+    name: 'find_member_accesses',
+    description:
+      "The C++ ⇆ NED member cross-reference for a NED type: its resolved C++ implementation class (Define_Module/Define_Channel), and for every parameter/gate/submodule the locations where it is accessed in C++ via a literal par()/gate()/getSubmodule(). Only string-literal accesses are seen — a member with zero locations may still be used dynamically, so treat emptiness as a hint, not proof.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        fqName: { type: 'string', description: 'Fully-qualified NED type name.' },
+      },
+      required: ['fqName'],
+    },
+    handler: (a, ctx) => {
+      const type = ctx.nedCache.getType(a.fqName);
+      if (!type) return { error: `NED type not found: ${a.fqName}` };
+      const members: { kind: MemberKind; name: string; accesses: Location[] }[] = [];
+      const collect = (kind: MemberKind, names: Iterable<string>) => {
+        for (const name of names) {
+          const key = memberKeyFor(type, kind, name);
+          members.push({ kind, name, accesses: key ? ctx.db.findCppMemberAccesses(key) : [] });
+        }
+      };
+      collect('param', type.params().keys());
+      collect('gate', type.gates().keys());
+      collect('submodule', type.submodules().keys());
+      return { fqName: type.fqName, implClass: ctx.db.findImplClass(type.fqName), members };
     },
   },
 ];
