@@ -1,5 +1,7 @@
 [test]
 # Tests are the TypeScript sources under shared/src/test. `bun run compile` also
 # emits compiled copies to shared/out/test; ignore those so a bare `bun test`
-# (no path arg) doesn't run every test twice.
+# (no path arg) doesn't run every test twice. Note there are also server-glue
+# tests under server/src/test; `bun run test` runs both trees (explicit ./path
+# args override this root).
 root = "shared/src/test"

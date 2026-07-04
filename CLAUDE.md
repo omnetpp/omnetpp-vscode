@@ -87,8 +87,10 @@ shebang for end users running the CLI standalone.
 Tests use **Bun's test runner** (`bun:test`) over the TypeScript sources directly — no
 compile-to-JS needed to run them. `bunfig.toml` pins the test `root` to `shared/src/test`,
 so a bare `bun test` runs exactly that suite (and not the `shared/out/test/*.js` copies
-that `tsc --build` also emits). `bun run test` additionally runs `tsc --build` first so
-type errors surface alongside test failures.
+that `tsc --build` also emits). Server-glue tests live in `server/src/test` (excluded
+from the server's tsc build because they import `bun:test`); `bun run test` runs **both**
+trees by passing explicit `./`-prefixed paths, which override the bunfig root. It also
+runs `tsc --build` first so type errors surface alongside test failures.
 
 ```bash
 # First-time setup (grammars live in git submodules under subprojects/)
@@ -106,8 +108,9 @@ bun run dev:build           # copy:assets + esbuild bundle to dist/ (assumes a p
 bun run bundle:watch        # esbuild in watch mode
 
 # Test (bun:test over the TS sources; bun run test also type-checks first)
-bun run test                # bun run compile && bun test shared/src/test
-bun test shared/src/test/<name>.test.ts      # run a single test file
+bun run test                # compile + bun test ./shared/src/test ./server/src/test
+bun test ./shared/src/test/<name>.test.ts    # run a single test file (./ prefix
+                                             #  needed outside the bunfig test root)
 bun test -t "<name substr>"                  # run tests whose name matches
 
 # Package / publish (prepackage chains compile + build:wasm + copy:assets + esbuild,

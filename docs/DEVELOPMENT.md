@@ -63,10 +63,11 @@ bun run dev:build      # copy:assets + esbuild bundle to dist/ (runtime artifact
                        #   assumes a prior `compile` — esbuild pulls shared from shared/out)
 bun run bundle:watch   # esbuild in watch mode
 
-# Test (bun:test over the TypeScript sources)
-bun run test           # bun run compile (type-check) THEN bun test shared/src/test
-bun test shared/src/test                       # tests only, no type-check
-bun test shared/src/test/<name>.test.ts        # a single test file
+# Test (bun:test over the TypeScript sources; shared + server test trees)
+bun run test           # compile (type-check) THEN bun test ./shared/src/test ./server/src/test
+bun test ./shared/src/test ./server/src/test   # tests only, no type-check
+bun test ./shared/src/test/<name>.test.ts      # a single test file (./ prefix needed
+                                               #   outside the bunfig test root)
 bun test -t "<name substr>"                    # tests whose name matches
 
 # Package / publish (prepackage chains compile + build:wasm + copy:assets + esbuild,
