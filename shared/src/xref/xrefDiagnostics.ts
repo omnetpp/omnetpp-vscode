@@ -7,7 +7,8 @@ import type { SemanticDatabase } from './semanticDatabase';
 import type { NedResourceCache } from '../ned/nedResourceCache';
 import type { IniResourceCache } from '../ini/iniResourceCache';
 import { nedTypeSym } from './symbolId';
-import { nameNode } from '../ned/nedAst';
+import { nameNode, nedClassRefs } from '../ned/nedAst';
+import { nedImplClassName } from './nedMsgLinks';
 import { nodeRange } from '../parser/treeUtils';
 
 /**
@@ -32,6 +33,44 @@ export function nedUnusedNetworkDiagnostics(
       message: `Network '${t.simpleName}' is not run by any configuration or referenced by any NED type.`,
       source: 'omnetpp',
       code: 'unused-network',
+    });
+  }
+  return out;
+}
+
+/**
+ * Warning: a `simple` module with no C++ implementation class. A simple module
+ * runs C++ code registered with `Define_Module()`; its class is the type's own
+ * `@class` value (else its name), or a value inherited from a supertype. This
+ * fires only when NEITHER the module NOR any supertype resolves to an indexed
+ * `Define_Module`/`Define_Channel` class. The warning anchors on the module's own
+ * `@class(...)` value when it declares one, otherwise on the `simple <Name>` line.
+ *
+ * Suppressed entirely when the workspace has no indexed C++ at all (a pure NED /
+ * analysis-only project we cannot check), to avoid false positives.
+ */
+export function nedMissingImplClassDiagnostics(
+  db: SemanticDatabase,
+  nedCache: NedResourceCache,
+  uri: string,
+): Diagnostic[] {
+  if (db.cppCache.allFiles().length === 0) return [];
+  const out: Diagnostic[] = [];
+  for (const t of nedCache.typesInFile(uri)) {
+    if (t.kind !== 'simple') continue;
+    // implemented if this type OR any supertype resolves to a Define_Module class
+    if ([t, ...t.ancestors()].some((a) => db.findImplClass(a.fqName))) continue;
+
+    const ownClass = nedClassRefs(t.node)[0]; // the type's own @class(...) value, if any
+    const className = nedImplClassName(t) ?? t.simpleName;
+    out.push({
+      range: nodeRange(ownClass?.node ?? nameNode(t.node) ?? t.node),
+      severity: DiagnosticSeverity.Warning,
+      message: ownClass
+        ? `No C++ class registered with Define_Module('${className}') was found for simple module '${t.simpleName}'.`
+        : `Simple module '${t.simpleName}' has no C++ implementation class registered with Define_Module('${className}').`,
+      source: 'omnetpp',
+      code: 'missing-cpp-class',
     });
   }
   return out;

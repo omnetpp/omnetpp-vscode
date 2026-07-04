@@ -102,6 +102,7 @@ import {
   impactOf,
   paramContainerSimpleNames,
   nedUnusedNetworkDiagnostics,
+  nedMissingImplClassDiagnostics,
   suggestSimilar,
   sectionName,
   filterSuppressedDiagnostics,
@@ -206,6 +207,7 @@ export function computeDiagnostics(parsed: ParsedDocument, ctx?: IndexContext): 
       if (ctx) {
         diags.push(...nedSemanticDiagnostics(ctx.nedCache, parsed.uri));
         diags.push(...nedUnusedNetworkDiagnostics(ctx.db, ctx.nedCache, ctx.iniCache, parsed.uri));
+        diags.push(...nedMissingImplClassDiagnostics(ctx.db, ctx.nedCache, parsed.uri));
       }
     } else if (parsed.language === 'msg') {
       diags.push(...msgLocalDiagnostics(parsed.tree));

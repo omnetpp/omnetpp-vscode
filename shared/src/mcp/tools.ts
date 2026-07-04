@@ -41,6 +41,7 @@ import {
 import { expandNetwork, paramSlots } from '../ini/moduleTree';
 import { parseIni, configSummaries } from '../ini/iniDocument';
 import { resolveNedClass, nedClassReferences } from '../xref/nedMsgLinks';
+import { nedMissingImplClassDiagnostics } from '../xref/xrefDiagnostics';
 import { impactOf } from '../xref/impact';
 import { paramContainerSimpleNames } from '../xref/paramContainers';
 import { nedTypeSym, msgTypeSym } from '../xref/symbolId';
@@ -166,7 +167,10 @@ export async function lintFile(uri: string, ctx: ToolContext): Promise<{ uri: st
     }
     try {
       diags.push(...syntaxDiagnostics(tree), ...nedLocalDiagnostics(tree), ...nedValueDiagnostics(tree));
-      if (f) diags.push(...nedSemanticDiagnostics(ctx.nedCache, uri));
+      if (f) {
+        diags.push(...nedSemanticDiagnostics(ctx.nedCache, uri));
+        diags.push(...nedMissingImplClassDiagnostics(ctx.db, ctx.nedCache, uri));
+      }
       // use the tree's own source so directives match it even for unsaved buffers
       filtered = filterSuppressedDiagnostics(diags, { language: 'ned', text: tree.rootNode.text, tree });
     } finally {
