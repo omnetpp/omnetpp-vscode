@@ -8,7 +8,7 @@ import type { NedResourceCache } from '../ned/nedResourceCache';
 import type { IniResourceCache } from '../ini/iniResourceCache';
 import { nedTypeSym } from './symbolId';
 import { nameNode, nedClassRefs } from '../ned/nedAst';
-import { nedImplClassName } from './nedMsgLinks';
+import { nedImplClass } from './nedMsgLinks';
 import { nodeRange } from '../parser/treeUtils';
 
 /**
@@ -58,11 +58,14 @@ export function nedMissingImplClassDiagnostics(
   const out: Diagnostic[] = [];
   for (const t of nedCache.typesInFile(uri)) {
     if (t.kind !== 'simple') continue;
-    // implemented if this type OR any supertype resolves to a Define_Module class
-    if ([t, ...t.ancestors()].some((a) => db.findImplClass(a.fqName))) continue;
+    const impl = nedImplClass(t);
+    if (!impl) continue; // base type not indexed → the class is unknown, don't guess
+    // implemented when the kernel-resolved class (own/inherited @class, else the
+    // root type's own name) points at an indexed Define_Module/Define_Channel
+    if (db.findImplClass(t.fqName)) continue;
 
     const ownClass = nedClassRefs(t.node)[0]; // the type's own @class(...) value, if any
-    const className = nedImplClassName(t) ?? t.simpleName;
+    const className = impl.className;
     out.push({
       range: nodeRange(ownClass?.node ?? nameNode(t.node) ?? t.node),
       severity: DiagnosticSeverity.Warning,

@@ -29,10 +29,43 @@ import type { XrefEdge } from './xrefModel';
 import type { CppResourceCache } from '../cpp/cppResourceCache';
 
 /**
- * The C++ implementation class a NED type maps to, or null when it has none: an
- * explicit `@class(...)` wins for any kind; otherwise `simple` and `channel`
- * types map implicitly to a class named after the type (OMNeT++'s convention).
- * Compound modules/networks/interfaces without `@class` have no dedicated class.
+ * Resolve a NED type's C++ implementation class the way the OMNeT++ kernel does:
+ * the nearest `@class(...)` found walking up the `extends` chain wins, and only if
+ * NO type in the chain declares `@class` does the class default to the ROOT
+ * (extends-nothing) type's own name. So `simple Derived extends Base` without a
+ * `@class` inherits Base's implementation class rather than expecting one named
+ * `Derived`. Only `simple` and `channel` roots get the default-name; a compound
+ * module / network / interface has a C++ class only via an explicit `@class`.
+ *
+ * Returns the class name plus the NED type whose `@namespace` qualifies it (the
+ * one that declared the `@class`, or the root for the default-name case), or null
+ * when the type has no C++ class or its base type is not indexed.
+ */
+export function nedImplClass(type: NedTypeInfo): { className: string; owner: NedTypeInfo } | null {
+  const seen = new Set<string>();
+  let t: NedTypeInfo | undefined = type;
+  while (t && !seen.has(t.fqName)) {
+    seen.add(t.fqName);
+    const own = nedClassRefs(t.node)[0]?.className;
+    if (own) return { className: own, owner: t };
+    const base = t.superType();
+    if (!base) {
+      // no @class up to here: `t` is the chain root, unless it names a base we
+      // could not resolve (then the class is unknown, not the type's own name).
+      if (t.extendsNames().length > 0) return null;
+      if (t.kind === 'simple' || t.kind === 'channel') return { className: t.simpleName, owner: t };
+      return null;
+    }
+    t = base;
+  }
+  return null; // inheritance cycle
+}
+
+/**
+ * The C++ implementation class NAME a NED type maps to, or null when it has none.
+ * This is the type's OWN class (`@class` value, else — for `simple`/`channel` —
+ * its own name); it drives the per-type `ned-impl` edge. For the fully inherited
+ * resolution used by navigation and the missing-class check, see `nedImplClass`.
  */
 export function nedImplClassName(type: NedTypeInfo): string | null {
   const explicit = nedClassRefs(type.node)[0]?.className;

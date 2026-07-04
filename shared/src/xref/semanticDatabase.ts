@@ -24,7 +24,7 @@ import {
   type MemberKind,
   type MemberKey,
 } from '../ned/nedNavigation';
-import { nameNode } from '../ned/nedAst';
+import { nameNode, fileNamespace } from '../ned/nedAst';
 import { msgNameNode } from '../msg/msgAst';
 import { resolveNetworkType } from '../ini/iniParamResolution';
 import { nodeRange } from '../parser/treeUtils';
@@ -33,7 +33,7 @@ import { XrefIndex } from './xrefIndex';
 import { extractNedEdges } from './xrefExtract';
 import { extractMsgEdges } from './msgExtract';
 import { extractIniEdges } from './iniExtract';
-import { extractNedClassEdges, extractNedImplEdges, findMsgUsagesInNed } from './nedMsgLinks';
+import { extractNedClassEdges, extractNedImplEdges, findMsgUsagesInNed, nedImplClass } from './nedMsgLinks';
 import { cppClassSymbols, extractCppMemberEdges } from './cppExtract';
 import {
   nedTypeSym,
@@ -338,16 +338,21 @@ export class SemanticDatabase {
       .map((e) => e.src);
   }
 
-  /** The C++ implementation class a NED type resolves to, if indexed. */
+  /**
+   * The C++ implementation class a NED type resolves to, if indexed. Uses the
+   * OMNeT++ kernel resolution (nearest `@class` up the `extends` chain, else the
+   * root type's own name) resolved live against the caches — so a derived module
+   * that inherits its base's C++ class navigates correctly, and the result never
+   * goes stale when a base type is edited.
+   */
   findImplClass(fq: string): { qualifiedName: string; decl: Location } | null {
-    for (const e of this.index.outboundOf(nedTypeSym(fq))) {
-      if (e.kind !== 'ned-impl' || !e.to) continue;
-      const p = parseSymbolId(e.to);
-      if (p?.lang !== 'cpp') continue;
-      const c = this.cppCache.classByQualifiedName(p.qualifiedName);
-      if (c) return { qualifiedName: c.qualifiedName, decl: c.decl };
-    }
-    return null;
+    const type = this.nedCache.getType(fq);
+    if (!type) return null;
+    const impl = nedImplClass(type);
+    if (!impl) return null;
+    const ns = fileNamespace(impl.owner.file.tree) ?? '';
+    const c = this.cppCache.lookupClass(impl.className, ns);
+    return c ? { qualifiedName: c.qualifiedName, decl: c.decl } : null;
   }
 
   /** Forget a file's contribution to the cross-reference graph. */
