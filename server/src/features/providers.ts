@@ -110,7 +110,16 @@ import {
   formatSuppressDirective,
   ImpactResult,
   UsedByGroup,
-  UsedByItem,
+  posInRange,
+  iniEntryAt,
+  leafSegment,
+  keySegmentPrefixAt,
+  isWildcardSegment,
+  extendsLabelAt,
+  symbolAtPosition,
+  groupEdges,
+  refDisplayName,
+  edgeKindLabel,
 } from '@omnetpp/shared';
 import type { ParsedDocument } from '../documentModel';
 
@@ -126,75 +135,7 @@ function lineAt(text: string, line: number): string {
   return text.split(/\r?\n/)[line] ?? '';
 }
 
-/** The ini section + entry whose key OR value range spans `pos`, if any. */
-function iniEntryAt(
-  doc: IniDocument,
-  pos: Position,
-): { section: IniSection; entry: IniEntry } | undefined {
-  for (const section of doc.sections) {
-    for (const e of section.entries) {
-      if (posInRange(pos, e.keyRange) || posInRange(pos, e.valueRange)) return { section, entry: e };
-    }
-  }
-  return undefined;
-}
-
-/** The leaf (last dotted segment) of an ini key, e.g. `typename` of `**.app.typename`. */
-function leafSegment(key: string): string {
-  const dot = key.lastIndexOf('.');
-  return dot < 0 ? key : key.slice(dot + 1);
-}
-
-/**
- * For a cursor within a dotted key's range, the key truncated to the end of the
- * segment under the cursor (its module-path prefix) and whether that segment is the
- * last one (the leaf parameter name). The key is always single-line. Returns
- * `undefined` when the cursor is not on the key line/range.
- */
-function keySegmentPrefixAt(
-  entry: IniEntry,
-  pos: Position,
-): { prefix: string; segment: string; isLast: boolean } | undefined {
-  const r = entry.keyRange;
-  if (pos.line !== r.start.line) return undefined;
-  const rel = pos.character - r.start.character;
-  const key = entry.key;
-  if (rel < 0 || rel > key.length) return undefined;
-  const dots: number[] = [];
-  for (let i = 0; i < key.length; i++) if (key[i] === '.') dots.push(i);
-  let seg = 0;
-  for (const d of dots) {
-    if (rel > d) seg++;
-    else break;
-  }
-  const start = seg === 0 ? 0 : dots[seg - 1] + 1;
-  const end = seg < dots.length ? dots[seg] : key.length;
-  return { prefix: key.slice(0, end), segment: key.slice(start, end), isLast: seg === dots.length };
-}
-
-/** A dotted-key segment whose NAME (before any `[index]`) is a wildcard — it
- *  targets no specific module type, so it should not drive type navigation. */
-function isWildcardSegment(segment: string): boolean {
-  const name = segment.split('[')[0];
-  return name === '' || /[*?]/.test(name);
-}
-
-/** The comma-separated `extends=` label under `pos`, if the cursor is on the value. */
-function extendsLabelAt(entry: IniEntry, pos: Position): string | undefined {
-  const r = entry.valueRange;
-  if (pos.line !== r.start.line) return undefined; // extends is always single-line
-  const rel = pos.character - r.start.character;
-  const v = entry.value;
-  if (rel < 0 || rel > v.length) return undefined;
-  let start = 0;
-  for (let i = 0; i <= v.length; i++) {
-    if (i === v.length || v[i] === ',') {
-      if (rel >= start && rel <= i) return v.slice(start, i).trim() || undefined;
-      start = i + 1;
-    }
-  }
-  return undefined;
-}
+const baseName = (uri: string): string => uri.split('/').pop() ?? uri;
 
 /** Declaration location of a NED type (its name identifier). */
 function typeDeclLoc(t: NedTypeInfo): Location {
@@ -478,13 +419,6 @@ function computeHoverRaw(
   return null;
 }
 
-function posInRange(pos: Position, r: Range): boolean {
-  if (pos.line < r.start.line || pos.line > r.end.line) return false;
-  if (pos.line === r.start.line && pos.character < r.start.character) return false;
-  if (pos.line === r.end.line && pos.character > r.end.character) return false;
-  return true;
-}
-
 export function computeReferences(
   parsed: ParsedDocument,
   pos: Position,
@@ -713,89 +647,11 @@ export function computeCodeLenses(
 }
 
 // ---- "Used By" reverse-dependency view ----------------------------------
+// (symbol resolution, edge grouping and labels live in shared's xrefGrouping)
 
-const EDGE_GROUP_LABEL: Record<EdgeKind, string> = {
-  extends: 'Extended by',
-  implements: 'Implemented by',
-  'like-iface': 'Used as «like» by',
-  'submodule-type': 'Instantiated by',
-  'channel-type': 'Used as channel by',
-  import: 'Imported by',
-  'gate-ref': 'Gate referenced by',
-  'submodule-ref': 'Submodule referenced by',
-  'msg-extends': 'Extended by',
-  'msg-field-type': 'Field type in',
-  'ned-class': 'Backing class for',
-  'ned-impl': 'Implemented by',
-  'cpp-par-ref': 'Parameter read in',
-  'cpp-gate-ref': 'Gate accessed in',
-  'cpp-submodule-ref': 'Submodule accessed in',
-  'ini-network': 'Network for config',
-  'ini-extends': 'Extended by config',
-};
-const GROUP_ORDER: EdgeKind[] = [
-  'extends', 'implements', 'msg-extends', 'like-iface', 'submodule-type', 'channel-type',
-  'msg-field-type', 'ned-class', 'ned-impl', 'cpp-par-ref', 'cpp-gate-ref', 'cpp-submodule-ref',
-  'ini-network', 'ini-extends', 'import', 'gate-ref', 'submodule-ref',
-];
-
-const baseName = (uri: string) => uri.split('/').pop() ?? uri;
-
-function refName(from: SymbolId): string {
-  const p = parseSymbolId(from);
-  if (!p) return String(from);
-  if (p.lang === 'ned' || p.lang === 'msg') return p.fqName.split(/[.:]/).pop() ?? p.fqName;
-  if (p.lang === 'ini') return p.rawName;
-  if (p.lang === 'nedmem') return p.member.name;
-  if (p.lang === 'cpp') return p.qualifiedName.split('::').pop() ?? p.qualifiedName;
-  if (p.lang === 'file') return baseName(p.uri);
-  return String(from);
-}
-
-function groupEdges(edges: readonly XrefEdge[]): UsedByGroup[] {
-  const byKind = new Map<EdgeKind, UsedByItem[]>();
-  for (const e of edges) {
-    const items = byKind.get(e.kind) ?? [];
-    items.push({ label: refName(e.from), description: baseName(e.src.uri), uri: e.src.uri, range: e.src.range });
-    byKind.set(e.kind, items);
-  }
-  const out: UsedByGroup[] = [];
-  for (const kind of GROUP_ORDER) {
-    const items = byKind.get(kind);
-    if (items?.length) out.push({ label: EDGE_GROUP_LABEL[kind], items });
-  }
-  return out;
-}
-
-/** The cross-reference graph symbol at a position (NED/MSG type, INI network or section). */
+/** The cross-reference graph symbol at a position, against the live index. */
 function symbolAt(parsed: ParsedDocument, pos: Position, ctx: IndexContext): SymbolId | undefined {
-  if (parsed.language === 'ned' && parsed.tree) {
-    const file = ctx.nedCache.getFile(parsed.uri);
-    if (!file) return undefined;
-    const tref = referenceAt(ctx.nedCache, file, file.tree, pos);
-    const fq = tref?.kind === 'typedef' ? tref.info.fqName : tref?.kind === 'typeref' ? tref.target?.fqName : undefined;
-    if (fq) return nedTypeSym(fq);
-    const mref = memberRefAt(ctx.nedCache, file, file.tree, pos);
-    return mref ? nedMemberSym(mref.key) : undefined;
-  }
-  if (parsed.language === 'msg' && parsed.tree) {
-    const file = ctx.msgCache.getFile(parsed.uri);
-    const t = file ? msgTypeAt(ctx.msgCache, file, file.tree, pos) : undefined;
-    return t ? msgTypeSym(t.fqName) : undefined;
-  }
-  if (parsed.language === 'ini' && parsed.ini) {
-    for (const section of parsed.ini.sections) {
-      for (const e of section.entries) {
-        if (e.key === 'network' && e.value && (posInRange(pos, e.keyRange) || posInRange(pos, e.valueRange))) {
-          const net = resolveNetworkType(ctx.nedCache, e.value);
-          return net ? nedTypeSym(net.fqName) : undefined;
-        }
-      }
-    }
-    const sec = [...parsed.ini.sections].reverse().find((s) => s.range.start.line <= pos.line);
-    return sec ? iniSectionSym(parsed.uri, sec.rawName) : undefined;
-  }
-  return undefined;
+  return symbolAtPosition(parsed, pos, ctx.nedCache, ctx.msgCache);
 }
 
 /**
@@ -813,7 +669,7 @@ export function computeUsedBy(
 ): { target?: string; groups: UsedByGroup[] } {
   const sym = symbolAt(parsed, pos, ctx);
   if (!sym) return { groups: [] };
-  return { target: refName(sym), groups: groupEdges(ctx.db.index.inboundOf(sym)) };
+  return { target: refDisplayName(sym), groups: groupEdges(ctx.db.index.inboundOf(sym)) };
 }
 
 /** Transitive impact (what depends on the symbol at a position), for the command/MCP. */
@@ -825,7 +681,7 @@ export function computeImpact(parsed: ParsedDocument, pos: Position, ctx: IndexC
     target: parseSymbolId(sym)?.lang === 'ini' ? undefined : sym,
     items: nodes.map((n) => ({
       label: n.name,
-      description: `${EDGE_GROUP_LABEL[n.via]} · depth ${n.depth}`,
+      description: `${edgeKindLabel(n.via)} · depth ${n.depth}`,
       uri: n.decl?.uri,
       range: n.decl?.range,
     })),

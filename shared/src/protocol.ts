@@ -80,16 +80,8 @@ export interface ActiveConfig {
   name: string;
 }
 
-export interface UsedByItem {
-  label: string;
-  description?: string;
-  uri: string;
-  range: Range;
-}
-export interface UsedByGroup {
-  label: string;
-  items: UsedByItem[];
-}
+export type { UsedByGroup, UsedByItem } from './xref/xrefGrouping';
+import type { UsedByGroup } from './xref/xrefGrouping';
 export interface UsedByResult {
   /** Display name of the symbol the view reports on, if one resolved. */
   target?: string;

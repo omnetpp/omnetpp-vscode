@@ -36,6 +36,14 @@ export interface TextEdit {
   newText: string;
 }
 
+/** Whether `pos` lies within `r` (inclusive at both ends). */
+export function posInRange(pos: Position, r: Range): boolean {
+  if (pos.line < r.start.line || pos.line > r.end.line) return false;
+  if (pos.line === r.start.line && pos.character < r.start.character) return false;
+  if (pos.line === r.end.line && pos.character > r.end.character) return false;
+  return true;
+}
+
 export interface WorkspaceEdit {
   changes: Record<string, TextEdit[]>;
 }

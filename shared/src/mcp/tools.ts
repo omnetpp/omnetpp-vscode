@@ -19,6 +19,7 @@ import { ConfigRegistry } from '../ini/configRegistry';
 import { nameNode } from '../ned/nedAst';
 import { nodeRange } from '../parser/treeUtils';
 import { nedRenameType, nedRenameMember } from '../ned/nedRename';
+import { edgeKindLabel } from '../xref/xrefGrouping';
 import { organizeImports } from '../ned/nedOrganizeImports';
 import { syntaxDiagnostics } from '../features/syntaxDiagnostics';
 import { filterSuppressedDiagnostics } from '../diagnostics/suppress';
@@ -571,6 +572,8 @@ const TOOLS: ToolDef[] = [
         name: n.name,
         lang: n.lang,
         via: n.via,
+        // the same human-readable relation label the IDE's Used By/Impact views show
+        viaLabel: edgeKindLabel(n.via),
         depth: n.depth,
         decl: n.decl ?? null,
       }));
