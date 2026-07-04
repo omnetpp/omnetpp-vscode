@@ -1,0 +1,44 @@
+name: CI
+
+# Validation gate: type-check, unit tests, bundling, and headless smoke tests on
+# every push and pull request. (Publishing is handled by release.yml/publish.yml,
+# which do NOT run tests — this workflow is what keeps them honest.)
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Bun
+      uses: oven-sh/setup-bun@v2
+
+    - name: Install dependencies
+      run: bun install && ./refresh_submodules
+
+    - name: Build tree-sitter WASM grammars
+      run: bun run build:wasm
+
+    - name: Type-check (tsc --build)
+      run: bun run compile
+
+    - name: Run unit tests
+      run: bun test ./shared/src/test ./server/src/test
+
+    - name: Bundle (esbuild)
+      run: bun run dev:build
+
+    # Headless end-to-end smokes over the bundled artifacts. mcp-smoke.mjs and the
+    # other scripts/*-smoke.mjs need a real OMNeT++ project directory, so they stay
+    # manual (see docs/DEVELOPMENT.md).
+    - name: Smoke-test CLI linter (dist/opp_lint.js)
+      run: bun scripts/lint-cli-smoke.mjs
+
+    - name: Smoke-test language server (dist/server.js)
+      run: bun scripts/lsp-smoke.mjs
