@@ -77,6 +77,7 @@ import {
   nedCompletion,
   nedClassDefinition,
   nedClassRefAt,
+  fileNamespace,
   msgDefinition,
   msgHover,
   msgDocRefResolver,
@@ -438,12 +439,29 @@ function computeHoverRaw(
   if (parsed.language === 'ned') {
     const file = ctx.nedCache.getFile(parsed.uri);
     if (!file) return null;
-    // @class / @signal(type=) token: show the resolved MSG type
+    // @class / @signal(type=) token: a data type resolves to its MSG declaration;
+    // a module/channel @class names a C++ implementation class (Define_Module), so
+    // fall back to the C++ index and report where the class is registered.
     const hit = nedClassRefAt(ctx.msgCache, ctx.nedCache, file, file.tree, pos);
     if (hit) {
-      const md = hit.target
-        ? `\`\`\`msg\n${hit.target.kind} ${hit.target.fqName}\n\`\`\``
-        : `Class \`${hit.ref.className}\` (no matching .msg declaration)`;
+      let md: string;
+      if (hit.target) {
+        md = `\`\`\`msg\n${hit.target.kind} ${hit.target.fqName}\n\`\`\``;
+      } else {
+        const ns = fileNamespace(file.tree) ?? '';
+        const cpp = ctx.db.cppCache.lookupClass(hit.ref.className, ns);
+        if (cpp) {
+          const where = baseName(cpp.decl.uri);
+          const line = cpp.decl.range.start.line + 1;
+          md =
+            `\`\`\`cpp\nclass ${cpp.qualifiedName}\n\`\`\`\n\n` +
+            `Registered with \`Define_Module\` in [${where}](${cpp.decl.uri}) (line ${line})`;
+        } else {
+          md =
+            `C++ class \`${hit.ref.className}\` — no \`Define_Module\`/\`Define_Channel\` ` +
+            `registration found in the indexed C++ sources.`;
+        }
+      }
       return { markdown: md, range: hit.range };
     }
     // NED docs may cross-reference MSG types: resolve those against the MSG index.
