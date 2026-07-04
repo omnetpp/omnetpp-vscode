@@ -6,6 +6,7 @@ import { LanguageClient } from 'vscode-languageclient/node';
 // semantic core into the extension bundle.
 import {
   OmnetppMethods,
+  configNameAtHeaderLine,
   type ActiveConfig,
   type ConfigSummary as ConfigEntryDto,
   type ImpactResult,
@@ -441,26 +442,23 @@ function activeConfigNetworkFqName(): string | undefined {
   return activeConfigState ? activeConfigNetwork : undefined;
 }
 
-/** The canonical config name of the nearest `[...]` header at/above `line`, if any. */
+/** The canonical config name of the nearest `[...]` header at/above `line`, if any.
+ *  Uses the shared parser's own header rule so this cannot drift from the server. */
 function configNameAtLine(doc: vscode.TextDocument, line: number): string | undefined {
   for (let i = line; i >= 0; i--) {
-    const m = /^\s*\[(.+?)\]\s*$/.exec(doc.lineAt(i).text);
-    if (!m) continue;
-    const raw = m[1].trim();
-    if (/^General$/i.test(raw)) return 'General';
-    const cm = /^Config\s+(.+)$/.exec(raw); // [Config X] -> X ; [X] -> X
-    return cm ? cm[1].trim() : raw;
+    const name = configNameAtHeaderLine(doc.lineAt(i).text);
+    if (name !== undefined) return name;
   }
   return undefined;
 }
 
 function iniFsPath(uri: string): string {
-  return decodeURIComponent(uri.replace(/^file:\/\//, ''));
+  return vscode.Uri.parse(uri).fsPath;
 }
 
 /** A short, identifying label: parent dir for a generic `omnetpp.ini`, else the file name. */
 function activeConfigLabel(cfg: ActiveConfig): string {
-  const parts = iniFsPath(cfg.uri).split('/').filter(Boolean);
+  const parts = iniFsPath(cfg.uri).split(/[\\/]/).filter(Boolean);
   const base = parts[parts.length - 1] ?? cfg.uri;
   const parent = parts[parts.length - 2];
   const ident = base.toLowerCase() === 'omnetpp.ini' && parent ? parent : base;

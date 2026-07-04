@@ -8,18 +8,15 @@
 //
 // Usage:  opp_lint [options] [path ...]
 // Env:    OMNETPP_NED_PATH, OMNETPP_WASM_DIR, OMNETPP_CONFIG_DIR
-import { existsSync, statSync } from 'node:fs';
-import { dirname, join, relative, resolve, sep } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { statSync } from 'node:fs';
+import { dirname, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   BUILTIN_URI,
   DiagnosticSeverity,
-  ParserService,
-  ToolContext,
   lintFile,
 } from '@omnetpp/shared';
-import { NodeFileSystem } from '@omnetpp/shared/node';
-import { buildDiskIndex } from './indexBuilder.js';
+import { createDiskToolSetup, parseNedPathDirs } from './context.js';
 
 interface Options {
   paths: string[];
@@ -159,41 +156,11 @@ async function main(): Promise<void> {
   }
   if (positionals.length === 0) dirArgs.push(process.cwd());
 
-  const wasmDir = process.env.OMNETPP_WASM_DIR || join(__dirname, 'wasm');
-  const configDir = process.env.OMNETPP_CONFIG_DIR || join(__dirname, 'config');
-  if (!existsSync(join(wasmDir, 'tree-sitter-ned.wasm'))) {
-    fail(`grammar wasm not found in ${wasmDir}. Run "bun run dev:build" or set OMNETPP_WASM_DIR.`);
-  }
-
-  const parsers = await ParserService.create({
-    runtimeWasmDir: wasmDir,
-    nedWasmPath: join(wasmDir, 'tree-sitter-ned.wasm'),
-    msgWasmPath: join(wasmDir, 'tree-sitter-msg.wasm'),
-  });
-
-  const nedPathDirs = opts.nedPath
-    .split(/[;:]/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((s) => resolve(s));
-
   // Index the targeted dirs plus the parents of any explicit files (for cross-file
-  // resolution), plus the library roots from --ned-path.
+  // resolution), plus the library roots from --ned-path. A missing grammar wasm is
+  // fatal for the linter.
   const indexRoots = unique([...dirArgs, ...fileArgs.map((f) => dirname(f))]);
-  const fs = new NodeFileSystem();
-  const index = await buildDiskIndex(fs, parsers, configDir, indexRoots, nedPathDirs);
-
-  const ctx: ToolContext = {
-    nedCache: index.nedCache,
-    msgCache: index.msgCache,
-    configRegistry: index.configRegistry,
-    db: index.db,
-    iniCache: index.iniCache,
-    fs,
-    parsers,
-    toUri: (p) => (/^[a-z][a-z0-9+.-]*:\/\//i.test(p) ? p : pathToFileURL(resolve(p)).toString()),
-    toPath: (u) => (u.startsWith('file:') ? fileURLToPath(u) : u),
-  };
+  const { ctx, index } = await createDiskToolSetup(indexRoots, parseNedPathDirs(opts.nedPath), fail);
 
   // Which indexed files are lint targets: explicit files, or anything under a dir arg.
   const explicitFiles = new Set(fileArgs);

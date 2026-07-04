@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "/home/rhornig/w/omnetpp-dev/src/sim/sim_std.msg",
+  "generatedFrom": "omnetpp-6.4.0: src/sim/sim_std.msg",
   "types": [
     "Constant0Filter",
     "Constant1Filter",

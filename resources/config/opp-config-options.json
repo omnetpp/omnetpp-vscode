@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "/home/rhornig/w/omnetpp-dev",
+  "generatedFrom": "omnetpp-6.4.0",
   "optionCount": 165,
   "options": [
     {
@@ -628,9 +628,11 @@
     },
     {
       "name": "NAME",
-      "type": "custom",
+      "type": "double",
+      "unit": "UNIT",
       "default": "DEFAULTVALUE",
-      "scope": "global",
+      "scope": "per-object",
+      "objectKind": "KIND",
       "description": "DESCRIPTION"
     },
     {

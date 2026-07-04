@@ -82,6 +82,22 @@ const SECTION_RE = /^\s*\[(.*)\]\s*$/;
 const INCLUDE_RE = /^\s*include\s+(.+?)\s*$/;
 
 /**
+ * The canonical config name of a section-header line, or undefined when the
+ * line is not a header: `[General]` → "General", `[Config Foo]` and `[Foo]` →
+ * "Foo" (the `Config ` prefix is optional in OMNeT++). Applies the exact same
+ * rule `parseIni` uses, so callers that only have a single line (e.g. the
+ * editor client resolving the section at the cursor) cannot drift from the
+ * parser. Case-sensitive, as OMNeT++ section names are.
+ */
+export function configNameAtHeaderLine(line: string): string | undefined {
+  const m = SECTION_RE.exec(stripComment(line));
+  if (!m) return undefined;
+  const rawName = m[1].trim();
+  if (rawName === 'General') return 'General';
+  return rawName.replace(/^Config\s+/, '').trim();
+}
+
+/**
  * Parses an OMNeT++ ini file into sections and entries. Handles `#` comments,
  * backslash line continuation, `[General]`/`[Config X]` sections, `include`
  * directives, and recognizes `extends=` for section inheritance.

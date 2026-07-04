@@ -7,7 +7,21 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const srcDir = resolve(process.argv[2] ?? '/home/rhornig/w/omnetpp-dev');
+if (!process.argv[2]) {
+  console.error('usage: bun scripts/gen-config-options.mjs <omnetppSrcDir>');
+  process.exit(2);
+}
+const srcDir = resolve(process.argv[2]);
+
+/** Machine-independent provenance for the generated file: the OMNeT++ version
+ *  (from the source tree's Version file), not a local filesystem path. */
+function sourceLabel() {
+  try {
+    return readFileSync(join(srcDir, 'Version'), 'utf8').trim();
+  } catch {
+    return 'omnetpp (unknown version)';
+  }
+}
 
 const TYPE_MAP = {
   CFG_BOOL: 'bool',
@@ -132,7 +146,7 @@ for (const file of walkFiles(srcDir)) {
 
 const sorted = [...options.values()].sort((a, b) => a.name.localeCompare(b.name));
 const out = {
-  generatedFrom: srcDir,
+  generatedFrom: sourceLabel(),
   optionCount: sorted.length,
   options: sorted,
 };

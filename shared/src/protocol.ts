@@ -3,10 +3,11 @@
 // Params/Result types from here, so a rename or shape change is a compile
 // error on both ends instead of a silent runtime failure.
 //
-// Deliberately dependency-light: the ONLY runtime value in this module is the
-// OmnetppMethods constant — everything else is `import type`/`export type`
-// (erased at compile time), so the client can bundle
-// '@omnetpp/shared/protocol' without dragging in the semantic core.
+// Deliberately dependency-light: the only runtime exports are the
+// OmnetppMethods constant and the tiny self-contained ini-header helper below —
+// everything else is `import type`/`export type` (erased at compile time), so
+// the client can bundle '@omnetpp/shared/protocol' without dragging in the
+// semantic core.
 import type { Position, Range } from './model/location';
 import type { NedHierarchyItem } from './ned/nedHierarchy';
 import type { ModuleHierNode } from './ned/nedModuleHierarchy';
@@ -24,6 +25,11 @@ export type {
   ConfigSummary,
   ToolDef,
 };
+
+// Runtime re-export for the client: the canonical `[Config X]` header-name rule
+// (used when building ActiveConfig from the cursor position without a server
+// round trip). iniDocument.js is self-contained — no transitive requires.
+export { configNameAtHeaderLine } from './ini/iniDocument';
 
 /** Method names of every custom request/notification (see per-key comments). */
 export const OmnetppMethods = {
