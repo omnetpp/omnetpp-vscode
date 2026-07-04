@@ -41,25 +41,23 @@ import { DocumentModelStore } from './documentModel';
 import type { ParsedDocument } from './documentModel';
 import { NodeFileSystem } from '@omnetpp/shared/node';
 import { ProjectIndex } from './projectIndex';
+import { computeDiagnostics } from './features/diagnostics';
+import { computeDocumentSymbols, computeFoldingRanges } from './features/symbolsFolding';
+import { computeDefinition } from './features/definition';
+import { computeHover } from './features/hover';
+import { computeReferences, computeDocumentHighlights } from './features/references';
+import { computeCodeLenses } from './features/codeLens';
+import { computeUsedBy, computeImpact } from './features/usedBy';
+import { computeCompletion } from './features/completion';
+import { computePrepareRename, computeRename } from './features/rename';
+import { computeFormatting } from './features/formatting';
+import { computeCodeActions } from './features/codeActions';
 import {
-  computeDiagnostics,
-  computeDocumentSymbols,
-  computeFoldingRanges,
-  computeDefinition,
-  computeHover,
-  computeReferences,
-  computeCodeLenses,
-  computeUsedBy,
-  computeImpact,
-  computeCompletion,
-  computePrepareRename,
-  computeRename,
-  computeFormatting,
-  computeDocumentHighlights,
-  computeCodeActions,
   computePrepareTypeHierarchy,
   computeTypeHierarchySupertypes,
   computeTypeHierarchySubtypes,
+} from './features/typeHierarchy';
+import {
   computeInheritanceRoots,
   computeInheritanceSpineByFq,
   computeModuleHierarchy,
@@ -70,7 +68,7 @@ import {
   computeParamHierarchyChildren,
   computeConfigNetwork,
   buildConfigCtx,
-} from './features/providers';
+} from './features/hierarchyViews';
 import type { Position as LspPosition } from 'vscode-languageserver/node';
 import type { NedHierarchyItem, ParamAssign, IniDocument } from '@omnetpp/shared';
 
