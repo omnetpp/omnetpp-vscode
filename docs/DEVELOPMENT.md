@@ -59,7 +59,8 @@ bun run build:wasm            # compile the NED/MSG tree-sitter grammars to WASM
 # Develop
 bun run compile        # tsc --build: type-check all workspaces, emit .d.ts + out/
 bun run watch          # tsc --build --watch
-bun run dev:build      # copy:assets + esbuild bundle to dist/ (runtime artifacts)
+bun run dev:build      # copy:assets + esbuild bundle to dist/ (runtime artifacts;
+                       #   assumes a prior `compile` — esbuild pulls shared from shared/out)
 bun run bundle:watch   # esbuild in watch mode
 
 # Test (bun:test over the TypeScript sources)
@@ -68,7 +69,8 @@ bun test shared/src/test                       # tests only, no type-check
 bun test shared/src/test/<name>.test.ts        # a single test file
 bun test -t "<name substr>"                    # tests whose name matches
 
-# Package / publish
+# Package / publish (prepackage chains compile + build:wasm + copy:assets + esbuild,
+# so both work from a fresh checkout)
 bun run package        # -> omnetpp-vscode-<version>.vsix
 bun run deploy         # vsce publish
 ```

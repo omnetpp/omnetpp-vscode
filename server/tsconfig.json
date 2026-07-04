@@ -3,6 +3,9 @@
   "compilerOptions": {
     "rootDir": "./src",
     "outDir": "./out",
+    // Keep the incremental-build state inside out/ so deleting out/ yields a
+    // coherent clean state (a surviving tsbuildinfo would make tsc skip re-emit).
+    "tsBuildInfoFile": "./out/tsconfig.tsbuildinfo",
     "lib": ["ES2021"],
     "types": ["node"]
   },

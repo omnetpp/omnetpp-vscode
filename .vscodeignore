@@ -25,3 +25,6 @@ vsc-extension-quickstart.md
 refresh_submodules
 omnetpp-vscode.code-workspace
 **/.DS_Store
+# IDE metadata (and vsce's secret scanner must not try to open it)
+.idea/**
+.idea

@@ -2,7 +2,10 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "./src",
-    "outDir": "./out"
+    "outDir": "./out",
+    // Keep the incremental-build state inside out/ so deleting out/ yields a
+    // coherent clean state (a surviving tsbuildinfo would make tsc skip re-emit).
+    "tsBuildInfoFile": "./out/tsconfig.tsbuildinfo"
   },
   "include": ["src/**/*.ts"]
 }
