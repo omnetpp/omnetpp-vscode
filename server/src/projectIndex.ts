@@ -4,6 +4,7 @@ import {
   BUILTIN_NED_TEXT,
   BUILTIN_URI,
   ConfigRegistry,
+  CppResourceCache,
   FileSystem,
   IniResourceCache,
   MsgResourceCache,
@@ -13,6 +14,7 @@ import {
   SemanticDatabase,
   configSummaries,
   discoverProjectLayout,
+  isCppSourceFile,
   isExcludedPackage,
   packageForFile,
   parseIni,
@@ -26,6 +28,7 @@ export interface RevalidateResult {
   nedChanged: boolean;
   msgChanged: boolean;
   iniChanged: boolean;
+  cppChanged: boolean;
 }
 
 /** Per-source-root index statistics, reported in the server log. */
@@ -47,8 +50,15 @@ export class ProjectIndex {
   readonly msgCache = new MsgResourceCache();
   readonly configRegistry = new ConfigRegistry();
   readonly iniCache = new IniResourceCache();
+  readonly cppCache = new CppResourceCache();
   /** Unified query surface over the caches + cross-reference graph. */
-  readonly db = new SemanticDatabase(this.cache, this.msgCache, this.configRegistry, this.iniCache);
+  readonly db = new SemanticDatabase(
+    this.cache,
+    this.msgCache,
+    this.configRegistry,
+    this.iniCache,
+    this.cppCache,
+  );
   private layout: ProjectLayout = { roots: [], excludedPackages: [] };
   /** Scanned INI files → number of named [Config] sections (for status reporting). */
   private iniConfigCounts = new Map<string, number>();
@@ -128,6 +138,8 @@ export class ProjectIndex {
         await this.indexMsgFile(full);
       } else if (name.endsWith('.ini')) {
         await this.indexIniFile(full);
+      } else if (isCppSourceFile(name)) {
+        await this.indexCppFile(full);
       }
     }
   }
@@ -163,6 +175,20 @@ export class ProjectIndex {
     this.iniCache.addFile(uri, text);
     this.iniConfigCounts.set(uri, configSummaries(parseIni(text)).length);
     this.db.onIniFile(uri);
+  }
+
+  /** Read and index a single C++ (.cc/.h) file from disk (by absolute fs path). */
+  async indexCppFile(fsPath: string): Promise<void> {
+    const uri = pathToFileURL(fsPath).toString();
+    let text: string;
+    try {
+      text = await this.fs.readFile(fsPath);
+    } catch {
+      return;
+    }
+    this.cppCache.addFile(uri, text);
+    this.db.onCppFile(uri);
+    await this.recordMeta(uri, fsPath);
   }
 
   /** Read and index a single MSG file from disk (by absolute fs path). */
@@ -223,6 +249,8 @@ export class ProjectIndex {
   async onFileChanged(uri: string, deleted: boolean): Promise<void> {
     const isMsg = uri.endsWith('.msg');
     const isIni = uri.endsWith('.ini');
+    const isNed = uri.endsWith('.ned');
+    const isCpp = !isMsg && !isIni && !isNed && isCppSourceFile(uri);
     let fsPath: string | undefined;
     try {
       fsPath = fileURLToPath(uri);
@@ -237,6 +265,9 @@ export class ProjectIndex {
         this.iniCache.removeFile(uri);
         this.iniConfigCounts.delete(uri);
         this.db.dropFile(uri);
+      } else if (isCpp) {
+        this.cppCache.removeFile(uri);
+        this.db.dropFile(uri);
       } else {
         this.cache.removeFile(uri);
         this.db.dropFile(uri);
@@ -246,6 +277,7 @@ export class ProjectIndex {
     }
     if (isMsg) await this.indexMsgFile(fsPath);
     else if (isIni) await this.indexIniFile(fsPath);
+    else if (isCpp) await this.indexCppFile(fsPath);
     else await this.indexFile(fsPath);
   }
 
@@ -254,6 +286,7 @@ export class ProjectIndex {
     this.cache.clear();
     this.msgCache.clear();
     this.iniCache.clear();
+    this.cppCache.clear();
     this.db.clear();
     await this.initialize(workspaceFolders, nedPathDirs);
   }
@@ -306,7 +339,12 @@ export class ProjectIndex {
       }
       if (stat.isDirectory) {
         await this.collectDiskFiles(full, out);
-      } else if (name.endsWith('.ned') || name.endsWith('.msg') || name.endsWith('.ini')) {
+      } else if (
+        name.endsWith('.ned') ||
+        name.endsWith('.msg') ||
+        name.endsWith('.ini') ||
+        isCppSourceFile(name)
+      ) {
         out.set(pathToFileURL(full).toString(), { mtimeMs: stat.mtimeMs ?? 0, size: stat.size ?? 0 });
       }
     }
@@ -328,7 +366,13 @@ export class ProjectIndex {
   ): Promise<RevalidateResult> {
     const fresh = await discoverProjectLayout(this.fs, workspaceFolders, nedPathDirs);
     if (ProjectIndex.layoutKey(fresh) !== ProjectIndex.layoutKey(this.layout)) {
-      return { needsReindex: true, nedChanged: false, msgChanged: false, iniChanged: false };
+      return {
+        needsReindex: true,
+        nedChanged: false,
+        msgChanged: false,
+        iniChanged: false,
+        cppChanged: false,
+      };
     }
 
     const disk = new Map<string, { mtimeMs: number; size: number }>();
@@ -339,11 +383,13 @@ export class ProjectIndex {
       nedChanged: false,
       msgChanged: false,
       iniChanged: false,
+      cppChanged: false,
     };
     const mark = (uri: string): void => {
       if (uri.endsWith('.msg')) result.msgChanged = true;
       else if (uri.endsWith('.ini')) result.iniChanged = true;
       else if (uri.endsWith('.ned')) result.nedChanged = true;
+      else if (isCppSourceFile(uri)) result.cppChanged = true;
     };
 
     // added or modified (present on disk, missing from / differing in fileMeta)

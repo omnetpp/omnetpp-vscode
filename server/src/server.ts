@@ -22,7 +22,7 @@ import {
 } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { promises as fsp } from 'node:fs';
-import { ParserService, parseIni, configSummaries, effectiveNetwork, OMNETPP_TOOLS, handleTool, workspaceSymbols, BUILTIN_URI } from '@omnetpp/shared';
+import { ParserService, parseIni, configSummaries, effectiveNetwork, OMNETPP_TOOLS, handleTool, workspaceSymbols, isCppSourceFile, BUILTIN_URI } from '@omnetpp/shared';
 import type { ToolContext, FileSystem } from '@omnetpp/shared';
 import { DocumentModelStore } from './documentModel';
 import type { ParsedDocument } from './documentModel';
@@ -381,7 +381,10 @@ async function registerExternalWatchers(): Promise<void> {
   externalWatchers = undefined;
   if (!dirs.length) return;
   const watchers = dirs.map((dir) => ({
-    globPattern: { baseUri: pathToFileURL(dir).toString(), pattern: '**/*.{ned,msg,ini}' },
+    globPattern: {
+      baseUri: pathToFileURL(dir).toString(),
+      pattern: '**/*.{ned,msg,ini,cc,cpp,cxx,h,hpp,hxx,hh}',
+    },
     kind: WatchKind.Create | WatchKind.Change | WatchKind.Delete,
   }));
   try {
@@ -437,10 +440,16 @@ async function runRevalidate(): Promise<void> {
     const r = await index.revalidate(workspaceFolders, currentNedPathDirs());
     if (r.needsReindex) {
       scheduleReindex(); // roots/exclusions changed → full rebuild
-    } else if (r.nedChanged || r.msgChanged || r.iniChanged) {
+    } else if (r.nedChanged || r.msgChanged || r.iniChanged || r.cppChanged) {
       // reconciled closed files may change cross-file diagnostics for open docs
       if (r.nedChanged) refreshAll('ned');
       if (r.msgChanged) refreshAll('msg');
+      // a C++ change alters NED reverse counts (CodeLens) — re-pull lenses and
+      // re-lint NED (unused-member hints depend on C++ accesses)
+      if (r.cppChanged) {
+        refreshAll('ned');
+        void connection.sendRequest(CodeLensRefreshRequest.type);
+      }
       logIndexStatus();
       scheduleWorkspaceDiagnostics();
     }
@@ -488,6 +497,7 @@ connection.onDidChangeWatchedFiles(async (params) => {
   let nedChanged = false;
   let msgChanged = false;
   let iniChanged = false;
+  let cppChanged = false;
   let layoutChanged = false;
   for (const change of params.changes) {
     if (isProjectConfigFile(change.uri)) {
@@ -497,21 +507,28 @@ connection.onDidChangeWatchedFiles(async (params) => {
     const isNed = change.uri.endsWith('.ned');
     const isMsg = change.uri.endsWith('.msg');
     const isIni = change.uri.endsWith('.ini');
-    if (!isNed && !isMsg && !isIni) continue;
+    const isCpp = !isNed && !isMsg && !isIni && isCppSourceFile(change.uri);
+    if (!isNed && !isMsg && !isIni && !isCpp) continue;
     // skip files that are open (their state comes from the editor)
     if (documents.get(change.uri)) continue;
     await index.onFileChanged(change.uri, change.type === FileChangeType.Deleted);
     if (isNed) nedChanged = true;
     else if (isMsg) msgChanged = true;
-    else iniChanged = true;
+    else if (isIni) iniChanged = true;
+    else cppChanged = true;
   }
   if (layoutChanged) {
     scheduleReindex(); // re-discovers .nedfolders/.nedexclusions/package.ned
   } else {
     if (nedChanged) refreshAll('ned');
     if (msgChanged) refreshAll('msg');
+    // a C++ change alters NED reverse counts (CodeLens) + unused-member hints
+    if (cppChanged) {
+      refreshAll('ned');
+      void connection.sendRequest(CodeLensRefreshRequest.type);
+    }
     // closed INI files have no open-doc refresh path; the workspace pass covers them
-    if (nedChanged || msgChanged || iniChanged) scheduleWorkspaceDiagnostics();
+    if (nedChanged || msgChanged || iniChanged || cppChanged) scheduleWorkspaceDiagnostics();
   }
 });
 

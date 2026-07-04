@@ -4,6 +4,7 @@ import {
   BUILTIN_NED_TEXT,
   BUILTIN_URI,
   ConfigRegistry,
+  CppResourceCache,
   FileSystem,
   IniResourceCache,
   MsgResourceCache,
@@ -12,6 +13,7 @@ import {
   ProjectLayout,
   SemanticDatabase,
   discoverProjectLayout,
+  isCppSourceFile,
   isExcludedPackage,
   packageForFile,
 } from '@omnetpp/shared';
@@ -21,6 +23,7 @@ export interface DiskIndex {
   msgCache: MsgResourceCache;
   configRegistry: ConfigRegistry;
   iniCache: IniResourceCache;
+  cppCache: CppResourceCache;
   db: SemanticDatabase;
   layout: ProjectLayout;
 }
@@ -42,6 +45,7 @@ export async function buildDiskIndex(
   const msgCache = new MsgResourceCache();
   const configRegistry = new ConfigRegistry();
   const iniCache = new IniResourceCache();
+  const cppCache = new CppResourceCache();
 
   // built-in NED declarations (ned.IdealChannel, ...)
   nedCache.addFile(BUILTIN_URI, parsers.parse('ned', BUILTIN_NED_TEXT), 'ned');
@@ -105,16 +109,25 @@ export async function buildDiskIndex(
         } catch {
           /* unreadable file */
         }
+      } else if (isCppSourceFile(name)) {
+        const uri = pathToFileURL(full).toString();
+        try {
+          cppCache.addFile(uri, await fs.readFile(full));
+        } catch {
+          /* unreadable file */
+        }
       }
     }
   };
 
   for (const root of layout.roots) await scan(root.dir);
-  const db = new SemanticDatabase(nedCache, msgCache, configRegistry, iniCache);
+  const db = new SemanticDatabase(nedCache, msgCache, configRegistry, iniCache, cppCache);
   // populate the cross-reference graph (msg first so NED @class resolves eagerly,
-  // ned before ini so `network=` resolves eagerly; drain covers any residual order)
+  // cpp before ned so `ned-impl` resolves eagerly, ned before ini so `network=`
+  // resolves eagerly; drain covers any residual order)
   for (const f of msgCache.allFiles()) db.onMsgFile(f.uri);
+  for (const f of cppCache.allFiles()) db.onCppFile(f.uri);
   for (const f of nedCache.allFiles()) db.onNedFile(f.uri);
   for (const { uri } of iniCache.allDocs()) db.onIniFile(uri);
-  return { nedCache, msgCache, configRegistry, iniCache, db, layout };
+  return { nedCache, msgCache, configRegistry, iniCache, cppCache, db, layout };
 }

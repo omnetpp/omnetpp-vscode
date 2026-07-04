@@ -74,6 +74,7 @@ export function activate(context: ExtensionContext): void {
         workspace.createFileSystemWatcher('**/*.ned'),
         workspace.createFileSystemWatcher('**/*.msg'),
         workspace.createFileSystemWatcher('**/*.ini'),
+        workspace.createFileSystemWatcher('**/*.{cc,cpp,cxx,h,hpp,hxx,hh}'),
         workspace.createFileSystemWatcher('**/{.nedfolders,.nedexclusions,package.ned}'),
       ],
     },
