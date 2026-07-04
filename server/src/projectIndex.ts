@@ -1,7 +1,5 @@
-import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  BUILTIN_NED_TEXT,
   BUILTIN_URI,
   ConfigRegistry,
   CppResourceCache,
@@ -12,13 +10,16 @@ import {
   ParserService,
   ProjectLayout,
   SemanticDatabase,
+  collectIndexableFiles,
   configSummaries,
   discoverProjectLayout,
   isCppSourceFile,
   isExcludedPackage,
+  loadBuiltins,
   packageForFile,
   parseIni,
   rootForPath,
+  scanSourceRoots,
 } from '@omnetpp/shared';
 
 /** Outcome of a `revalidate()` pass: whether a full reindex is required and,
@@ -88,60 +89,20 @@ export class ProjectIndex {
     this.iniConfigCounts.clear();
     this.fileMeta.clear();
 
-    // built-in NED declarations (ned.IdealChannel, ...)
-    this.cache.addFile(BUILTIN_URI, this.parsers.parse('ned', BUILTIN_NED_TEXT), 'ned');
+    await loadBuiltins(this.fs, this.parsers, this.configDir, {
+      nedCache: this.cache,
+      msgCache: this.msgCache,
+      configRegistry: this.configRegistry,
+    });
     this.db.onNedFile(BUILTIN_URI);
 
-    // built-in MSG/sim type names
-    try {
-      const json = JSON.parse(await this.fs.readFile(join(this.configDir, 'msg-builtin-types.json')));
-      this.msgCache.setBuiltins(json.types ?? []);
-    } catch {
-      /* builtins optional */
-    }
-
-    // config-option registry snapshot
-    try {
-      const json = JSON.parse(await this.fs.readFile(join(this.configDir, 'opp-config-options.json')));
-      this.configRegistry.load(json.options ?? []);
-    } catch {
-      /* registry optional */
-    }
-
     this.layout = await discoverProjectLayout(this.fs, workspaceFolders, nedPathDirs);
-    for (const root of this.layout.roots) {
-      await this.scanDir(root.dir);
-    }
-  }
-
-  private async scanDir(dir: string): Promise<void> {
-    let entries: string[];
-    try {
-      entries = await this.fs.readDirectory(dir);
-    } catch {
-      return;
-    }
-    for (const name of entries) {
-      if (name.startsWith('.') || name === 'node_modules' || name === 'out') continue;
-      const full = `${dir}/${name}`;
-      let stat;
-      try {
-        stat = await this.fs.stat(full);
-      } catch {
-        continue;
-      }
-      if (stat.isDirectory) {
-        await this.scanDir(full);
-      } else if (name.endsWith('.ned')) {
-        await this.indexFile(full);
-      } else if (name.endsWith('.msg')) {
-        await this.indexMsgFile(full);
-      } else if (name.endsWith('.ini')) {
-        await this.indexIniFile(full);
-      } else if (isCppSourceFile(name)) {
-        await this.indexCppFile(full);
-      }
-    }
+    await scanSourceRoots(this.fs, this.layout.roots.map((r) => r.dir), {
+      ned: (p) => this.indexFile(p),
+      msg: (p) => this.indexMsgFile(p),
+      ini: (p) => this.indexIniFile(p),
+      cpp: (p) => this.indexCppFile(p),
+    });
   }
 
   /** Stat `fsPath` and remember its {mtimeMs,size} for `revalidate()`. */
@@ -316,40 +277,6 @@ export class ProjectIndex {
     return out;
   }
 
-  /** Recursively collect indexable files under `dir` (stat-only, no parse), keyed
-   *  by URI. Mirrors `scanDir`'s skip rules so the disk view matches the index. */
-  private async collectDiskFiles(
-    dir: string,
-    out: Map<string, { mtimeMs: number; size: number }>,
-  ): Promise<void> {
-    let entries: string[];
-    try {
-      entries = await this.fs.readDirectory(dir);
-    } catch {
-      return;
-    }
-    for (const name of entries) {
-      if (name.startsWith('.') || name === 'node_modules' || name === 'out') continue;
-      const full = `${dir}/${name}`;
-      let stat;
-      try {
-        stat = await this.fs.stat(full);
-      } catch {
-        continue;
-      }
-      if (stat.isDirectory) {
-        await this.collectDiskFiles(full, out);
-      } else if (
-        name.endsWith('.ned') ||
-        name.endsWith('.msg') ||
-        name.endsWith('.ini') ||
-        isCppSourceFile(name)
-      ) {
-        out.set(pathToFileURL(full).toString(), { mtimeMs: stat.mtimeMs ?? 0, size: stat.size ?? 0 });
-      }
-    }
-  }
-
   /**
    * Self-healing reconciliation against disk, independent of file-watch events.
    * Catches changes missed when a background process (git checkout/reset, a build)
@@ -375,8 +302,9 @@ export class ProjectIndex {
       };
     }
 
+    const onDisk = await collectIndexableFiles(this.fs, this.layout.roots.map((r) => r.dir));
     const disk = new Map<string, { mtimeMs: number; size: number }>();
-    for (const root of this.layout.roots) await this.collectDiskFiles(root.dir, disk);
+    for (const [p, meta] of onDisk) disk.set(pathToFileURL(p).toString(), meta);
 
     const result: RevalidateResult = {
       needsReindex: false,

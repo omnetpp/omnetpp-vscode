@@ -31,8 +31,9 @@ export * from './ned/nedValueChecks';
 export * from './expr/exprParser';
 export * from './expr/infer';
 
-// Project model
+// Project model + disk indexing building blocks
 export * from './project/projectModel';
+export * from './project/diskIndexer';
 
 // Cross-reference graph + unified query surface
 export * from './xref/symbolId';

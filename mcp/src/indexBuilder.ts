@@ -1,8 +1,5 @@
-import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
-  BUILTIN_NED_TEXT,
-  BUILTIN_URI,
   ConfigRegistry,
   CppResourceCache,
   FileSystem,
@@ -10,12 +7,13 @@ import {
   MsgResourceCache,
   NedResourceCache,
   ParserService,
-  ProjectLayout,
   SemanticDatabase,
   discoverProjectLayout,
-  isCppSourceFile,
   isExcludedPackage,
+  loadBuiltins,
   packageForFile,
+  populateDatabase,
+  scanSourceRoots,
 } from '@omnetpp/shared';
 
 export interface DiskIndex {
@@ -25,14 +23,14 @@ export interface DiskIndex {
   iniCache: IniResourceCache;
   cppCache: CppResourceCache;
   db: SemanticDatabase;
-  layout: ProjectLayout;
 }
 
 /**
- * Build a project index by scanning NED/MSG files from disk. Mirrors the LSP
- * server's ProjectIndex.initialize but without the live-document machinery: a
- * standalone, read-mostly snapshot. INI files are read on demand by the tools,
- * so they are not indexed here.
+ * Build a project index by scanning NED/MSG/INI/C++ files from disk. The
+ * one-shot counterpart of the LSP server's ProjectIndex: same builtin
+ * bootstrap, walk and skip rules (via shared's diskIndexer), but without the
+ * live-document/watcher/revalidate machinery — a standalone, read-mostly
+ * snapshot.
  */
 export async function buildDiskIndex(
   fs: FileSystem,
@@ -47,87 +45,43 @@ export async function buildDiskIndex(
   const iniCache = new IniResourceCache();
   const cppCache = new CppResourceCache();
 
-  // built-in NED declarations (ned.IdealChannel, ...)
-  nedCache.addFile(BUILTIN_URI, parsers.parse('ned', BUILTIN_NED_TEXT), 'ned');
-
-  // built-in MSG/sim type names (optional)
-  try {
-    const json = JSON.parse(await fs.readFile(join(configDir, 'msg-builtin-types.json')));
-    msgCache.setBuiltins(json.types ?? []);
-  } catch {
-    /* builtins optional */
-  }
-
-  // config-option registry snapshot (optional)
-  try {
-    const json = JSON.parse(await fs.readFile(join(configDir, 'opp-config-options.json')));
-    configRegistry.load(json.options ?? []);
-  } catch {
-    /* registry optional */
-  }
+  await loadBuiltins(fs, parsers, configDir, { nedCache, msgCache, configRegistry });
 
   const layout = await discoverProjectLayout(fs, workspaceFolders, nedPathDirs);
-
-  const scan = async (dir: string): Promise<void> => {
-    let entries: string[];
-    try {
-      entries = await fs.readDirectory(dir);
-    } catch {
-      return;
-    }
-    for (const name of entries) {
-      if (name.startsWith('.') || name === 'node_modules' || name === 'out') continue;
-      const full = `${dir}/${name}`;
-      let stat;
+  await scanSourceRoots(fs, layout.roots.map((r) => r.dir), {
+    ned: async (p) => {
+      const pkg = packageForFile(layout.roots, p);
+      if (pkg && isExcludedPackage(layout.excludedPackages, pkg)) return;
       try {
-        stat = await fs.stat(full);
+        nedCache.addFile(pathToFileURL(p).toString(), parsers.parse('ned', await fs.readFile(p)), pkg);
       } catch {
-        continue;
+        /* unreadable file */
       }
-      if (stat.isDirectory) {
-        await scan(full);
-      } else if (name.endsWith('.ned')) {
-        const uri = pathToFileURL(full).toString();
-        const pkg = packageForFile(layout.roots, full);
-        if (pkg && isExcludedPackage(layout.excludedPackages, pkg)) continue;
-        try {
-          nedCache.addFile(uri, parsers.parse('ned', await fs.readFile(full)), pkg);
-        } catch {
-          /* unreadable file */
-        }
-      } else if (name.endsWith('.msg')) {
-        const uri = pathToFileURL(full).toString();
-        try {
-          msgCache.addFile(uri, parsers.parse('msg', await fs.readFile(full)));
-        } catch {
-          /* unreadable file */
-        }
-      } else if (name.endsWith('.ini')) {
-        const uri = pathToFileURL(full).toString();
-        try {
-          iniCache.addFile(uri, await fs.readFile(full));
-        } catch {
-          /* unreadable file */
-        }
-      } else if (isCppSourceFile(name)) {
-        const uri = pathToFileURL(full).toString();
-        try {
-          cppCache.addFile(uri, await fs.readFile(full));
-        } catch {
-          /* unreadable file */
-        }
+    },
+    msg: async (p) => {
+      try {
+        msgCache.addFile(pathToFileURL(p).toString(), parsers.parse('msg', await fs.readFile(p)));
+      } catch {
+        /* unreadable file */
       }
-    }
-  };
+    },
+    ini: async (p) => {
+      try {
+        iniCache.addFile(pathToFileURL(p).toString(), await fs.readFile(p));
+      } catch {
+        /* unreadable file */
+      }
+    },
+    cpp: async (p) => {
+      try {
+        cppCache.addFile(pathToFileURL(p).toString(), await fs.readFile(p));
+      } catch {
+        /* unreadable file */
+      }
+    },
+  });
 
-  for (const root of layout.roots) await scan(root.dir);
   const db = new SemanticDatabase(nedCache, msgCache, configRegistry, iniCache, cppCache);
-  // populate the cross-reference graph (msg first so NED @class resolves eagerly,
-  // cpp before ned so `ned-impl` resolves eagerly, ned before ini so `network=`
-  // resolves eagerly; drain covers any residual order)
-  for (const f of msgCache.allFiles()) db.onMsgFile(f.uri);
-  for (const f of cppCache.allFiles()) db.onCppFile(f.uri);
-  for (const f of nedCache.allFiles()) db.onNedFile(f.uri);
-  for (const { uri } of iniCache.allDocs()) db.onIniFile(uri);
-  return { nedCache, msgCache, configRegistry, iniCache, cppCache, db, layout };
+  populateDatabase(db, { nedCache, msgCache, iniCache, cppCache });
+  return { nedCache, msgCache, configRegistry, iniCache, cppCache, db };
 }
