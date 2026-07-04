@@ -12,6 +12,10 @@
     "./node": {
       "types": "./out/node/nodeFileSystem.d.ts",
       "default": "./out/node/nodeFileSystem.js"
+    },
+    "./protocol": {
+      "types": "./out/protocol.d.ts",
+      "default": "./out/protocol.js"
     }
   },
   "dependencies": {

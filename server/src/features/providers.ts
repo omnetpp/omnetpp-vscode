@@ -108,6 +108,9 @@ import {
   sectionName,
   filterSuppressedDiagnostics,
   formatSuppressDirective,
+  ImpactResult,
+  UsedByGroup,
+  UsedByItem,
 } from '@omnetpp/shared';
 import type { ParsedDocument } from '../documentModel';
 
@@ -711,17 +714,6 @@ export function computeCodeLenses(
 
 // ---- "Used By" reverse-dependency view ----------------------------------
 
-export interface UsedByItem {
-  label: string;
-  description?: string;
-  uri: string;
-  range: Range;
-}
-export interface UsedByGroup {
-  label: string;
-  items: UsedByItem[];
-}
-
 const EDGE_GROUP_LABEL: Record<EdgeKind, string> = {
   extends: 'Extended by',
   implements: 'Implemented by',
@@ -822,12 +814,6 @@ export function computeUsedBy(
   const sym = symbolAt(parsed, pos, ctx);
   if (!sym) return { groups: [] };
   return { target: refName(sym), groups: groupEdges(ctx.db.index.inboundOf(sym)) };
-}
-
-export interface ImpactResult {
-  /** The starting symbol's display name, or undefined if nothing resolved. */
-  target?: string;
-  items: { label: string; description: string; uri?: string; range?: Range }[];
 }
 
 /** Transitive impact (what depends on the symbol at a position), for the command/MCP. */

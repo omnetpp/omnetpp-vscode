@@ -1,66 +1,24 @@
 import * as vscode from 'vscode';
 import { LanguageClient } from 'vscode-languageclient/node';
-
-interface Pos {
-  line: number;
-  character: number;
-}
-interface Range {
-  start: Pos;
-  end: Pos;
-}
-interface HierarchyItem {
-  fqName: string;
-  name: string;
-  kind: string;
-  detail?: string;
-  uri: string;
-  range: Range;
-  selectionRange: Range;
-  hasSubtypes?: boolean;
-  children?: HierarchyItem[];
-  lazy?: boolean;
-  expanded?: boolean;
-  isSelected?: boolean;
-}
-
-interface ParamHierNode {
-  kind: 'module' | 'param';
-  label: string;
-  declUri?: string;
-  declRange?: Range;
-  inheritedFrom?: string;
-  typeFqName?: string;
-  isLike?: boolean;
-  isSelected?: boolean;
-  hasChildren?: boolean;
-  children?: ParamHierNode[];
-  path?: string;
-  paramType?: string;
-  paramValue?: string;
-  paramUnit?: string;
-  overridden?: boolean;
-  fromConfig?: boolean;
-  unset?: boolean;
-  valueOwner?: string;
-  declaredIn?: string;
-  subAssign?: Record<string, { value: string; uri: string; range: Range }>;
-}
-
-interface ModuleHierNode {
-  label: string;
-  name: string;
-  typeFqName?: string;
-  typeUri?: string;
-  typeRange?: Range;
-  declUri?: string;
-  declRange?: Range;
-  inheritedFrom?: string;
-  isLike?: boolean;
-  hasChildren: boolean;
-  isSelected?: boolean;
-  children?: ModuleHierNode[];
-}
+// Method names + DTO types come from the shared protocol contract. Import ONLY
+// from '@omnetpp/shared/protocol' here (never the barrel): shared's output is
+// CJS, which esbuild cannot tree-shake, so a barrel import would pull the whole
+// semantic core into the extension bundle.
+import {
+  OmnetppMethods,
+  type ActiveConfig,
+  type ConfigSummary as ConfigEntryDto,
+  type ImpactResult,
+  type IniFileConfigs,
+  type ModuleHierNode,
+  type NedHierarchyItem as HierarchyItem,
+  type ParamHierNode,
+  type Position as Pos,
+  type Range,
+  type UsedByGroup,
+  type UsedByItem,
+  type UsedByResult,
+} from '@omnetpp/shared/protocol';
 
 const OMNETPP_LANGS = new Set(['OMNeT++ NED', 'OMNeT++ MSG', 'OMNeT++ INI']);
 
@@ -89,11 +47,6 @@ async function showReferences(
   );
 }
 
-interface ImpactResult {
-  target?: string;
-  items: { label: string; description: string; uri?: string; range?: Range }[];
-}
-
 /** Show the transitive impact of the symbol at the cursor in a navigable QuickPick. */
 async function showImpact(client: LanguageClient): Promise<void> {
   const focus = activeContext();
@@ -103,7 +56,7 @@ async function showImpact(client: LanguageClient): Promise<void> {
   }
   let res: ImpactResult;
   try {
-    res = await client.sendRequest<ImpactResult>('omnetpp/impact', focus);
+    res = await client.sendRequest<ImpactResult>(OmnetppMethods.impact, focus);
   } catch {
     return;
   }
@@ -140,11 +93,6 @@ async function openLocation(uri: string, range?: Range): Promise<void> {
  * `reveal`, and reveals+selects the focused node. Subclasses implement how to
  * fetch roots/children and which node is the focus.
  */
-interface ActiveConfig {
-  uri: string;
-  name: string;
-}
-
 /** Where a focus-tree gets its roots: a pinned type or the editor selection. */
 type Focus = { fqName: string } | { uri: string; position: Pos };
 
@@ -303,12 +251,12 @@ class InheritanceProvider extends FocusTreeProvider<HierarchyItem> {
 
   protected fetchRoots(focus: { fqName: string } | { uri: string; position: Pos }): Promise<HierarchyItem[]> {
     return this.client
-      .sendRequest<HierarchyItem[]>('omnetpp/inheritanceRoots', focus)
+      .sendRequest<HierarchyItem[]>(OmnetppMethods.inheritanceRoots, focus)
       .then((r) => r ?? []);
   }
   protected async fetchChildren(el: HierarchyItem): Promise<HierarchyItem[]> {
     if (el.lazy) {
-      return (await this.client.sendRequest<HierarchyItem[]>('omnetpp/subtypes', { fqName: el.fqName })) ?? [];
+      return (await this.client.sendRequest<HierarchyItem[]>(OmnetppMethods.subtypes, { fqName: el.fqName })) ?? [];
     }
     return el.children ?? [];
   }
@@ -351,14 +299,14 @@ class ModuleHierarchyProvider extends FocusTreeProvider<ModuleHierNode> {
 
   protected fetchRoots(focus: { fqName: string } | { uri: string; position: Pos }): Promise<ModuleHierNode[]> {
     return this.client
-      .sendRequest<ModuleHierNode[]>('omnetpp/moduleHierarchy', focus)
+      .sendRequest<ModuleHierNode[]>(OmnetppMethods.moduleHierarchy, focus)
       .then((r) => r ?? []);
   }
   protected async fetchChildren(el: ModuleHierNode): Promise<ModuleHierNode[]> {
     if (el.children) return el.children; // prebuilt root level
     if (!el.typeFqName) return [];
     return (
-      (await this.client.sendRequest<ModuleHierNode[]>('omnetpp/moduleHierarchyChildren', {
+      (await this.client.sendRequest<ModuleHierNode[]>(OmnetppMethods.moduleHierarchyChildren, {
         fqName: el.typeFqName,
       })) ?? []
     );
@@ -446,7 +394,7 @@ class ModuleParamsProvider extends FocusTreeProvider<ParamHierNode> {
 
   protected fetchRoots(focus: Focus): Promise<ParamHierNode[]> {
     const req = this.activeConfig ? { ...focus, activeConfig: this.activeConfig } : focus;
-    return this.client.sendRequest<ParamHierNode[]>('omnetpp/paramHierarchy', req).then((r) => r ?? []);
+    return this.client.sendRequest<ParamHierNode[]>(OmnetppMethods.paramHierarchy, req).then((r) => r ?? []);
   }
   protected async fetchChildren(el: ParamHierNode): Promise<ParamHierNode[]> {
     if (el.kind === 'param') return [];
@@ -461,7 +409,7 @@ class ModuleParamsProvider extends FocusTreeProvider<ParamHierNode> {
     if (el.path !== undefined) req.path = el.path;
     if (this.activeConfig) req.activeConfig = this.activeConfig;
     if (el.subAssign) req.subAssign = el.subAssign; // apply this instance's NED assignments
-    return (await this.client.sendRequest<ParamHierNode[]>('omnetpp/paramHierarchyChildren', req)) ?? [];
+    return (await this.client.sendRequest<ParamHierNode[]>(OmnetppMethods.paramHierarchyChildren, req)) ?? [];
   }
   protected prebuiltChildren(el: ParamHierNode): ParamHierNode[] | undefined {
     return el.children;
@@ -524,20 +472,6 @@ function isActiveConfig(uri: string, name: string): boolean {
   return !!activeConfigState && activeConfigState.uri === uri && activeConfigState.name === name;
 }
 
-/** A config section as reported by the server's `omnetpp/listConfigurations`. */
-interface ConfigEntryDto {
-  name: string;
-  rawName: string;
-  range: Range;
-  abstract: boolean;
-  extends: string[];
-  description?: string;
-}
-interface IniFileConfigs {
-  uri: string;
-  configs: ConfigEntryDto[];
-}
-
 /** Tree nodes for the Configurations view: ini files at the top, configs beneath. */
 type ConfigTreeNode =
   | { kind: 'file'; uri: string; configs: ConfigEntryDto[] }
@@ -591,7 +525,7 @@ class ConfigurationsProvider implements vscode.TreeDataProvider<ConfigTreeNode> 
       await vscode.workspace.findFiles('**/*.ini', '**/{node_modules,out,.git}/**')
     ).map((u) => u.toString());
     this.files =
-      (await this.client.sendRequest<IniFileConfigs[]>('omnetpp/listConfigurations', { uris })) ?? [];
+      (await this.client.sendRequest<IniFileConfigs[]>(OmnetppMethods.listConfigurations, { uris })) ?? [];
     this.loaded = true;
     this.dirty = true;
   }
@@ -702,16 +636,6 @@ class ConfigurationsProvider implements vscode.TreeDataProvider<ConfigTreeNode> 
   }
 }
 
-interface UsedByItem {
-  label: string;
-  description?: string;
-  uri: string;
-  range: Range;
-}
-interface UsedByGroupData {
-  label: string;
-  items: UsedByItem[];
-}
 type UsedByNode =
   | { kind: 'group'; label: string; children: UsedByNode[] }
   | ({ kind: 'leaf' } & UsedByItem);
@@ -774,9 +698,9 @@ class UsedByProvider implements vscode.TreeDataProvider<UsedByNode> {
       return;
     }
     this.lastFocus = focus;
-    let groups: UsedByGroupData[] = [];
+    let groups: UsedByGroup[] = [];
     try {
-      const res = await this.client.sendRequest<{ target?: string; groups: UsedByGroupData[] }>('omnetpp/usedBy', focus);
+      const res = await this.client.sendRequest<UsedByResult>(OmnetppMethods.usedBy, focus);
       groups = res?.groups ?? [];
       this.target = res?.target;
     } catch {
@@ -920,7 +844,7 @@ export function registerViews(context: vscode.ExtensionContext, client: Language
     void context.workspaceState.update(ACTIVE_CONFIG_KEY, cfg);
     // let the server track the active config so INI param navigation (hover, refs,
     // codelens, go-to-def) can use its network as the fallback for [General] lines.
-    void client.sendNotification('omnetpp/activeConfigChanged', cfg ?? null);
+    void client.sendNotification(OmnetppMethods.activeConfigChanged, cfg ?? null);
     void vscode.commands.executeCommand('setContext', 'omnetpp.hasActiveConfig', !!cfg);
     syncConfigTitle();
     configurations.rerender(); // re-highlight the active node + open its path
@@ -930,7 +854,7 @@ export function registerViews(context: vscode.ExtensionContext, client: Language
       // editor is focused. followEditor() runs in the .then so it never fires
       // during the synchronous restore (followEditor is defined later).
       void client
-        .sendRequest<string | undefined>('omnetpp/configNetwork', { uri: cfg.uri, name: cfg.name })
+        .sendRequest<string | undefined>(OmnetppMethods.configNetwork, { uri: cfg.uri, name: cfg.name })
         .then((fq) => {
           if (activeConfigState?.uri !== cfg.uri || activeConfigState?.name !== cfg.name) return;
           activeConfigNetwork = fq;

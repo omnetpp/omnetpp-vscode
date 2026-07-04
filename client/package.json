@@ -5,6 +5,7 @@
   "main": "./out/extension.js",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "@omnetpp/shared": "0.1.0",
     "vscode-languageclient": "^9.0.1"
   }
 }

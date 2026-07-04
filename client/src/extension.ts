@@ -16,6 +16,7 @@ import {
   ServerOptions,
   TransportKind,
 } from 'vscode-languageclient/node';
+import { OmnetppMethods, type OmnetppSettings } from '@omnetpp/shared/protocol';
 import { registerViews } from './views';
 import { startMcpBridge } from './mcpBridge';
 
@@ -35,7 +36,7 @@ interface GitExtensionExports {
 }
 
 /** The `omnetpp.*` settings the server consumes; read on activation and on change. */
-function readSettings() {
+function readSettings(): OmnetppSettings {
   const config = workspace.getConfiguration('omnetpp');
   return {
     nedPath: config.get<string>('nedPath', ''),
@@ -117,7 +118,7 @@ function registerRevalidationTriggers(context: ExtensionContext): void {
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       timer = undefined;
-      void client?.sendNotification('omnetpp/revalidate');
+      void client?.sendNotification(OmnetppMethods.revalidate);
     }, 250);
   };
 

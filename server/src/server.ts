@@ -22,8 +22,21 @@ import {
 } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { promises as fsp } from 'node:fs';
-import { ParserService, parseIni, configSummaries, effectiveNetwork, OMNETPP_TOOLS, handleTool, workspaceSymbols, isCppSourceFile, BUILTIN_URI } from '@omnetpp/shared';
-import type { ToolContext, FileSystem } from '@omnetpp/shared';
+import { ParserService, parseIni, configSummaries, effectiveNetwork, OMNETPP_TOOLS, handleTool, workspaceSymbols, isCppSourceFile, BUILTIN_URI, OmnetppMethods } from '@omnetpp/shared';
+import type {
+  ToolContext,
+  FileSystem,
+  ActiveConfig,
+  CursorParams,
+  FqNameParams,
+  IniFileConfigs,
+  ListConfigurationsParams,
+  McpCallToolParams,
+  OmnetppSettings,
+  ParamHierarchyChildrenParams,
+  ParamHierarchyParams,
+  ViewFocusParams,
+} from '@omnetpp/shared';
 import { DocumentModelStore } from './documentModel';
 import type { ParsedDocument } from './documentModel';
 import { NodeFileSystem } from '@omnetpp/shared/node';
@@ -76,16 +89,7 @@ let diagnosticsScope: 'openFiles' | 'workspace' = 'workspace';
 let iniParamCodeLensEnabled = true;
 
 /** Read the `omnetpp.*` settings the server cares about from init/config options. */
-function applySettings(
-  opts:
-    | {
-        nedPath?: string;
-        installDir?: string;
-        diagnostics?: { scope?: string };
-        codeLens?: { iniParams?: boolean };
-      }
-    | undefined,
-): void {
+function applySettings(opts: OmnetppSettings | undefined): void {
   nedPathSetting = opts?.nedPath ?? '';
   // explicit setting wins; otherwise fall back to the env vars an OMNeT++ shell exports
   installDir =
@@ -466,7 +470,7 @@ async function runRevalidate(): Promise<void> {
 
 // The client pokes this on git HEAD changes and window-focus regain (see the
 // extension), where a background process may have rewritten files on disk.
-connection.onNotification('omnetpp/revalidate', () => scheduleRevalidate());
+connection.onNotification(OmnetppMethods.revalidate, () => scheduleRevalidate());
 
 connection.onDidChangeConfiguration((change) => {
   const before = `${nedPathSetting}\0${installDir}`;
@@ -655,26 +659,23 @@ connection.languages.typeHierarchy.onSubtypes((params) => {
 });
 
 // ---- custom requests for the auxiliary tree views ----
-interface ViewParams {
-  uri: string;
-  position?: LspPosition;
-}
+// (method names + param/result types live in @omnetpp/shared's protocol module)
 
-connection.onRequest('omnetpp/usedBy', (params: { uri: string; position: LspPosition }) => {
+connection.onRequest(OmnetppMethods.usedBy, (params: CursorParams) => {
   const parsed = store?.get(params.uri);
   const c = ctx();
   if (!parsed || !c) return { groups: [] };
   return computeUsedBy(parsed, params.position, c);
 });
 
-connection.onRequest('omnetpp/impact', (params: { uri: string; position: LspPosition }) => {
+connection.onRequest(OmnetppMethods.impact, (params: CursorParams) => {
   const parsed = store?.get(params.uri);
   const c = ctx();
   if (!parsed || !c) return { items: [] };
   return computeImpact(parsed, params.position, c);
 });
 
-connection.onRequest('omnetpp/inheritanceRoots', (params: ViewParams & { fqName?: string }) => {
+connection.onRequest(OmnetppMethods.inheritanceRoots, (params: ViewFocusParams) => {
   const c = ctx();
   if (!c) return [];
   if (params.fqName) return computeInheritanceSpineByFq(params.fqName, c);
@@ -683,7 +684,7 @@ connection.onRequest('omnetpp/inheritanceRoots', (params: ViewParams & { fqName?
   return computeInheritanceRoots(parsed, params.position, c);
 });
 
-connection.onRequest('omnetpp/moduleHierarchy', (params: ViewParams & { fqName?: string }) => {
+connection.onRequest(OmnetppMethods.moduleHierarchy, (params: ViewFocusParams) => {
   const c = ctx();
   if (!c) return [];
   if (params.fqName) return computeModuleHierarchyByFq(params.fqName, c);
@@ -692,16 +693,11 @@ connection.onRequest('omnetpp/moduleHierarchy', (params: ViewParams & { fqName?:
   return computeModuleHierarchy(parsed, params.position, c);
 });
 
-connection.onRequest('omnetpp/moduleHierarchyChildren', (params: { fqName: string }) => {
+connection.onRequest(OmnetppMethods.moduleHierarchyChildren, (params: FqNameParams) => {
   const c = ctx();
   if (!c) return [];
   return computeModuleHierarchyChildren(params.fqName, c);
 });
-
-interface ActiveConfig {
-  uri: string;
-  name: string;
-}
 
 /**
  * The globally-selected active configuration, pushed by the client. Its effective
@@ -725,7 +721,7 @@ async function refreshActiveNetwork(): Promise<void> {
   if (section) currentActiveNetwork = effectiveNetwork(ini, section);
 }
 
-connection.onNotification('omnetpp/activeConfigChanged', (cfg: ActiveConfig | null) => {
+connection.onNotification(OmnetppMethods.activeConfigChanged, (cfg: ActiveConfig | null) => {
   currentActiveConfig = cfg ?? undefined;
   void refreshActiveNetwork();
 });
@@ -739,8 +735,8 @@ async function activeConfigCtx(cfg: ActiveConfig | undefined, c: ReturnType<type
 }
 
 connection.onRequest(
-  'omnetpp/paramHierarchy',
-  async (params: ViewParams & { fqName?: string; activeConfig?: ActiveConfig }) => {
+  OmnetppMethods.paramHierarchy,
+  async (params: ParamHierarchyParams) => {
     const c = ctx();
     if (!c) return [];
     const cfg = await activeConfigCtx(params.activeConfig, c);
@@ -752,13 +748,8 @@ connection.onRequest(
 );
 
 connection.onRequest(
-  'omnetpp/paramHierarchyChildren',
-  async (params: {
-    fqName: string;
-    path?: string;
-    activeConfig?: ActiveConfig;
-    subAssign?: Record<string, ParamAssign>;
-  }) => {
+  OmnetppMethods.paramHierarchyChildren,
+  async (params: ParamHierarchyChildrenParams) => {
     const c = ctx();
     if (!c) return [];
     const cfg = await activeConfigCtx(params.activeConfig, c);
@@ -766,7 +757,7 @@ connection.onRequest(
   },
 );
 
-connection.onRequest('omnetpp/subtypes', (params: { fqName: string }) => {
+connection.onRequest(OmnetppMethods.subtypes, (params: FqNameParams) => {
   const c = ctx();
   if (!c) return [];
   return computeTypeHierarchySubtypes(params.fqName, c);
@@ -803,8 +794,8 @@ function looksLikeOmnetppIni(doc: IniDocument): boolean {
 }
 
 connection.onRequest(
-  'omnetpp/configNetwork',
-  async (params: { uri: string; name: string }): Promise<string | undefined> => {
+  OmnetppMethods.configNetwork,
+  async (params: ActiveConfig): Promise<string | undefined> => {
     const c = ctx();
     if (!c) return undefined;
     const ini = await iniDocFor(params.uri);
@@ -813,14 +804,14 @@ connection.onRequest(
 );
 
 connection.onRequest(
-  'omnetpp/listConfigurations',
-  async (params: { uris?: string[] }): Promise<{ uri: string; configs: ReturnType<typeof configSummaries> }[]> => {
+  OmnetppMethods.listConfigurations,
+  async (params: ListConfigurationsParams): Promise<IniFileConfigs[]> => {
     // The client supplies the candidate ini uris (found via workspace.findFiles);
     // union in any open ini buffers so freshly-created/unsaved files appear too.
     const uris = new Set<string>(params.uris ?? []);
     for (const doc of documents.all()) if (languageOfDoc(doc) === 'ini') uris.add(doc.uri);
 
-    const result: { uri: string; configs: ReturnType<typeof configSummaries> }[] = [];
+    const result: IniFileConfigs[] = [];
     for (const uri of uris) {
       const doc = await iniDocFor(uri);
       if (!doc || !looksLikeOmnetppIni(doc)) continue;
@@ -887,11 +878,11 @@ function mcpCtx(): ToolContext | undefined {
   };
 }
 
-connection.onRequest('omnetpp/mcp/listTools', () => OMNETPP_TOOLS);
+connection.onRequest(OmnetppMethods.mcpListTools, () => OMNETPP_TOOLS);
 
 connection.onRequest(
-  'omnetpp/mcp/callTool',
-  async (params: { name: string; arguments?: Record<string, unknown> }) => {
+  OmnetppMethods.mcpCallTool,
+  async (params: McpCallToolParams) => {
     const c = mcpCtx();
     if (!c) throw new Error('OMNeT++ project index not ready');
     return handleTool(params.name, params.arguments ?? {}, c);

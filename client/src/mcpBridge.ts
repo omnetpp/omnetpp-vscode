@@ -13,6 +13,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { LanguageClient } from 'vscode-languageclient/node';
+import { OmnetppMethods, type McpCallToolParams, type ToolDef } from '@omnetpp/shared/protocol';
 
 export interface McpBridge {
   /** The URL VS Code should POST to (Streamable HTTP). */
@@ -38,7 +39,7 @@ export async function startMcpBridge(getClient: () => LanguageClient | undefined
     server.setRequestHandler(ListToolsRequestSchema, async () => {
       const client = getClient();
       if (!client) return { tools: [] };
-      const tools = await client.sendRequest<unknown[]>('omnetpp/mcp/listTools');
+      const tools = await client.sendRequest<ToolDef[]>(OmnetppMethods.mcpListTools);
       return { tools };
     });
     server.setRequestHandler(CallToolRequestSchema, async (req) => {
@@ -47,10 +48,10 @@ export async function startMcpBridge(getClient: () => LanguageClient | undefined
         return { isError: true, content: [{ type: 'text', text: 'OMNeT++ language server is not running.' }] };
       }
       try {
-        const result = await client.sendRequest('omnetpp/mcp/callTool', {
+        const result = await client.sendRequest(OmnetppMethods.mcpCallTool, {
           name: req.params.name,
           arguments: req.params.arguments ?? {},
-        });
+        } satisfies McpCallToolParams);
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
       } catch (e) {
         return {
