@@ -81,3 +81,7 @@ export { iniHover, iniCompletion } from './ini/iniNavigation';
 export * from './ini/iniKeySegments';
 export * from './ini/moduleTree';
 export * from './ini/iniParamResolution';
+export * from './ini/iniParamChecks';
+export * from './ini/iniParamCodeActions';
+export * from './ini/iniParamNavigation';
+export * from './ini/iniParamCompletion';

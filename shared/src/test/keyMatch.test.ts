@@ -5,7 +5,7 @@ import { NedResourceCache } from '../ned/nedResourceCache';
 import { ConfigRegistry } from '../ini/configRegistry';
 import { parseIni } from '../ini/iniDocument';
 import { iniKeyToRegex, normIndices } from '../ini/keyMatch';
-import { iniParamDiagnostics } from '../ini/iniParamResolution';
+import { iniParamDiagnostics } from '../ini/iniParamChecks';
 
 // ---- iniKeyToRegex: OMNeT++ brace patterns ({set} and {num..num}) ----
 

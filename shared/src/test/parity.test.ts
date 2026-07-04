@@ -5,7 +5,8 @@ import { BUILTIN_NED_TEXT, BUILTIN_URI, NedResourceCache } from '../ned/nedResou
 import { ConfigRegistry } from '../ini/configRegistry';
 import { iniStructureDiagnostics } from '../ini/iniStructureChecks';
 import { iniVariableDiagnostics } from '../ini/iniVariables';
-import { iniParamDiagnostics, resolveNetworkType } from '../ini/iniParamResolution';
+import { iniParamDiagnostics } from '../ini/iniParamChecks';
+import { resolveNetworkType } from '../ini/iniParamResolution';
 import { nedRename } from '../ned/nedRename';
 import { nedReferences } from '../ned/nedNavigation';
 import { prepareTypeHierarchy, typeSupertypes, typeSubtypes, inheritanceSpineFor } from '../ned/nedHierarchy';

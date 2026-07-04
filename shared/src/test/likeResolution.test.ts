@@ -6,7 +6,8 @@ import { getParsers } from './helpers';
 import { BUILTIN_NED_TEXT, BUILTIN_URI, NedResourceCache } from '../ned/nedResourceCache';
 import { ConfigRegistry } from '../ini/configRegistry';
 import { parseIni } from '../ini/iniDocument';
-import { iniParamDiagnostics, reachableParamPaths } from '../ini/iniParamResolution';
+import { iniParamDiagnostics } from '../ini/iniParamChecks';
+import { reachableParamPaths } from '../ini/iniParamCompletion';
 import { nedSemanticDiagnostics } from '../ned/nedSemanticChecks';
 
 const reg = new ConfigRegistry(

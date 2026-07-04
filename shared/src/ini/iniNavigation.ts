@@ -4,7 +4,7 @@ import { ConfigRegistry } from './configRegistry';
 import { classifyKey } from './iniConfigChecks';
 import type { IniDocument, IniEntry, IniSection } from './iniDocument';
 import type { NedResourceCache } from '../ned/nedResourceCache';
-import { matchedParamType, reachableParamPaths } from './iniParamResolution';
+import { matchedParamType, reachableParamPaths } from './iniParamCompletion';
 import { PREDEFINED_VARS, findOccurrences, namedIterations, sectionChain } from './iniVariables';
 
 function inRange(r: Range, pos: Position): boolean {

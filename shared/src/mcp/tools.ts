@@ -31,14 +31,14 @@ import { iniLocalDiagnostics } from '../ini/iniLocalChecks';
 import { iniVariableDiagnostics } from '../ini/iniVariables';
 import { iniConfigDiagnostics } from '../ini/iniConfigChecks';
 import { iniStructureDiagnostics } from '../ini/iniStructureChecks';
+import { iniParamDiagnostics } from '../ini/iniParamChecks';
 import {
-  iniParamDiagnostics,
   effectiveNetwork,
   resolveNetworkType,
   configEntriesInScope,
   configResolver,
-  findParamAssignments,
 } from '../ini/iniParamResolution';
+import { findParamAssignments } from '../ini/iniParamNavigation';
 import { expandNetwork, paramSlots } from '../ini/moduleTree';
 import { parseIni, configSummaries } from '../ini/iniDocument';
 import { resolveNedClass, nedClassReferences } from '../xref/nedMsgLinks';

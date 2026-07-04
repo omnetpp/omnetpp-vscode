@@ -4,13 +4,10 @@ import { getParsers } from './helpers';
 import { BUILTIN_NED_TEXT, BUILTIN_URI, NedResourceCache } from '../ned/nedResourceCache';
 import { ConfigRegistry } from '../ini/configRegistry';
 import { parseIni } from '../ini/iniDocument';
-import {
-  iniParamDiagnostics,
-  iniKeyToRegex,
-  effectiveNetwork,
-  reachableParamPaths,
-  iniParamDefinition,
-} from '../ini/iniParamResolution';
+import { iniParamDiagnostics } from '../ini/iniParamChecks';
+import { iniKeyToRegex, effectiveNetwork } from '../ini/iniParamResolution';
+import { reachableParamPaths } from '../ini/iniParamCompletion';
+import { iniParamDefinition } from '../ini/iniParamNavigation';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 

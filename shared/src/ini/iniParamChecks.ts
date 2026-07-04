@@ -1,0 +1,185 @@
+import { Diagnostic, DiagnosticSeverity, Range } from '../model/location';
+import { NedResourceCache } from '../ned/nedResourceCache';
+import { ParamSlot, paramSlots } from './moduleTree';
+import { ConfigRegistry } from './configRegistry';
+import { classifyKey } from './iniConfigChecks';
+import type { IniDocument } from './iniDocument';
+import { parseExpression } from '../expr/exprParser';
+import { inferType, isTypeMismatch } from '../expr/infer';
+import { unitsCompatible } from '../expr/units';
+import { iniKeyToRegex, normIndices } from './keyMatch';
+import {
+  effectiveNetwork,
+  resolveNetworkType,
+  collectTypenameEntries,
+  buildTypenameBindings,
+  getExpansion,
+  effectiveResolver,
+  configEntriesInScope,
+} from './iniParamResolution';
+
+/**
+ * Full INI parameter resolution: matches every `**.param = value` assignment
+ * against the expanded module tree of the section's network, reporting keys that
+ * match no parameter and values whose type conflicts with the NED declaration.
+ */
+export function iniParamDiagnostics(
+  doc: IniDocument,
+  cache: NedResourceCache,
+  registry: ConfigRegistry,
+): Diagnostic[] {
+  const out: Diagnostic[] = [];
+
+  for (const section of doc.sections) {
+    const netName = effectiveNetwork(doc, section);
+    if (!netName) continue;
+    const net = resolveNetworkType(cache, netName, doc.uri);
+    if (!net) continue;
+
+    const typenameEntries = collectTypenameEntries(doc, section);
+    const bindings = buildTypenameBindings(typenameEntries);
+    const expansion = getExpansion(cache, net, bindings);
+    const params = paramSlots(expansion);
+
+    // An INI `**.x.typename = "Name"` that matched >1 implementers of the slot's
+    // interface is ambiguous (OMNeT++ rejects it) — flag the offending entry's value.
+    const flagged = new Set<string>();
+    for (const amb of expansion.ambiguities) {
+      const slotNorm = normIndices(amb.path);
+      for (const e of typenameEntries) {
+        const dot = e.key.lastIndexOf('.');
+        const prefix = dot < 0 ? '' : e.key.slice(0, dot);
+        if (e.value.replace(/^"|"$/g, '').trim() !== amb.typeName) continue;
+        if (!iniKeyToRegex(prefix).test(slotNorm)) continue;
+        const dedupe = `${e.valueRange.start.line}:${e.valueRange.start.character}:${amb.typeName}`;
+        if (flagged.has(dedupe)) continue;
+        flagged.add(dedupe);
+        out.push({
+          range: e.valueRange,
+          severity: DiagnosticSeverity.Warning,
+          message: `Ambiguous typename '${amb.typeName}': ${amb.candidates.length} types implement the interface (${amb.candidates.join(', ')}). Use a fully qualified name to disambiguate.`,
+          source: 'omnetpp',
+          code: 'ambiguous-typename',
+        });
+      }
+    }
+
+    // OMNeT++ resolves each parameter from the FIRST matching key in precedence
+    // order (own section file-order → extends → [General]); build that oracle once
+    // for the whole section (concrete vector indices only partially cover a slot).
+    const isEffective = effectiveResolver(configEntriesInScope(doc, section, registry));
+
+    for (const e of section.entries) {
+      if (classifyKey(registry, e.key).kind !== 'param-assignment') continue;
+      const re = iniKeyToRegex(e.key);
+      const matched = params.filter((p) => re.test(p.norm));
+
+      if (matched.length > 0) {
+        // Only the parameters this key actually WINS are effectively assigned;
+        // type-check just those (a broader key does not set a parameter an earlier,
+        // higher-precedence key already claimed).
+        const won = matched.filter((p) => isEffective(e, p.norm));
+        if (won.length > 0) {
+          typeCheck(e, won, out);
+        } else {
+          out.push({
+            range: e.keyRange,
+            severity: DiagnosticSeverity.Information,
+            message:
+              'This assignment has no effect — every parameter it matches is already set by an earlier, higher-precedence key',
+            source: 'omnetpp',
+            code: 'shadowed-assignment',
+          });
+        }
+        continue;
+      }
+
+      // No param matched. Deep-wildcard (`**`) keys can target modules created
+      // dynamically at runtime (builder networks) — never flag those.
+      if (e.key.includes('**')) continue;
+      // Otherwise only warn when we can pinpoint the target MODULE as fully-known
+      // but missing the leaf param (the param may live behind a `like` subtree).
+      const dot = e.key.lastIndexOf('.');
+      if (dot < 0) continue;
+      const leaf = e.key.slice(dot + 1);
+      if (/[*?\]]/.test(leaf)) continue; // wildcard leaf: too vague to flag
+      const prefixRe = iniKeyToRegex(e.key.slice(0, dot));
+      const candidateModules = expansion.modules.filter((m) => prefixRe.test(m.norm));
+      if (candidateModules.length > 0 && candidateModules.every((m) => !m.open) && !expansion.truncated) {
+        out.push({
+          range: e.keyRange,
+          severity: DiagnosticSeverity.Warning,
+          message: `No parameter '${leaf}' in the module(s) matched by '${e.key}' (network '${net.simpleName}')`,
+          source: 'omnetpp',
+          code: 'no-matching-param',
+        });
+      }
+    }
+  }
+  return out;
+}
+
+function typeCheck(
+  e: { value: string; valueRange: Range; key: string },
+  matched: ParamSlot[],
+  out: Diagnostic[],
+): void {
+  const err = (message: string, code: string) =>
+    out.push({ range: e.valueRange, severity: DiagnosticSeverity.Error, message, source: 'omnetpp', code });
+
+  // matched parameters must agree on units (purely a NED-side check)
+  const units = new Set(matched.map((m) => m.unit ?? ''));
+  if (units.size > 1) {
+    err(
+      `Entry matches parameters with different units: ${[...units].map((u) => u || 'none').join(', ')}`,
+      'param-unit-mismatch',
+    );
+    return;
+  }
+
+  const types = new Set(matched.map((m) => m.type).filter(Boolean));
+  if (types.size !== 1) return;
+  const declared = [...types][0]!;
+  const v = e.value;
+  if (!v || v.includes('$') || v.includes('{') || v === 'default' || v === 'ask') return;
+
+  const { type: vt, unit: valueUnit } = inferType(parseExpression(v));
+
+  // data-type mismatch
+  if (isTypeMismatch(declared, vt)) {
+    err(`Cannot assign ${vt} value to '${declared}' parameter (matched by '${e.key}')`, 'param-value-type');
+    return;
+  }
+
+  // unit compatibility: value's unit vs the (agreed) parameter @unit
+  const paramUnit = matched[0].unit;
+  if (valueUnit && paramUnit && !unitsCompatible(valueUnit, paramUnit)) {
+    err(`Wrong unit: '${paramUnit}' expected, got '${valueUnit}'`, 'param-unit-mismatch');
+    return;
+  }
+
+  // @enum validation (string params with an @enum property)
+  if (declared === 'string' && /^".*"$/.test(v)) {
+    const allowed = new Set<string>();
+    for (const m of matched) for (const x of m.enumValues ?? []) allowed.add(x);
+    if (allowed.size) {
+      const unquoted = v.slice(1, -1);
+      if (!allowed.has(unquoted)) {
+        err(`Invalid value ${v}, should be one of: ${[...allowed].map((x) => `"${x}"`).join(', ')}`, 'param-enum-value');
+        return;
+      }
+    }
+  }
+
+  // info: assignment is redundant (same as the NED default)
+  const defaults = new Set(matched.map((m) => m.default).filter((d): d is string => d !== undefined));
+  if (defaults.size === 1 && matched.every((m) => m.default !== undefined) && v.trim() === [...defaults][0].trim()) {
+    out.push({
+      range: e.valueRange,
+      severity: DiagnosticSeverity.Information,
+      message: 'Value is same as the NED default',
+      source: 'omnetpp',
+      code: 'redundant-assignment',
+    });
+  }
+}

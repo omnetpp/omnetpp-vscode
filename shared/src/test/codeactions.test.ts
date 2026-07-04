@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { getParsers } from './helpers';
 import { BUILTIN_NED_TEXT, BUILTIN_URI, NedResourceCache } from '../ned/nedResourceCache';
 import { organizeImports } from '../ned/nedOrganizeImports';
-import { addMissingKeys } from '../ini/iniParamResolution';
+import { addMissingKeys } from '../ini/iniParamCodeActions';
 import { parseIni } from '../ini/iniDocument';
 
 async function nedCache(files: Record<string, { text: string; pkg: string }>) {

@@ -1,25 +1,28 @@
-import { Diagnostic, DiagnosticSeverity, Location, Range } from '../model/location';
+import { Location } from '../model/location';
 import { NedResourceCache } from '../ned/nedResourceCache';
-import type { IniResourceCache } from './iniResourceCache';
 import { NedTypeInfo } from '../ned/nedTypeInfo';
 import { nameNode } from '../ned/nedAst';
 import { nodeRange } from '../parser/treeUtils';
-import { ExpandResult, ParamSlot, expandNetwork, paramSlots } from './moduleTree';
+import { ExpandResult, expandNetwork } from './moduleTree';
 import { ConfigRegistry } from './configRegistry';
 import { classifyKey } from './iniConfigChecks';
 import type { IniDocument, IniSection, IniEntry } from './iniDocument';
-import { parseExpression } from '../expr/exprParser';
-import { inferType, isTypeMismatch } from '../expr/infer';
-import { unitsCompatible } from '../expr/units';
 import { iniKeyToRegex, normIndices } from './keyMatch';
 
 export { iniKeyToRegex, normIndices };
 
-function findSection(doc: IniDocument, configName: string): IniSection | undefined {
+/**
+ * The base module for INI parameter resolution: the core resolve/expand
+ * primitives shared by {@link ./iniParamChecks}, {@link ./iniParamCodeActions},
+ * {@link ./iniParamNavigation} and {@link ./iniParamCompletion}. Those modules
+ * import from here; this module never imports from them (no cycles).
+ */
+
+export function findSection(doc: IniDocument, configName: string): IniSection | undefined {
   return doc.sections.find((s) => s.configName === configName);
 }
 
-function generalSection(doc: IniDocument): IniSection | undefined {
+export function generalSection(doc: IniDocument): IniSection | undefined {
   return doc.sections.find((s) => s.type === 'general');
 }
 
@@ -228,7 +231,12 @@ export function resolveNetworkType(
 // expansion cache, scoped per resource-cache instance and keyed by (generation, fqName)
 const expandCache = new WeakMap<NedResourceCache, Map<string, ExpandResult>>();
 
-function getExpansion(
+/**
+ * Expand `net`'s module tree (bound by `bindings`), memoized per resource-cache
+ * generation. Shared by every module that needs the expanded tree
+ * (diagnostics, code actions, navigation, completion).
+ */
+export function getExpansion(
   cache: NedResourceCache,
   net: NedTypeInfo,
   bindings?: TypenameBindings,
@@ -258,220 +266,6 @@ function getExpansion(
   return r;
 }
 
-/**
- * Full INI parameter resolution: matches every `**.param = value` assignment
- * against the expanded module tree of the section's network, reporting keys that
- * match no parameter and values whose type conflicts with the NED declaration.
- */
-export function iniParamDiagnostics(
-  doc: IniDocument,
-  cache: NedResourceCache,
-  registry: ConfigRegistry,
-): Diagnostic[] {
-  const out: Diagnostic[] = [];
-
-  for (const section of doc.sections) {
-    const netName = effectiveNetwork(doc, section);
-    if (!netName) continue;
-    const net = resolveNetworkType(cache, netName, doc.uri);
-    if (!net) continue;
-
-    const typenameEntries = collectTypenameEntries(doc, section);
-    const bindings = buildTypenameBindings(typenameEntries);
-    const expansion = getExpansion(cache, net, bindings);
-    const params = paramSlots(expansion);
-
-    // An INI `**.x.typename = "Name"` that matched >1 implementers of the slot's
-    // interface is ambiguous (OMNeT++ rejects it) — flag the offending entry's value.
-    const flagged = new Set<string>();
-    for (const amb of expansion.ambiguities) {
-      const slotNorm = normIndices(amb.path);
-      for (const e of typenameEntries) {
-        const dot = e.key.lastIndexOf('.');
-        const prefix = dot < 0 ? '' : e.key.slice(0, dot);
-        if (e.value.replace(/^"|"$/g, '').trim() !== amb.typeName) continue;
-        if (!iniKeyToRegex(prefix).test(slotNorm)) continue;
-        const dedupe = `${e.valueRange.start.line}:${e.valueRange.start.character}:${amb.typeName}`;
-        if (flagged.has(dedupe)) continue;
-        flagged.add(dedupe);
-        out.push({
-          range: e.valueRange,
-          severity: DiagnosticSeverity.Warning,
-          message: `Ambiguous typename '${amb.typeName}': ${amb.candidates.length} types implement the interface (${amb.candidates.join(', ')}). Use a fully qualified name to disambiguate.`,
-          source: 'omnetpp',
-          code: 'ambiguous-typename',
-        });
-      }
-    }
-
-    // OMNeT++ resolves each parameter from the FIRST matching key in precedence
-    // order (own section file-order → extends → [General]); build that oracle once
-    // for the whole section (concrete vector indices only partially cover a slot).
-    const isEffective = effectiveResolver(configEntriesInScope(doc, section, registry));
-
-    for (const e of section.entries) {
-      if (classifyKey(registry, e.key).kind !== 'param-assignment') continue;
-      const re = iniKeyToRegex(e.key);
-      const matched = params.filter((p) => re.test(p.norm));
-
-      if (matched.length > 0) {
-        // Only the parameters this key actually WINS are effectively assigned;
-        // type-check just those (a broader key does not set a parameter an earlier,
-        // higher-precedence key already claimed).
-        const won = matched.filter((p) => isEffective(e, p.norm));
-        if (won.length > 0) {
-          typeCheck(e, won, out);
-        } else {
-          out.push({
-            range: e.keyRange,
-            severity: DiagnosticSeverity.Information,
-            message:
-              'This assignment has no effect — every parameter it matches is already set by an earlier, higher-precedence key',
-            source: 'omnetpp',
-            code: 'shadowed-assignment',
-          });
-        }
-        continue;
-      }
-
-      // No param matched. Deep-wildcard (`**`) keys can target modules created
-      // dynamically at runtime (builder networks) — never flag those.
-      if (e.key.includes('**')) continue;
-      // Otherwise only warn when we can pinpoint the target MODULE as fully-known
-      // but missing the leaf param (the param may live behind a `like` subtree).
-      const dot = e.key.lastIndexOf('.');
-      if (dot < 0) continue;
-      const leaf = e.key.slice(dot + 1);
-      if (/[*?\]]/.test(leaf)) continue; // wildcard leaf: too vague to flag
-      const prefixRe = iniKeyToRegex(e.key.slice(0, dot));
-      const candidateModules = expansion.modules.filter((m) => prefixRe.test(m.norm));
-      if (candidateModules.length > 0 && candidateModules.every((m) => !m.open) && !expansion.truncated) {
-        out.push({
-          range: e.keyRange,
-          severity: DiagnosticSeverity.Warning,
-          message: `No parameter '${leaf}' in the module(s) matched by '${e.key}' (network '${net.simpleName}')`,
-          source: 'omnetpp',
-          code: 'no-matching-param',
-        });
-      }
-    }
-  }
-  return out;
-}
-
-function typeCheck(
-  e: { value: string; valueRange: import('../model/location').Range; key: string },
-  matched: ParamSlot[],
-  out: Diagnostic[],
-): void {
-  const err = (message: string, code: string) =>
-    out.push({ range: e.valueRange, severity: DiagnosticSeverity.Error, message, source: 'omnetpp', code });
-
-  // matched parameters must agree on units (purely a NED-side check)
-  const units = new Set(matched.map((m) => m.unit ?? ''));
-  if (units.size > 1) {
-    err(
-      `Entry matches parameters with different units: ${[...units].map((u) => u || 'none').join(', ')}`,
-      'param-unit-mismatch',
-    );
-    return;
-  }
-
-  const types = new Set(matched.map((m) => m.type).filter(Boolean));
-  if (types.size !== 1) return;
-  const declared = [...types][0]!;
-  const v = e.value;
-  if (!v || v.includes('$') || v.includes('{') || v === 'default' || v === 'ask') return;
-
-  const { type: vt, unit: valueUnit } = inferType(parseExpression(v));
-
-  // data-type mismatch
-  if (isTypeMismatch(declared, vt)) {
-    err(`Cannot assign ${vt} value to '${declared}' parameter (matched by '${e.key}')`, 'param-value-type');
-    return;
-  }
-
-  // unit compatibility: value's unit vs the (agreed) parameter @unit
-  const paramUnit = matched[0].unit;
-  if (valueUnit && paramUnit && !unitsCompatible(valueUnit, paramUnit)) {
-    err(`Wrong unit: '${paramUnit}' expected, got '${valueUnit}'`, 'param-unit-mismatch');
-    return;
-  }
-
-  // @enum validation (string params with an @enum property)
-  if (declared === 'string' && /^".*"$/.test(v)) {
-    const allowed = new Set<string>();
-    for (const m of matched) for (const x of m.enumValues ?? []) allowed.add(x);
-    if (allowed.size) {
-      const unquoted = v.slice(1, -1);
-      if (!allowed.has(unquoted)) {
-        err(`Invalid value ${v}, should be one of: ${[...allowed].map((x) => `"${x}"`).join(', ')}`, 'param-enum-value');
-        return;
-      }
-    }
-  }
-
-  // info: assignment is redundant (same as the NED default)
-  const defaults = new Set(matched.map((m) => m.default).filter((d): d is string => d !== undefined));
-  if (defaults.size === 1 && matched.every((m) => m.default !== undefined) && v.trim() === [...defaults][0].trim()) {
-    out.push({
-      range: e.valueRange,
-      severity: DiagnosticSeverity.Information,
-      message: 'Value is same as the NED default',
-      source: 'omnetpp',
-      code: 'redundant-assignment',
-    });
-  }
-}
-
-/** All param-assignment keys visible to a section (own + extends chain + [General]). */
-function scopeParamKeys(doc: IniDocument, section: IniSection): string[] {
-  const keys: string[] = [];
-  const seen = new Set<string>();
-  const visit = (sec: IniSection | undefined) => {
-    if (!sec || seen.has(sec.rawName)) return;
-    seen.add(sec.rawName);
-    for (const e of sec.entries) keys.push(e.key);
-    for (const base of sec.extends) visit(findSection(doc, base));
-  };
-  visit(section);
-  visit(generalSection(doc));
-  return keys;
-}
-
-/**
- * Edits that add ini entries for mandatory parameters (no NED default) of each
- * section's network that are not yet assigned. Returns [] if nothing is missing.
- */
-export function addMissingKeys(
-  doc: IniDocument,
-  cache: NedResourceCache,
-): import('../model/location').TextEdit[] {
-  const edits: import('../model/location').TextEdit[] = [];
-  for (const section of doc.sections) {
-    const netName = effectiveNetwork(doc, section);
-    if (!netName) continue;
-    const net = resolveNetworkType(cache, netName, doc.uri);
-    if (!net) continue;
-    const bindings = buildTypenameBindings(collectTypenameEntries(doc, section));
-    const slots = paramSlots(getExpansion(cache, net, bindings));
-    const keyRes = scopeParamKeys(doc, section).map((k) => iniKeyToRegex(k));
-    const missing: string[] = [];
-    const seen = new Set<string>();
-    for (const s of slots) {
-      if (s.hasDefault || s.open) continue;
-      if (keyRes.some((re) => re.test(s.norm))) continue;
-      if (seen.has(s.norm)) continue;
-      seen.add(s.norm);
-      missing.push(s.path);
-    }
-    if (!missing.length) continue;
-    const text = '\n' + missing.map((p) => `${p} = `).join('\n');
-    edits.push({ range: { start: section.range.end, end: section.range.end }, newText: text });
-  }
-  return edits;
-}
-
 /** A concrete module parameter that an ini key pattern matches. */
 export interface MatchedParamModule {
   /** full instance path, vector indices as [*], e.g. "Net.host[*].app". */
@@ -489,8 +283,9 @@ export interface MatchedParamModule {
  * Every concrete module parameter that an ini key pattern matches, in the context
  * of `section`'s effective network (falling back to `fallbackNetwork` — the active
  * config's network — when the section itself selects none, e.g. `[General]`).
- * Unlike {@link iniParamDefinition} this also handles wildcard leaves (e.g.
- * `**.host.*`) and reports the matched instance path + parameter type.
+ * Unlike `iniParamDefinition` (see `iniParamNavigation.ts`) this also handles
+ * wildcard leaves (e.g. `**.host.*`) and reports the matched instance path +
+ * parameter type.
  */
 export function matchedParamModules(
   doc: IniDocument,
@@ -535,8 +330,9 @@ export function matchedParamModules(
  * `entry` is the precedence winner — OMNeT++ assigns each parameter from the FIRST
  * matching key (own section, file order → `extends` → `[General]`), so a broader
  * key never claims a parameter an earlier, higher-precedence key already set. This
- * is the forward-direction counterpart of {@link findParamAssignments}'s `isWinner`
- * and reuses the same {@link configEntriesInScope} + {@link configResolver} oracle.
+ * is the forward-direction counterpart of `findParamAssignments`'s `isWinner`
+ * (see `iniParamNavigation.ts`) and reuses the same {@link configEntriesInScope} +
+ * {@link configResolver} oracle.
  *
  * Pass a precomputed `isEffective` (from `effectiveResolver(configEntriesInScope(...))`)
  * to amortize the resolver build across every entry of a section.
@@ -554,240 +350,4 @@ export function effectiveParamModules(
   return matchedParamModules(doc, cache, section, entry.key, fallbackNetwork).filter((m) =>
     eff(entry, normIndices(`${m.path}.${m.paramName}`)),
   );
-}
-
-/** The NED type-declaration location for a module (its name identifier). */
-function moduleDeclLocation(typeInfo: NedTypeInfo): Location {
-  const nn = nameNode(typeInfo.node) ?? typeInfo.node;
-  return { uri: typeInfo.file.uri, range: nodeRange(nn) };
-}
-
-/**
- * Declaration location(s) of the NED type named by a `*.typename = "T"` value.
- * The value is a string but denotes a type, resolved by OMNeT++'s `like` rules:
- * a qualified name maps to that exact type; an unqualified (simple) name maps to
- * every module type sharing it (callers may present a picker). Inner types and
- * non-module types (interfaces, channels) are excluded.
- */
-export function typenameTypeTargets(cache: NedResourceCache, value: string): Location[] {
-  const name = value.replace(/^"|"$/g, '').trim();
-  if (!name || name.includes('$') || name.includes('{')) return [];
-  const seen = new Set<string>();
-  const out: Location[] = [];
-  const push = (t: NedTypeInfo | undefined) => {
-    if (!t || t.isInnerType || !t.isModuleType() || seen.has(t.fqName)) return;
-    seen.add(t.fqName);
-    out.push(moduleDeclLocation(t));
-  };
-  if (name.includes('.')) push(cache.getType(name));
-  else for (const t of cache.allTypes()) if (t.simpleName === name) push(t);
-  return out;
-}
-
-/**
- * Modules of the section's network whose instance path matches `pathPattern` (an
- * ini-style dotted path, possibly with wildcards), each with its concrete NED
- * type and that type's declaration location. Backs both "jump to the module
- * behind an ini key" and per-segment navigation from a dotted key.
- */
-export function modulesAtPath(
-  doc: IniDocument,
-  cache: NedResourceCache,
-  section: IniSection,
-  pathPattern: string,
-  fallbackNetwork?: string,
-): { path: string; typeFqName: string; decl: Location }[] {
-  const netName = effectiveNetwork(doc, section) ?? fallbackNetwork;
-  if (!netName) return [];
-  const net = resolveNetworkType(cache, netName, doc.uri);
-  if (!net) return [];
-  const re = iniKeyToRegex(pathPattern);
-  const out: { path: string; typeFqName: string; decl: Location }[] = [];
-  const bindings = buildTypenameBindings(collectTypenameEntries(doc, section));
-  for (const m of getExpansion(cache, net, bindings).modules) {
-    if (!m.typeInfo || !re.test(m.norm)) continue;
-    out.push({ path: m.path, typeFqName: m.typeInfo.fqName, decl: moduleDeclLocation(m.typeInfo) });
-  }
-  return out;
-}
-
-/**
- * Modules whose instance path matches the module-prefix of an ini key (the part
- * before the leaf parameter name). Used as a navigation fallback when the leaf
- * matches no actual parameter — jump to the module rather than nowhere.
- */
-export function matchedModules(
-  doc: IniDocument,
-  cache: NedResourceCache,
-  section: IniSection,
-  key: string,
-  fallbackNetwork?: string,
-): { path: string; typeFqName: string; decl: Location }[] {
-  const dot = key.lastIndexOf('.');
-  if (dot < 0) return []; // no module prefix to match
-  return modulesAtPath(doc, cache, section, key.slice(0, dot), fallbackNetwork);
-}
-
-/**
- * Go-to-definition target(s) for an ini parameter key: the NED param
- * declaration(s). When the leaf matches no actual parameter, falls back to the
- * first matching module's declaration so navigation still lands somewhere useful.
- */
-export function iniParamDefinition(
-  doc: IniDocument,
-  cache: NedResourceCache,
-  section: IniSection,
-  key: string,
-  fallbackNetwork?: string,
-): Location[] {
-  const out: Location[] = [];
-  const seen = new Set<string>();
-  for (const m of matchedParamModules(doc, cache, section, key, fallbackNetwork)) {
-    if (!m.decl) continue;
-    const locKey = `${m.decl.uri}:${m.decl.range.start.line}:${m.decl.range.start.character}`;
-    if (seen.has(locKey)) continue;
-    seen.add(locKey);
-    out.push(m.decl);
-  }
-  if (out.length) return out;
-  // No parameter matched — navigate to the first matching module instead.
-  const mods = matchedModules(doc, cache, section, key, fallbackNetwork);
-  return mods.length ? [mods[0].decl] : [];
-}
-
-/** One INI assignment that targets a given NED parameter declaration. */
-export interface ParamAssignment {
-  uri: string;
-  /** config name, or 'General'. */
-  config: string;
-  key: string;
-  value: string;
-  keyRange: Range;
-  /** the normalized instance path the key matched. */
-  matchedPath: string;
-  /** true if this entry wins precedence for `matchedPath` in its config. */
-  isWinner: boolean;
-}
-
-/**
- * Reverse of {@link iniParamDefinition}: every INI key across the workspace that
- * assigns the NED parameter declared by `(typeFqName, param)`. For each config,
- * the parameter's declaring type is expanded to its instance paths, then every
- * in-scope entry whose pattern matches one of those paths is reported (with the
- * precedence winner flagged). Optionally restricted to a single config.
- */
-/**
- * Whether a config could possibly instantiate a type in `relevant` (a set of
- * container simple names), given its effective network and `typename` bindings —
- * a cheap, network-expansion-free over-approximation used to prune the scan.
- */
-function sectionMaybeRelevant(netName: string, tnEntries: IniEntry[], relevant: Set<string>): boolean {
-  if (relevant.has(lastSegment(unquote(netName)))) return true;
-  for (const e of tnEntries) {
-    const v = e.value;
-    if (v.includes('$') || v.includes('{')) return true; // variable typename: cannot rule out
-    if (relevant.has(lastSegment(unquote(v)))) return true;
-  }
-  return false;
-}
-
-function lastSegment(s: string): string {
-  const dot = s.lastIndexOf('.');
-  const col = s.lastIndexOf('::');
-  const cut = Math.max(dot, col < 0 ? -1 : col + 1);
-  return cut >= 0 ? s.slice(cut + 1) : s;
-}
-function unquote(s: string): string {
-  return s.replace(/^"|"$/g, '');
-}
-
-export function findParamAssignments(
-  iniCache: IniResourceCache,
-  cache: NedResourceCache,
-  registry: ConfigRegistry,
-  target: { typeFqName: string; param: string },
-  configFilter?: string,
-  /** Container simple names (from paramContainerSimpleNames); when given, configs
-   *  that cannot reach the type are skipped without expanding their network. */
-  relevant?: Set<string>,
-): ParamAssignment[] {
-  const out: ParamAssignment[] = [];
-  const seen = new Set<string>();
-  for (const { uri, doc } of iniCache.allDocs()) {
-    for (const section of doc.sections) {
-      const cfgName = section.configName ?? 'General';
-      if (configFilter && cfgName !== configFilter) continue;
-      const netName = effectiveNetwork(doc, section);
-      if (!netName) continue;
-      const tnEntries = collectTypenameEntries(doc, section);
-      if (relevant && !sectionMaybeRelevant(netName, tnEntries, relevant)) continue;
-      const net = resolveNetworkType(cache, netName, doc.uri);
-      if (!net) continue;
-      const bindings = buildTypenameBindings(tnEntries);
-      const expansion = getExpansion(cache, net, bindings);
-
-      // instance paths where (typeFqName, param) is declared
-      const targetNorms = new Set<string>();
-      for (const m of expansion.modules) {
-        if (!m.params.has(target.param)) continue;
-        const owner = m.paramOwner.get(target.param) ?? m.typeInfo;
-        const decl = owner?.paramDecl(target.param);
-        if (decl && decl.owner.fqName === target.typeFqName) {
-          targetNorms.add(`${m.norm}.${target.param}`);
-        }
-      }
-      if (!targetNorms.size) continue;
-
-      const entries = configEntriesInScope(doc, section, registry);
-      const winner = configResolver(entries);
-      for (const e of entries) {
-        const re = iniKeyToRegex(e.key);
-        for (const tn of targetNorms) {
-          if (!re.test(tn)) continue;
-          const dkey = `${uri}|${cfgName}|${e.keyRange.start.line}|${tn}`;
-          if (seen.has(dkey)) continue;
-          seen.add(dkey);
-          out.push({
-            uri,
-            config: cfgName,
-            key: e.key,
-            value: e.value,
-            keyRange: e.keyRange,
-            matchedPath: tn,
-            isWinner: winner(tn) === e,
-          });
-        }
-      }
-    }
-  }
-  return out;
-}
-
-/** The NED type of the parameter(s) a key matches, if unambiguous. */
-export function matchedParamType(
-  doc: IniDocument,
-  cache: NedResourceCache,
-  section: IniSection,
-  key: string,
-): string | undefined {
-  const re = iniKeyToRegex(key);
-  const types = new Set<string>();
-  for (const p of reachableParamPaths(doc, cache, section)) {
-    if (p.type && re.test(normIndices(p.path))) types.add(p.type);
-  }
-  return types.size === 1 ? [...types][0] : undefined;
-}
-
-/** Reachable parameter paths for completion in a section's network context. */
-export function reachableParamPaths(
-  doc: IniDocument,
-  cache: NedResourceCache,
-  section: IniSection,
-): { path: string; type?: string }[] {
-  const netName = effectiveNetwork(doc, section);
-  if (!netName) return [];
-  const net = resolveNetworkType(cache, netName, doc.uri);
-  if (!net) return [];
-  const bindings = buildTypenameBindings(collectTypenameEntries(doc, section));
-  return paramSlots(getExpansion(cache, net, bindings)).map((p) => ({ path: p.path, type: p.type }));
 }
