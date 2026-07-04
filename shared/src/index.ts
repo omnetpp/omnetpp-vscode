@@ -1,3 +1,10 @@
+// This barrel IS the public API of @omnetpp/shared. Named exports = curated
+// public surface (exactly the names consumers use — functions, plus the
+// result/param types their signatures mention); `export *` is reserved for
+// modules that are public in their entirety. Internals not exported here are
+// not API: server/, mcp/, and client/ (via '@omnetpp/shared/protocol') must
+// not need anything this file doesn't surface.
+
 // NOTE: shared/src/node (the Node-backed FileSystem) is deliberately absent
 // here — the core barrel stays Node-free. It ships via '@omnetpp/shared/node'.
 export * from './fs/fileSystem';
@@ -5,83 +12,153 @@ export * from './fs/fileSystem';
 // '@omnetpp/shared/protocol' so the client can import it without the core).
 export * from './protocol';
 export * from './model/location';
-export * from './model/resourceCacheBase';
 export * from './model/symbols';
 export * from './model/completion';
 export * from './parser/parserService';
-export * from './parser/treeUtils';
-export * from './features/syntaxDiagnostics';
-export * from './diagnostics/suppress';
-export * from './features/folding';
-export * from './features/format';
-export * from './features/workspaceSymbols';
+export { nodeRange } from './parser/treeUtils';
+export { syntaxDiagnostics } from './features/syntaxDiagnostics';
+export { filterSuppressedDiagnostics, formatSuppressDirective } from './diagnostics/suppress';
+export { type FoldingRange, treeFoldingRanges, iniFoldingRanges } from './features/folding';
+export { type FormatOptions, formatDocumentEdits } from './features/format';
+export { type WorkspaceSymbolInfo, workspaceSymbols } from './features/workspaceSymbols';
 
 // NED
-export * from './ned/nedAst';
-export * from './ned/nedSymbols';
-export * from './ned/nedLocalChecks';
-export * from './ned/nedResourceCache';
-export * from './ned/nedTypeInfo';
-export * from './ned/nedSemanticChecks';
-export * from './ned/nedNavigation';
-export * from './ned/nedCompletion';
-export * from './ned/nedRename';
-export * from './ned/nedHierarchy';
-export * from './ned/nedModuleHierarchy';
-export * from './ned/nedParamHierarchy';
-export * from './ned/nedOrganizeImports';
-
-export * from './ned/nedValueChecks';
-
-// Expressions
-export * from './expr/exprParser';
-export * from './expr/infer';
+export { nameNode, fileNamespace } from './ned/nedAst';
+export { nedDocumentSymbols } from './ned/nedSymbols';
+export { nedLocalDiagnostics } from './ned/nedLocalChecks';
+export { BUILTIN_URI, BUILTIN_NED_TEXT, type NedFileInfo, NedResourceCache } from './ned/nedResourceCache';
+export { NedTypeInfo } from './ned/nedTypeInfo';
+export { nedSemanticDiagnostics } from './ned/nedSemanticChecks';
+export {
+  referenceAt,
+  type MemberKey,
+  memberKeyFor,
+  memberRefAt,
+  nedDefinition,
+  type HoverResult,
+  nedDocRefResolver,
+  nedHover,
+  nedReferences,
+} from './ned/nedNavigation';
+export { nedCompletion } from './ned/nedCompletion';
+export { nedPrepareRename, nedPrepareMemberRename, nedRename } from './ned/nedRename';
+export {
+  type NedHierarchyItem,
+  prepareTypeHierarchy,
+  typeSupertypes,
+  typeSubtypes,
+  inheritanceSpineFor,
+} from './ned/nedHierarchy';
+export { type ModuleHierNode, moduleHierarchyRoot, moduleHierarchyChildren } from './ned/nedModuleHierarchy';
+export {
+  type ParamHierNode,
+  type ParamAssign,
+  type ParamResolve,
+  type ParamViewOpts,
+  paramHierarchyRoot,
+  paramHierarchyChildren,
+} from './ned/nedParamHierarchy';
+export { organizeImports } from './ned/nedOrganizeImports';
+export { nedValueDiagnostics } from './ned/nedValueChecks';
 
 // Project model + disk indexing building blocks
-export * from './project/projectModel';
-export * from './project/diskIndexer';
+export {
+  type ProjectLayout,
+  type NedSourceRoot,
+  discoverProjectLayout,
+  rootForPath,
+  packageForFile,
+  isExcludedPackage,
+} from './project/projectModel';
+export {
+  type DiskFileMeta,
+  type DiskFileSink,
+  loadBuiltins,
+  scanSourceRoots,
+  collectIndexableFiles,
+  populateDatabase,
+} from './project/diskIndexer';
 
 // Cross-reference graph + unified query surface
-export * from './xref/symbolId';
-export * from './xref/xrefModel';
-export * from './xref/xrefIndex';
-export * from './xref/semanticDatabase';
-export * from './xref/xrefDiagnostics';
-export * from './xref/impact';
-export * from './xref/xrefGrouping';
-export * from './xref/paramContainers';
-export * from './xref/nedMsgLinks';
-export * from './xref/cppExtract';
+export {
+  type SymbolId,
+  type ParsedSymbol,
+  nedTypeSym,
+  msgTypeSym,
+  nedMemberSym,
+  iniSectionSym,
+  cppSym,
+  parseSymbolId,
+} from './xref/symbolId';
+export { type XrefEdge, type EdgeKind } from './xref/xrefModel';
+export { XrefIndex } from './xref/xrefIndex';
+export { SemanticDatabase } from './xref/semanticDatabase';
+export {
+  nedUnusedNetworkDiagnostics,
+  nedMissingImplClassDiagnostics,
+  suggestSimilar,
+} from './xref/xrefDiagnostics';
+export { type ImpactNode, impactOf } from './xref/impact';
+export { type SymbolLookupDoc, symbolAtPosition, groupEdges, refDisplayName, edgeKindLabel } from './xref/xrefGrouping';
+export { paramContainerSimpleNames } from './xref/paramContainers';
+export {
+  type NedClassRefAt,
+  nedClassRefAt,
+  nedClassDefinition,
+  resolveNedClass,
+  findMsgUsagesInNed,
+} from './xref/nedMsgLinks';
 
 // C++ scanner + cache (lightweight cross-referencing of .cc/.h)
-export * from './cpp/cppScanner';
-export * from './cpp/cppResourceCache';
+export { isCppSourceFile } from './cpp/cppScanner';
+export { CppResourceCache } from './cpp/cppResourceCache';
 
 // MCP tool layer (host-agnostic; no MCP SDK dependency)
-export * from './mcp/tools';
+export { type ToolContext, lintFile, OMNETPP_TOOLS, handleTool } from './mcp/tools';
 
 // MSG
-export * from './msg/msgAst';
+export { msgNameNode, isMsgTypeHeaderLine } from './msg/msgAst';
 export { msgDocumentSymbols } from './msg/msgSymbols';
-export * from './msg/msgResourceCache';
-export * from './msg/msgTypeInfo';
+export { MsgResourceCache } from './msg/msgResourceCache';
+export { MsgTypeInfo } from './msg/msgTypeInfo';
 export { msgDefinition, msgHover, msgCompletion, msgTypeAt, msgRenameRangeAt, msgDocRefResolver } from './msg/msgNavigation';
-export * from './msg/msgChecks';
+export { msgLocalDiagnostics, msgSemanticDiagnostics } from './msg/msgChecks';
 
 // INI
-export * from './ini/iniDocument';
-export * from './ini/iniResourceCache';
-export * from './ini/iniSymbols';
-export * from './ini/iniLocalChecks';
-export * from './ini/configRegistry';
-export * from './ini/iniConfigChecks';
-export * from './ini/iniStructureChecks';
-export * from './ini/iniVariables';
+export {
+  type IniEntry,
+  type IniSection,
+  type IniDocument,
+  type ConfigSummary,
+  parseIni,
+  configSummaries,
+} from './ini/iniDocument';
+export { IniResourceCache } from './ini/iniResourceCache';
+export { iniDocumentSymbols } from './ini/iniSymbols';
+export { iniLocalDiagnostics } from './ini/iniLocalChecks';
+export { type ConfigOption, ConfigRegistry } from './ini/configRegistry';
+export { type KeyClass, classifyKey, iniConfigDiagnostics } from './ini/iniConfigChecks';
+export { sectionName, iniStructureDiagnostics } from './ini/iniStructureChecks';
+export { iniVariableDiagnostics } from './ini/iniVariables';
 export { iniHover, iniCompletion } from './ini/iniNavigation';
-export * from './ini/iniKeySegments';
-export * from './ini/moduleTree';
-export * from './ini/iniParamResolution';
-export * from './ini/iniParamChecks';
-export * from './ini/iniParamCodeActions';
-export * from './ini/iniParamNavigation';
-export * from './ini/iniParamCompletion';
+export { iniEntryAt, leafSegment, keySegmentPrefixAt, isWildcardSegment, extendsLabelAt } from './ini/iniKeySegments';
+export {
+  effectiveNetwork,
+  configEntriesInScope,
+  effectiveResolver,
+  resolveNetworkType,
+  type MatchedParamModule,
+  effectiveParamModules,
+  configResolver,
+  matchedParamModules,
+} from './ini/iniParamResolution';
+export { iniParamDiagnostics } from './ini/iniParamChecks';
+export { addMissingKeys } from './ini/iniParamCodeActions';
+export {
+  typenameTypeTargets,
+  modulesAtPath,
+  matchedModules,
+  iniParamDefinition,
+  type ParamAssignment,
+  findParamAssignments,
+} from './ini/iniParamNavigation';
