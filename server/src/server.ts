@@ -26,7 +26,7 @@ import { ParserService, parseIni, configSummaries, effectiveNetwork, OMNETPP_TOO
 import type { ToolContext, FileSystem } from '@omnetpp/shared';
 import { DocumentModelStore } from './documentModel';
 import type { ParsedDocument } from './documentModel';
-import { NodeFileSystem } from './nodeFileSystem';
+import { NodeFileSystem } from '@omnetpp/shared/node';
 import { ProjectIndex } from './projectIndex';
 import {
   computeDiagnostics,

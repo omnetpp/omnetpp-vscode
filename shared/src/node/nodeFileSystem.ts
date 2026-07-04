@@ -1,7 +1,10 @@
+// The one Node-backed FileSystem implementation, shared by every Node host
+// (the LSP server, the standalone MCP server, the CLI linter). Deliberately
+// NOT exported from the core barrel (shared/src/index.ts) so the semantic core
+// stays free of Node imports; consumers import '@omnetpp/shared/node'.
 import { promises as fs } from 'node:fs';
-import type { FileStat, FileSystem } from '@omnetpp/shared';
+import type { FileStat, FileSystem } from '../fs/fileSystem';
 
-/** Node-backed FileSystem for the standalone MCP server. */
 export class NodeFileSystem implements FileSystem {
   async readFile(path: string): Promise<string> {
     return fs.readFile(path, 'utf8');
@@ -11,7 +14,7 @@ export class NodeFileSystem implements FileSystem {
   }
   async stat(path: string): Promise<FileStat> {
     const s = await fs.stat(path);
-    return { isFile: s.isFile(), isDirectory: s.isDirectory() };
+    return { isFile: s.isFile(), isDirectory: s.isDirectory(), mtimeMs: s.mtimeMs, size: s.size };
   }
   async exists(path: string): Promise<boolean> {
     try {

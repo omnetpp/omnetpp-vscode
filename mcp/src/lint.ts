@@ -18,7 +18,7 @@ import {
   ToolContext,
   lintFile,
 } from '@omnetpp/shared';
-import { NodeFileSystem } from './nodeFileSystem.js';
+import { NodeFileSystem } from '@omnetpp/shared/node';
 import { buildDiskIndex } from './indexBuilder.js';
 
 interface Options {

@@ -1,3 +1,5 @@
+// NOTE: shared/src/node (the Node-backed FileSystem) is deliberately absent
+// here — the core barrel stays Node-free. It ships via '@omnetpp/shared/node'.
 export * from './fs/fileSystem';
 export * from './model/location';
 export * from './model/symbols';

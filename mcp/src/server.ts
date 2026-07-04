@@ -13,7 +13,7 @@ import { ParserService, OMNETPP_TOOLS, handleTool, ToolContext } from '@omnetpp/
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { NodeFileSystem } from './nodeFileSystem.js';
+import { NodeFileSystem } from '@omnetpp/shared/node';
 import { buildDiskIndex } from './indexBuilder.js';
 
 /** Log to stderr only — stdout is reserved for the JSON-RPC stdio transport. */

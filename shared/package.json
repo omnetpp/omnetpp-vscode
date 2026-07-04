@@ -4,6 +4,16 @@
   "description": "Pure-TypeScript semantic core for OMNeT++ NED/MSG/INI (parser wrappers, type model, analyzers)",
   "main": "./out/index.js",
   "types": "./out/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./out/index.d.ts",
+      "default": "./out/index.js"
+    },
+    "./node": {
+      "types": "./out/node/nodeFileSystem.d.ts",
+      "default": "./out/node/nodeFileSystem.js"
+    }
+  },
   "dependencies": {
     "web-tree-sitter": "0.25.10"
   }
