@@ -455,11 +455,11 @@ function computeHoverRaw(
           const line = cpp.decl.range.start.line + 1;
           md =
             `\`\`\`cpp\nclass ${cpp.qualifiedName}\n\`\`\`\n\n` +
-            `Registered with \`Define_Module\` in [${where}](${cpp.decl.uri}) (line ${line})`;
+            `Registered with \`${cpp.macro}\` in [${where}](${cpp.decl.uri}) (line ${line})`;
         } else {
           md =
-            `C++ class \`${hit.ref.className}\` — no \`Define_Module\`/\`Define_Channel\` ` +
-            `registration found in the indexed C++ sources.`;
+            `C++ class \`${hit.ref.className}\` — no matching class registration ` +
+            `(\`Define_Module\`/\`Define_Channel\`/\`Register_Class\`, …) found in the indexed C++ sources.`;
         }
       }
       return { markdown: md, range: hit.range };

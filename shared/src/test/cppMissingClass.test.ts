@@ -64,7 +64,23 @@ test('warns on the @class value when it names an unregistered class', async () =
   assert.equal(d.length, 1);
   // anchored on the @class(Bar) value on line 3
   assert.equal(d[0].range.start.line, 3);
-  assert.ok(/Define_Module\('Bar'\)/.test(d[0].message));
+  assert.ok(/C\+\+ class 'Bar'/.test(d[0].message));
+});
+
+test('no warning when @class points to a Register_Class / Register_Abstract_Class', async () => {
+  const ctx = await build();
+  ctx.addCpp(
+    'file:///reg.cc',
+    'namespace demo { Register_Class(Concrete); Register_Abstract_Class(AbstractBase); }',
+  );
+  ctx.addNed(
+    'file:///Foo.ned',
+    `${HDR}simple Uses { @class(Concrete); }\nsimple UsesAbstract { @class(AbstractBase); }`,
+  );
+  const d = nedMissingImplClassDiagnostics(ctx.db, ctx.nedCache, 'file:///Foo.ned');
+  assert.equal(d.length, 0);
+  assert.equal(ctx.db.findImplClass('demo.Uses')?.qualifiedName, 'demo::Concrete');
+  assert.equal(ctx.db.findImplClass('demo.UsesAbstract')?.qualifiedName, 'demo::AbstractBase');
 });
 
 test('no warning when a supertype provides the C++ class', async () => {

@@ -24,11 +24,15 @@ import type { Location, Position } from '../model/location';
 export type CppMemberKind = 'param' | 'gate' | 'submodule';
 
 /** A `Define_Module`/`Define_Channel`/`Define_Network` class registration. */
+export type CppClassKind = 'module' | 'channel' | 'class';
+
 export interface CppClassDecl {
   /** Namespace-qualified class name, e.g. `inet::UdpBasicApp` (or `Foo`). */
   qualifiedName: string;
   simpleName: string;
-  kind: 'module' | 'channel';
+  kind: CppClassKind;
+  /** The registration macro used, e.g. `Define_Module` or `Register_Class`. */
+  macro: string;
   /** Location of the class-name token inside the macro call. */
   decl: Location;
 }
@@ -62,10 +66,16 @@ export function isCppSourceFile(name: string): boolean {
   return true;
 }
 
-const REGISTRATION: Record<string, 'module' | 'channel'> = {
+// The registration macros a NED `@class` (or an implicit implementation class)
+// can resolve to: modules and channels via `Define_*`, and general/abstract C++
+// classes via `Register_Class`/`Register_Abstract_Class` (an `@class` may name one
+// of these, e.g. an abstract module base or an object class).
+const REGISTRATION: Record<string, CppClassKind> = {
   Define_Module: 'module',
   Define_Network: 'module',
   Define_Channel: 'channel',
+  Register_Class: 'class',
+  Register_Abstract_Class: 'class',
 };
 
 const ACCESS_FUNCS: Record<string, CppMemberKind> = {
@@ -322,7 +332,7 @@ export function scanCpp(uri: string, text: string): CppScanResult {
       if (read && nameTok) {
         const qn = qualify(read.name, nsStack());
         const simple = qn.includes('::') ? qn.slice(qn.lastIndexOf('::') + 2) : qn;
-        classes.push({ qualifiedName: qn, simpleName: simple, kind: reg, decl: loc(nameTok) });
+        classes.push({ qualifiedName: qn, simpleName: simple, kind: reg, macro: t.value, decl: loc(nameTok) });
       }
       continue;
     }

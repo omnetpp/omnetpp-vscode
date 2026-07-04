@@ -40,6 +40,21 @@ Define_Module(::top::Thing);
   assert.equal(byName['top::Thing'], 'module'); // leading :: stripped, kept as-written
 });
 
+test('Register_Class and Register_Abstract_Class are recognized registrations', () => {
+  const src = `
+namespace demo {
+Register_Class(MyObject);
+Register_Abstract_Class(AbstractBase);
+Define_Module(Widget);
+}
+`;
+  const { classes } = scanCpp('file:///r.cc', src);
+  const byName = Object.fromEntries(classes.map((c) => [c.qualifiedName, { kind: c.kind, macro: c.macro }]));
+  assert.deepEqual(byName['demo::MyObject'], { kind: 'class', macro: 'Register_Class' });
+  assert.deepEqual(byName['demo::AbstractBase'], { kind: 'class', macro: 'Register_Abstract_Class' });
+  assert.deepEqual(byName['demo::Widget'], { kind: 'module', macro: 'Define_Module' });
+});
+
 test('par/gate/getSubmodule accesses attributed to out-of-line method class', () => {
   const src = `
 namespace inet {

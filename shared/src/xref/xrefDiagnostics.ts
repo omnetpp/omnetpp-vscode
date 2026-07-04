@@ -70,7 +70,7 @@ export function nedMissingImplClassDiagnostics(
       range: nodeRange(ownClass?.node ?? nameNode(t.node) ?? t.node),
       severity: DiagnosticSeverity.Warning,
       message: ownClass
-        ? `No C++ class registered with Define_Module('${className}') was found for simple module '${t.simpleName}'.`
+        ? `No registered C++ class '${className}' (Define_Module/Register_Class/…) was found for simple module '${t.simpleName}'.`
         : `Simple module '${t.simpleName}' has no C++ implementation class registered with Define_Module('${className}').`,
       source: 'omnetpp',
       code: 'missing-cpp-class',
