@@ -1,11 +1,11 @@
 import { test } from 'bun:test';
 import assert from 'node:assert';
-import { getParsers } from './helpers';
+import { getParsers, posOf } from './helpers';
 import { BUILTIN_NED_TEXT, BUILTIN_URI, NedResourceCache } from '../ned/nedResourceCache';
 import { nedDefinition, nedHover, nedReferences } from '../ned/nedNavigation';
 import { MsgResourceCache } from '../msg/msgResourceCache';
-import { msgDocRefResolver } from '../msg/msgNavigation';
-import { nedCompletion } from '../ned/nedCompletion';
+import { msgDocRefResolver, msgDefinition, msgHover } from '../msg/msgNavigation';
+import { nedDocRefResolver } from '../ned/nedNavigation';
 import type { Position } from '../model/location';
 
 async function build(files: Record<string, { text: string; pkg?: string }>) {
@@ -14,15 +14,6 @@ async function build(files: Record<string, { text: string; pkg?: string }>) {
   cache.addFile(BUILTIN_URI, svc.parse('ned', BUILTIN_NED_TEXT), 'ned');
   for (const [uri, f] of Object.entries(files)) cache.addFile(uri, svc.parse('ned', f.text), f.pkg ?? '');
   return cache;
-}
-
-/** Position of the first occurrence of `needle` (at its first char). */
-function posOf(text: string, needle: string): Position {
-  const idx = text.indexOf(needle);
-  const before = text.slice(0, idx);
-  const line = before.split('\n').length - 1;
-  const character = idx - (before.lastIndexOf('\n') + 1);
-  return { line, character };
 }
 
 const TEXT = `simple Base {
@@ -143,21 +134,43 @@ test('find references to a type', async () => {
   assert.ok(refs.length >= 2, `expected >=2 refs, got ${refs.length}`);
 });
 
-test('completion after extends offers types', async () => {
-  const cache = await build({ 'file:///a.ned': { text: TEXT } });
-  const file = cache.getFile('file:///a.ned')!;
-  const prefix = 'simple X extends ';
-  const items = nedCompletion(cache, file, file.tree, { line: 0, character: prefix.length }, prefix);
-  const labels = items.map((i) => i.label);
-  assert.ok(labels.includes('Base'));
-  assert.ok(labels.includes('Derived'));
+const BUILTINS = ['cMessage', 'cPacket', 'cObject', 'simtime_t'];
+
+async function buildMsg(files: Record<string, string>) {
+  const svc = await getParsers();
+  const cache = new MsgResourceCache();
+  cache.setBuiltins(BUILTINS);
+  for (const [uri, text] of Object.entries(files)) cache.addFile(uri, svc.parse('msg', text));
+  return cache;
+}
+
+test('MSG go-to-definition and hover', async () => {
+  const text = 'class Base { }\nclass Derived extends Base { }';
+  const cache = await buildMsg({ 'file:///m.msg': text });
+  const file = cache.getFile('file:///m.msg')!;
+  const def = msgDefinition(cache, file, file.tree, posOf(text, 'Base { }') === undefined ? { line: 0, character: 0 } : { line: 1, character: text.split('\n')[1].indexOf('Base') });
+  assert.ok(def);
+  assert.equal(def!.range.start.line, 0);
+  const hov = msgHover(cache, file, file.tree, { line: 1, character: text.split('\n')[1].indexOf('Base') });
+  assert.ok(hov && /class Base/.test(hov.markdown));
 });
 
-test('completion after submodule colon offers module types', async () => {
-  const cache = await build({ 'file:///a.ned': { text: TEXT } });
-  const file = cache.getFile('file:///a.ned')!;
-  const prefix = '    host: ';
-  const items = nedCompletion(cache, file, file.tree, { line: 0, character: prefix.length }, prefix);
-  const labels = items.map((i) => i.label);
-  assert.ok(labels.includes('Net') || labels.includes('Base') || labels.includes('Derived'));
+test('MSG hover renders doc and linkifies same- and cross-language refs', async () => {
+  const msgText = `// A packet, see ~Other and the NED module ~Sink.
+class Pkt { int x; }
+class Other { }`;
+  const msgCache = await buildMsg({ 'file:///pkt.msg': msgText });
+  const file = msgCache.getFile('file:///pkt.msg')!;
+
+  // a NED type referenced from the MSG doc comment
+  const svc = await getParsers();
+  const nedCache = new NedResourceCache();
+  nedCache.addFile('file:///net.ned', svc.parse('ned', 'simple Sink { }'), '');
+
+  const hov = msgHover(msgCache, file, file.tree, posOf(msgText, 'Pkt {'), nedDocRefResolver(nedCache));
+  assert.ok(hov);
+  assert.match(hov!.markdown, /A packet/); // doc comment is now rendered
+  assert.match(hov!.markdown, /\[Other\]\(file:\/\/\/pkt\.msg#L3,7\)/); // same-language MSG link
+  assert.match(hov!.markdown, /\[Sink\]\(file:\/\/\/net\.ned#L1,8\)/); // cross-language NED link
+  assert.doesNotMatch(hov!.markdown, /~Other|~Sink/);
 });

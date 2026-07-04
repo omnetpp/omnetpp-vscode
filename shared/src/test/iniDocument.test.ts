@@ -2,6 +2,7 @@ import { test } from 'bun:test';
 import assert from 'node:assert';
 import { parseIni, bracketDepth } from '../ini/iniDocument';
 import { iniLocalDiagnostics } from '../ini/iniLocalChecks';
+import { iniDocumentSymbols } from '../ini/iniSymbols';
 
 test('bracketDepth ignores brackets inside quoted strings', () => {
   assert.equal(bracketDepth('[{a: 1}]'), 0);
@@ -62,4 +63,23 @@ test('a genuinely duplicated key is still reported', () => {
   const doc = parseIni('[General]\n*.x = 1\n*.x = 2\n');
   const dups = iniLocalDiagnostics(doc).filter((d) => d.code === 'duplicate-key');
   assert.equal(dups.length, 1);
+});
+
+test('INI parsing, symbols and duplicate-key check', () => {
+  const ini = `network = Foo
+[Config Base]
+sim-time-limit = 10s
+[Config Run1]
+extends = Base
+**.app.typename = "X"
+**.app.typename = "Y"`;
+  const doc = parseIni(ini);
+  assert.deepEqual(doc.sections.map((s) => s.rawName), ['General', 'Config Base', 'Config Run1']);
+  const run1 = doc.sections[2];
+  assert.deepEqual(run1.extends, ['Base']);
+  const syms = iniDocumentSymbols(doc);
+  assert.equal(syms.length, 3);
+  const diags = iniLocalDiagnostics(doc);
+  assert.equal(diags.length, 1);
+  assert.match(diags[0].message, /Duplicate key/);
 });

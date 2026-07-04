@@ -7,7 +7,6 @@ import { parseIni } from '../ini/iniDocument';
 import { iniParamDiagnostics } from '../ini/iniParamChecks';
 import { iniKeyToRegex, effectiveNetwork } from '../ini/iniParamResolution';
 import { reachableParamPaths } from '../ini/iniParamCompletion';
-import { iniParamDefinition } from '../ini/iniParamNavigation';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -95,19 +94,6 @@ test('index-specific like typenames: param on NO candidate type is still flagged
   assert.ok(diags.some((d) => d.code === 'no-matching-param'), JSON.stringify(diags));
 });
 
-test('go-to-definition resolves a param that lives only on a non-primary candidate', async () => {
-  const cache = await cacheWith(NED);
-  const doc = parseIni(`network = Net
-*.host[0].typename = "SinkApp"
-*.host[*].typename = "ConcreteApp"
-*.host[*].addr = "x"`);
-  // `addr` is declared on ConcreteApp (the 2nd candidate); paramOwner must make
-  // navigation land on its real NED declaration, not fail.
-  const defs = iniParamDefinition(doc, cache, doc.sections[0], '*.host[*].addr');
-  assert.ok(defs.length >= 1, 'found a declaration for addr');
-  assert.equal(defs[0].uri, 'file:///net.ned');
-});
-
 test('deep wildcard never flagged (dynamic-safe)', async () => {
   const cache = await cacheWith(NED);
   const doc = parseIni(`network = Net
@@ -124,16 +110,6 @@ network = Net
 extends = A`);
   const b = doc.sections.find((s) => s.configName === 'B')!;
   assert.equal(effectiveNetwork(doc, b), 'Net');
-});
-
-test('iniParamDefinition jumps to the NED parameter declaration', async () => {
-  const cache = await cacheWith(NED);
-  const doc = parseIni('network = Net\n**.queue.capacity = 50\n');
-  const defs = iniParamDefinition(doc, cache, doc.sections[0], '**.queue.capacity');
-  assert.ok(defs.length >= 1, 'found a declaration');
-  assert.equal(defs[0].uri, 'file:///net.ned');
-  // Queue.capacity is declared on the `Queue` simple module
-  assert.ok(defs[0].range.start.line >= 0);
 });
 
 test('reachableParamPaths includes nested params', async () => {

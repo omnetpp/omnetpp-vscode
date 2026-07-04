@@ -119,3 +119,43 @@ test('ini completion: section header offers General/Config', () => {
   const items = iniCompletion(doc, reg, undefined, { line: 0, character: 1 }, '[');
   assert.deepEqual(items.map((i) => i.label).sort(), ['Config ', 'General']);
 });
+
+// ---- NED completion (extends / submodule type, driven by a real cache) ----
+
+async function build(files: Record<string, { text: string; pkg?: string }>) {
+  const svc = await getParsers();
+  const cache = new NedResourceCache();
+  cache.addFile(BUILTIN_URI, svc.parse('ned', BUILTIN_NED_TEXT), 'ned');
+  for (const [uri, f] of Object.entries(files)) cache.addFile(uri, svc.parse('ned', f.text), f.pkg ?? '');
+  return cache;
+}
+
+const TEXT = `simple Base {
+  parameters:
+    int n = 1;
+}
+simple Derived extends Base {
+}
+module Net {
+  submodules:
+    host: Derived;
+}`;
+
+test('completion after extends offers types', async () => {
+  const cache = await build({ 'file:///a.ned': { text: TEXT } });
+  const file = cache.getFile('file:///a.ned')!;
+  const prefix = 'simple X extends ';
+  const items = nedCompletion(cache, file, file.tree, { line: 0, character: prefix.length }, prefix);
+  const labels = items.map((i) => i.label);
+  assert.ok(labels.includes('Base'));
+  assert.ok(labels.includes('Derived'));
+});
+
+test('completion after submodule colon offers module types', async () => {
+  const cache = await build({ 'file:///a.ned': { text: TEXT } });
+  const file = cache.getFile('file:///a.ned')!;
+  const prefix = '    host: ';
+  const items = nedCompletion(cache, file, file.tree, { line: 0, character: prefix.length }, prefix);
+  const labels = items.map((i) => i.label);
+  assert.ok(labels.includes('Net') || labels.includes('Base') || labels.includes('Derived'));
+});

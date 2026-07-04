@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { getParsers } from './helpers';
 import {
   NedResourceCache,
+  BUILTIN_NED_TEXT,
+  BUILTIN_URI,
   ConfigRegistry,
   classifyKey,
   parseIni,
@@ -191,4 +193,50 @@ test('a pseudo-parameter leaf resolves to the NED type of the module it applies 
   // `**.host.app.typename` applies to `app` -> App (the module the pseudo-param is on)
   const app = modulesAtPath(doc, nedCache, c, '**.host.app', undefined);
   assert.equal(app[0]?.typeFqName, 'App');
+});
+
+// ---- iniParamDefinition through `like` submodules with index-specific typenames ----
+
+const LIKE_NED = `
+moduleinterface IApp { parameters: int dummy; }
+simple Queue { parameters: int capacity = 10; double rate @unit(bps); }
+simple ConcreteApp like IApp { parameters: int dummy; string addr; }
+simple SinkApp like IApp { parameters: int dummy; }
+network Net {
+  parameters:
+    int numHosts = 3;
+  submodules:
+    queue: Queue;
+    host[numHosts]: <> like IApp;
+}`;
+
+async function cacheWithLikeNed() {
+  const svc = await getParsers();
+  const cache = new NedResourceCache();
+  cache.addFile(BUILTIN_URI, svc.parse('ned', BUILTIN_NED_TEXT), 'ned');
+  cache.addFile('file:///net.ned', svc.parse('ned', LIKE_NED), '');
+  return cache;
+}
+
+test('go-to-definition resolves a param that lives only on a non-primary candidate', async () => {
+  const cache = await cacheWithLikeNed();
+  const doc = parseIni(`network = Net
+*.host[0].typename = "SinkApp"
+*.host[*].typename = "ConcreteApp"
+*.host[*].addr = "x"`);
+  // `addr` is declared on ConcreteApp (the 2nd candidate); paramOwner must make
+  // navigation land on its real NED declaration, not fail.
+  const defs = iniParamDefinition(doc, cache, doc.sections[0], '*.host[*].addr');
+  assert.ok(defs.length >= 1, 'found a declaration for addr');
+  assert.equal(defs[0].uri, 'file:///net.ned');
+});
+
+test('iniParamDefinition jumps to the NED parameter declaration', async () => {
+  const cache = await cacheWithLikeNed();
+  const doc = parseIni('network = Net\n**.queue.capacity = 50\n');
+  const defs = iniParamDefinition(doc, cache, doc.sections[0], '**.queue.capacity');
+  assert.ok(defs.length >= 1, 'found a declaration');
+  assert.equal(defs[0].uri, 'file:///net.ned');
+  // Queue.capacity is declared on the `Queue` simple module
+  assert.ok(defs[0].range.start.line >= 0);
 });
