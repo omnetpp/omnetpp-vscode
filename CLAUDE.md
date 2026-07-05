@@ -30,10 +30,19 @@ Four workspaces (monorepo, managed by Bun's workspaces), wired together by TypeS
   the `omnetpp/mcp/listTools` / `omnetpp/mcp/callTool` custom requests by running
   `handleTool` against its **live** index (so MCP results reflect unsaved buffers).
 - **`client/`** — the thin VS Code extension (`client/src/extension.ts`). Starts the
-  language client over IPC, registers the activity-bar tree views (`views.ts`). Bundled
-  to `dist/extension.js` (the extension `main`). Also hosts a localhost Streamable-HTTP
-  **MCP bridge** (`mcpBridge.ts`, token-guarded) registered via
+  language client over IPC, registers the activity-bar tree views (`views.ts`) and the
+  **graphical NED preview panel** (`nedPreviewPanel.ts`: follows the cursor via the
+  `omnetpp/nedPreview` request, resolves icon ids to webview URIs using the Eclipse
+  search order — project `images/` → `omnetpp.installDir/images` → bundled
+  `dist/icons`). Bundled to `dist/extension.js` (the extension `main`). Also hosts a
+  localhost Streamable-HTTP **MCP bridge** (`mcpBridge.ts`, token-guarded) registered via
   `lm.registerMcpServerDefinitionProvider`; it forwards tool calls to the live LSP index.
+  The **preview webview app** lives separately in `client/webview/` (own tsconfig: DOM
+  lib, no node/vscode types; bundled to `dist/webview/nedPreview.js` as a browser IIFE).
+  It may import ONLY `@omnetpp/shared/preview` (a curated browser-safe subpath: the
+  display-string instance model + `shared/src/graphics/` math ports — spring embedder,
+  arrowcoords, X11 colors) plus type-only protocol imports, so the bundle never pulls in
+  web-tree-sitter or Node APIs.
 - **`mcp/`** — standalone disk-index tooling that runs without an editor. Hosts (a) a
   stdio MCP server (`mcp/src/server.ts`, bundled to `dist/opp_ide_mcp.js`) serving the same
   `OMNETPP_TOOLS`, and (b) the **CLI linter** (`mcp/src/lint.ts`, bundled to
@@ -45,7 +54,8 @@ Four workspaces (monorepo, managed by Bun's workspaces), wired together by TypeS
 
 Data flow: `client` reads `omnetpp.*` settings → passes them to `server` via LSP
 `initializationOptions` → `server` builds the project index and answers requests using
-`shared`. **All UI is currently tree views + input boxes — there are no webviews.**
+`shared`. **UI is tree views + input boxes + one webview** (the NED preview panel; keep
+any new webview code under `client/webview/` and browser-safe).
 
 ### Things that bite
 
@@ -63,6 +73,12 @@ Data flow: `client` reads `omnetpp.*` settings → passes them to `server` via L
 - **Project model discovery**: NED source roots come from `.nedfolders` /
   `.nedexclusions` / `package.ned` (see `shared/src/project/projectModel.ts`), plus the
   `omnetpp.nedPath` setting and the install dir — not just open workspace folders.
+- **The NED preview's icon set** is a bundled snapshot at `resources/icons/`
+  (+ `index.json` with natural sizes), regenerated from an OMNeT++ source tree via
+  `bun scripts/gen-icons.mjs <omnetpp-src-dir>`. Display-string semantics (parsing,
+  fallback chains, defaults) live in `shared/src/ned/displayStringModel.ts` — a faithful
+  port of the IDE's `DisplayString.java`; the scene DTO is built in
+  `shared/src/ned/nedPreviewScene.ts` and rendered by `client/webview/`.
 - **INI config-option validation** uses a bundled snapshot at
   `resources/config/opp-config-options.json`, regenerated from an OMNeT++ source tree
   via `bun scripts/gen-config-options.mjs <omnetpp-src-dir>`.
@@ -131,7 +147,8 @@ after `bun run compile` (they spawn the bundled servers via `process.execPath`, 
 For the MCP feature (after `bun run dev:build`):
 `mcp-smoke.mjs <projectDir>` drives the standalone `dist/opp_ide_mcp.js` over MCP stdio;
 `mcp-live-smoke.mjs <projectDir>` drives `dist/server.js` and exercises the
-`omnetpp/mcp/*` live-index requests (incl. unsaved-buffer reflection). Note: MCP stdio is
+`omnetpp/mcp/*` live-index requests (incl. unsaved-buffer reflection);
+`preview-smoke.mjs` checks the `omnetpp/nedPreview` scene request shape the same way. Note: MCP stdio is
 **newline-delimited JSON**, not LSP `Content-Length` framing. `lint-cli-smoke.mjs` drives
 the bundled CLI linter (`dist/opp_lint.js`) over a throwaway project (diagnostics,
 suppression, JSON shape, exit codes).

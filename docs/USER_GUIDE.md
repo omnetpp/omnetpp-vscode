@@ -233,6 +233,40 @@ Each group shows a count; leaves jump to the using site.
 
 **Advantage.** Immediately answer *"who uses this type/message?"* before you change it.
 
+### Graphical NED preview
+
+**Feature.** A read-only graphical rendering of the NED type under the cursor — the same
+visualization as the Eclipse-based IDE's graphical NED editor (types, not running
+instances). Open it with the **preview button** in the editor title of any NED file, or
+**"OMNeT++: Show NED Preview"** from the command palette. The panel opens beside the
+editor and *follows the cursor*: moving the caret into another type (or file) re-renders.
+
+**What is drawn.** Compound modules and networks show their full diagram: submodules
+(icons, shapes, tints, status icons, ranges, queue markers, text labels — the complete
+display-string tag set), connections (line styles, arrowheads, routing and bundling as in
+the IDE), the background box/grid/image, and everything **inherited from base types**
+(labelled in tooltips). Submodule vectors appear as a single `name[N]` box; connections
+inside `for` loops / behind `if` conditions carry the IDE's `o` / `?` markers. Unresolved
+`$param` display values use the IDE's placeholder visuals. Submodules without explicit
+positions are laid out with the same seeded spring-embedder algorithm as the IDE/Qtenv.
+Simple modules, channels, and interfaces show their icon "card". Unsaved edits render
+immediately.
+
+**Interactions.**
+- **Click** a submodule or connection to reveal its declaration; **double-click** a
+  submodule to open its type's NED file.
+- **Hover** for tooltips (resolved type incl. `like` resolution, inheritance origin,
+  gates/channel, `tt`/`bgtt` texts).
+- Toolbar: **zoom** in/out/1:1/fit (also `Ctrl`+wheel), **Re-layout** (new layout seed for
+  unpinned submodules, like the IDE's re-layout action), **SVG/PNG export**.
+- **Pin** (📌, title bar) freezes the preview on the current type so it stops following
+  the cursor; the pin persists per workspace.
+
+**Icons** are resolved like in the Eclipse IDE: a project's own `images/` folders first,
+then `<omnetpp.installDir>/images`, then the bundled snapshot of the standard icon set —
+so the preview works with zero OMNeT++ installation and still honors project-specific
+icons.
+
 ### Impact analysis — "Show Impact (Reverse Dependencies)"
 
 **Feature.** Computes the **transitive** set of types, configs, and files that depend

@@ -34,6 +34,9 @@ or build it locally.
   module tree of the selected `network`, flagging dead keys and type conflicts.
 - **Reverse-dependency tooling**: a "Used By" view, CodeLens reference counts, and
   "Show Impact" — *what breaks if I change this?*
+- **Graphical NED preview**: a read-only rendering of the type under the cursor with the
+  Eclipse IDE's visualization — icons, display strings, inherited submodules, IDE-identical
+  auto-layout — with click-to-navigate, zoom, and SVG/PNG export.
 - **Activity-bar views**: Configurations, Module Hierarchy, Module Parameters, NED
   Inheritance, and Used By.
 - **`opp_lint`** — a standalone CLI for CI, pre-commit hooks, and scripts (no OMNeT++

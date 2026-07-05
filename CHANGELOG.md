@@ -1,8 +1,16 @@
 # Change Log
 
-## 0.0.4
+## 0.4.0
 
-- Ned: added 'parent' keyword
+- **Graphical NED preview** — a read-only rendering of the NED type under the cursor,
+  matching the Eclipse-based IDE's graphical editor: full display-string tag support
+  (icons with tinting and size variants, shapes, ranges, background box/grid/image,
+  connection styles/routing/bundling), inherited submodules and connections, `$param`
+  placeholder visuals, and the IDE's seeded spring-embedder auto-layout. Opens beside the
+  editor (preview button on NED files), follows the cursor, and can be pinned.
+  Click-to-navigate, hover tooltips, zoom/fit/re-layout, SVG/PNG export. Icons resolve
+  from project `images/` folders, the OMNeT++ install, or a bundled snapshot — no
+  OMNeT++ installation required.
 
 ## 0.3.0
 
@@ -29,6 +37,7 @@
 - Build/test/package toolchain migrated to **Bun only** (no Node.js or npm required for
   development)
 
+## 0.2.0
 
 - Added a full language server (pure TypeScript on tree-sitter, no OMNeT++ install required)
 - NED: diagnostics (syntax, duplicates, unknown/inheritance/type checks, value type checks),
@@ -58,6 +67,10 @@
 - Documentation-comment content assist (`@author`/`@see`/… and HTML tags) for NED and MSG
 - Code snippets for common NED type skeletons and INI sections
 - Three OMNeT++ tree views: Module Hierarchy, Module Parameters and NED Inheritance
+
+## 0.0.4
+
+- Ned: added 'parent' keyword
 
 ## 0.0.3
 
