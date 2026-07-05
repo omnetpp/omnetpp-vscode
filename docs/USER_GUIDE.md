@@ -256,11 +256,17 @@ immediately.
 - **Click** a submodule or connection to reveal its declaration; **double-click** a
   submodule to open its type's NED file.
 - **Hover** for tooltips (resolved type incl. `like` resolution, inheritance origin,
-  gates/channel, `tt`/`bgtt` texts).
-- Toolbar: **zoom** in/out/1:1/fit (also `Ctrl`+wheel), **Re-layout** (new layout seed for
-  unpinned submodules, like the IDE's re-layout action), **SVG/PNG export**.
-- **Pin** (📌, title bar) freezes the preview on the current type so it stops following
-  the cursor; the pin persists per workspace.
+  gates/channel, `tt`/`bgtt` texts). **Drag** anywhere to pan the canvas.
+- Toolbar: **zoom** in/out/1:1/fit buttons (also `Ctrl`+wheel), and a **type search box**
+  on the right. While unpinned the box shows the currently previewed type as its hint
+  text; type or pick a type name (with completion) to pin the preview on it.
+- **Pin button** next to the search box: pressing it copies the shown type's fully
+  qualified name into the box, pinning the preview (it stops following the cursor). The
+  button then turns into a **clear** icon — pressing it empties the box and resumes
+  cursor-following. The pin persists per workspace (also available in the panel title
+  bar).
+- **Right-click** context menu: **Re-layout** (new layout seed for unpinned submodules,
+  like the IDE's re-layout action) and **Export as SVG/PNG**.
 
 **Icons** are resolved like in the Eclipse IDE: a project's own `images/` folders first,
 then `<omnetpp.installDir>/images`, then the bundled snapshot of the standard icon set —

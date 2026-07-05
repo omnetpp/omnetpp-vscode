@@ -29,6 +29,7 @@ interface SceneMessage {
   scene: PreviewScene | null;
   icons: Record<string, IconAsset>;
   pinned: boolean;
+  pinnedFqName?: string;
 }
 
 const vscode = acquireVsCodeApi();
@@ -36,21 +37,33 @@ const state: PersistedState = vscode.getState() ?? { seeds: {}, zoom: 1 };
 const icons = new IconStore();
 
 let scene: PreviewScene | null = null;
-let pinned = false;
+let pinnedFq: string | undefined;
 let svg: SVGSVGElement | undefined;
 let intrinsic = { w: 0, h: 0 };
 let renderToken = 0;
 
 // ---- static page structure ----
 
+// self-contained inline SVG icons (codicon look-alikes; no external fonts)
+const ICON = {
+  zoomOut: `<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6.5" cy="6.5" r="4.75"/><path d="M10.5 10.5 14.5 14.5"/><path d="M4.5 6.5h4"/></g></svg>`,
+  zoomIn: `<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6.5" cy="6.5" r="4.75"/><path d="M10.5 10.5 14.5 14.5"/><path d="M4.5 6.5h4M6.5 4.5v4"/></g></svg>`,
+  zoomReset: `<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><text x="8" y="11.5" text-anchor="middle" font-size="8.5" font-weight="bold" font-family="sans-serif" fill="currentColor">1:1</text></svg>`,
+  zoomFit: `<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 2H2v4"/><path d="M10 2h4v4"/><path d="M14 10v4h-4"/><path d="M6 14H2v-4"/></g></svg>`,
+  pin: `<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M9.3 1.3 14.7 6.7l-1.4 1.4-.7-.35-2.5 2.5.35 2.85-1.4 1.4-3.2-3.2-3.15 3.2-1.2-1.2 3.2-3.15-3.2-3.2 1.4-1.4 2.85.35 2.5-2.5-.35-.7z"/></svg>`,
+  clear: `<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.5h8a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-8L1.5 8z"/><path d="M8 6l4 4M12 6l-4 4"/></g></svg>`,
+};
+
 document.getElementById('root')!.innerHTML = `
   <div id="toolbar">
-    <button id="zoomOut" title="Zoom out">−</button>
+    <button id="zoomOut" title="Zoom out">${ICON.zoomOut}</button>
     <span id="zoomLabel">100%</span>
-    <button id="zoomIn" title="Zoom in">+</button>
-    <button id="zoomReset" title="Zoom to 100%">1:1</button>
-    <button id="zoomFit" title="Fit to view">Fit</button>
-    <span id="pinState"></span>
+    <button id="zoomIn" title="Zoom in">${ICON.zoomIn}</button>
+    <button id="zoomReset" title="Zoom to 100%">${ICON.zoomReset}</button>
+    <button id="zoomFit" title="Fit to view">${ICON.zoomFit}</button>
+    <input id="typeSearch" list="typeOptions" spellcheck="false" placeholder="type name">
+    <datalist id="typeOptions"></datalist>
+    <button id="pinBtn" title="Pin the preview to the current type">${ICON.pin}</button>
   </div>
   <div id="paper"><div id="canvas"></div><div id="empty">Open a NED file to see its graphical preview.</div></div>
 `;
@@ -72,7 +85,9 @@ const paper = document.getElementById('paper')!;
 const canvas = document.getElementById('canvas')!;
 const empty = document.getElementById('empty')!;
 const zoomLabel = document.getElementById('zoomLabel')!;
-const pinState = document.getElementById('pinState')!;
+const typeSearch = document.getElementById('typeSearch') as HTMLInputElement;
+const typeOptions = document.getElementById('typeOptions') as HTMLDataListElement;
+const pinBtn = document.getElementById('pinBtn') as HTMLButtonElement;
 
 // ---- rendering ----
 
@@ -85,7 +100,6 @@ async function rerender(): Promise<void> {
   if (!scene) {
     canvas.replaceChildren();
     empty.style.display = 'flex';
-    pinState.textContent = '';
     return;
   }
   const current = scene;
@@ -100,7 +114,6 @@ async function rerender(): Promise<void> {
   applyZoom();
   canvas.replaceChildren(svg);
   empty.style.display = 'none';
-  pinState.textContent = pinned ? `📌 ${current.fqName}` : current.fqName;
 }
 
 function applyZoom(): void {
@@ -127,6 +140,48 @@ document.getElementById('zoomFit')!.addEventListener('click', () => {
   const pad = 24;
   setZoom(Math.min((paper.clientWidth - pad) / intrinsic.w, (paper.clientHeight - pad) / intrinsic.h));
 });
+// ---- type search / pinning ----
+// Unpinned: the box is empty and the currently shown type appears as the
+// placeholder hint; the button is a PIN that copies that fq-name into the box
+// (pinning the preview). Pinned: the box holds the pinned fq-name and the
+// button turns into a CLEAR that empties the box and resumes cursor-following.
+
+function syncSearchUi(): void {
+  if (document.activeElement !== typeSearch) typeSearch.value = pinnedFq ?? '';
+  typeSearch.placeholder = scene?.fqName ?? 'type name';
+  pinBtn.innerHTML = pinnedFq ? ICON.clear : ICON.pin;
+  pinBtn.title = pinnedFq
+    ? 'Clear and follow the cursor again'
+    : 'Pin the preview to the currently shown type';
+}
+
+function commitSearch(): void {
+  const text = typeSearch.value.trim();
+  if (text === (pinnedFq ?? '')) return;
+  vscode.postMessage({ type: 'setPin', fqName: text || undefined });
+}
+
+pinBtn.addEventListener('click', () => {
+  if (pinnedFq) {
+    typeSearch.value = '';
+    vscode.postMessage({ type: 'setPin' });
+  } else if (scene) {
+    typeSearch.value = scene.fqName;
+    vscode.postMessage({ type: 'setPin', fqName: scene.fqName });
+  }
+});
+
+typeSearch.addEventListener('change', commitSearch);
+typeSearch.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    commitSearch();
+    typeSearch.blur();
+  } else if (e.key === 'Escape') {
+    typeSearch.value = pinnedFq ?? '';
+    typeSearch.blur();
+  }
+});
+
 // re-layout and the exports are reachable via the context menu (webview/context)
 function doRelayout(): void {
   if (!scene) return;
@@ -252,7 +307,10 @@ function post(type: 'navigate' | 'openType', uri: string, range?: Range): void {
 // ---- host messages ----
 
 window.addEventListener('message', (event: MessageEvent) => {
-  const msg = event.data as SceneMessage | { type: 'command'; command: string };
+  const msg = event.data as
+    | SceneMessage
+    | { type: 'command'; command: string }
+    | { type: 'typeList'; types: string[] };
   if (msg.type === 'command') {
     // context-menu commands forwarded by the host panel
     if (msg.command === 'relayout') doRelayout();
@@ -260,10 +318,21 @@ window.addEventListener('message', (event: MessageEvent) => {
     else if (msg.command === 'exportPng') doExportPng();
     return;
   }
+  if (msg.type === 'typeList') {
+    typeOptions.replaceChildren(
+      ...msg.types.map((t) => {
+        const option = document.createElement('option');
+        option.value = t;
+        return option;
+      }),
+    );
+    return;
+  }
   if (msg.type !== 'scene') return;
   scene = msg.scene;
-  pinned = msg.pinned;
+  pinnedFq = msg.pinnedFqName;
   icons.setAssets(msg.icons);
+  syncSearchUi();
   void rerender();
 });
 

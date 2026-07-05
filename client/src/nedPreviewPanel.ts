@@ -39,7 +39,8 @@ type HostMessage =
   | { type: 'ready' }
   | { type: 'navigate'; uri: string; range?: Range }
   | { type: 'openType'; uri: string; range?: Range }
-  | { type: 'export'; format: 'svg' | 'png'; data: string; suggestedName: string };
+  | { type: 'export'; format: 'svg' | 'png'; data: string; suggestedName: string }
+  | { type: 'setPin'; fqName?: string };
 
 function activeNedContext(): { uri: string; position: Pos } | undefined {
   const ed = vscode.window.activeTextEditor;
@@ -63,6 +64,7 @@ export class NedPreviewPanel {
 
   private readonly disposables: vscode.Disposable[] = [];
   private webviewReady = false;
+  private lastTypeListKey?: string;
   private lastSceneKey?: string;
   private bundledIndex?: Record<string, [number, number]>;
 
@@ -190,17 +192,62 @@ export class NedPreviewPanel {
     if (!scene && !force) return;
 
     const key = scene ? JSON.stringify(scene) : 'empty';
-    if (!force && key === this.lastSceneKey) return;
-    this.lastSceneKey = key;
+    if (force || key !== this.lastSceneKey) {
+      this.lastSceneKey = key;
+      const icons = scene ? this.resolveIcons(scene) : {};
+      this.panel.title = scene ? `NED Preview: ${scene.simpleName}` : 'NED Preview';
+      void this.panel.webview.postMessage({
+        type: 'scene',
+        scene,
+        icons,
+        pinned: !!this.pinnedFqName(),
+        pinnedFqName: this.pinnedFqName(),
+      });
+    }
+    void this.postTypeList();
+  }
 
-    const icons = scene ? this.resolveIcons(scene) : {};
-    this.panel.title = scene ? `NED Preview: ${scene.simpleName}` : 'NED Preview';
-    void this.panel.webview.postMessage({
-      type: 'scene',
-      scene,
-      icons,
-      pinned: !!this.pinnedFqName(),
-    });
+  /** Feed the search box's completion list (all indexed NED type fq-names). */
+  private async postTypeList(): Promise<void> {
+    let types: string[] = [];
+    try {
+      const result = await this.client.sendRequest<{ fqName: string }[]>(OmnetppMethods.mcpCallTool, {
+        name: 'list_ned_types',
+        arguments: {},
+      });
+      types = result.map((t) => t.fqName).sort();
+    } catch {
+      return;
+    }
+    const listKey = `${types.length}|${types[0] ?? ''}|${types[types.length - 1] ?? ''}`;
+    if (listKey === this.lastTypeListKey) return;
+    this.lastTypeListKey = listKey;
+    void this.panel.webview.postMessage({ type: 'typeList', types });
+  }
+
+  /** Pin request from the search box: resolve loose input to a known type. */
+  private async setPinFromSearch(text: string | undefined): Promise<void> {
+    let fqName = text?.trim() || undefined;
+    if (fqName && !fqName.includes('.')) {
+      // a bare simple name: prefer a unique fq match from the index
+      try {
+        const result = await this.client.sendRequest<{ fqName: string }[]>(OmnetppMethods.mcpCallTool, {
+          name: 'list_ned_types',
+          arguments: {},
+        });
+        const needle = fqName.toLowerCase();
+        const matches = result.filter((t) => {
+          const simple = t.fqName.split('.').pop() ?? t.fqName;
+          return simple.toLowerCase() === needle;
+        });
+        if (matches.length >= 1) fqName = matches[0].fqName;
+      } catch {
+        /* index unavailable: pin verbatim */
+      }
+    }
+    await this.context.workspaceState.update(PIN_KEY, fqName);
+    this.syncPinContext();
+    void this.update(true);
   }
 
   // ---- icon resolution (Eclipse search order) ----
@@ -288,6 +335,9 @@ export class NedPreviewPanel {
       case 'openType':
         await revealLocation(msg.uri, msg.range);
         break;
+      case 'setPin':
+        await this.setPinFromSearch(msg.fqName);
+        break;
       case 'export': {
         const filters: Record<string, string[]> =
           msg.format === 'svg' ? { 'SVG image': ['svg'] } : { 'PNG image': ['png'] };
@@ -328,12 +378,19 @@ export class NedPreviewPanel {
   #toolbar { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; padding: 4px 8px;
              background: var(--vscode-editorWidget-background); color: var(--vscode-foreground);
              border-bottom: 1px solid var(--vscode-editorWidget-border, transparent); }
-  #toolbar button { background: var(--vscode-button-secondaryBackground, #ddd);
+  #toolbar button { display: flex; align-items: center; justify-content: center;
+             width: 24px; height: 20px; padding: 0;
+             background: var(--vscode-button-secondaryBackground, #ddd);
              color: var(--vscode-button-secondaryForeground, #333); border: none; border-radius: 2px;
-             padding: 2px 8px; cursor: pointer; font-size: 12px; }
+             cursor: pointer; font-size: 12px; }
   #toolbar button:hover { background: var(--vscode-button-secondaryHoverBackground, #ccc); }
+  #toolbar button svg { display: block; }
   #zoomLabel { min-width: 42px; text-align: center; font-size: 12px; }
-  #pinState { margin-left: auto; font-size: 12px; opacity: .8; }
+  #typeSearch { margin-left: auto; flex: 0 1 280px; min-width: 90px; height: 20px; box-sizing: border-box;
+             background: var(--vscode-input-background, #fff); color: var(--vscode-input-foreground, #333);
+             border: 1px solid var(--vscode-input-border, #0000); border-radius: 2px;
+             padding: 0 6px; font-size: 12px; font-family: var(--vscode-font-family); }
+  #typeSearch::placeholder { color: var(--vscode-input-placeholderForeground, #888); }
   #paper { flex: 1 1 auto; overflow: auto; background: #ffffff; position: relative;
            cursor: grab; user-select: none; }
   #paper.panning { cursor: grabbing; }
