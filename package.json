@@ -2,7 +2,7 @@
   "name": "omnetpp-vscode",
   "displayName": "OMNeT++ Development Environment",
   "description": "Language server and editor support for the OMNeT++ NED, MSG and INI languages",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "opensim",
   "repository": "https://github.com/omnetpp/omnetpp-vscode",
   "license": "SEE LICENSE IN LICENSE",
