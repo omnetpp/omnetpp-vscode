@@ -254,7 +254,10 @@ immediately.
 
 **Interactions.**
 - **Click** a submodule or connection to reveal its declaration; **double-click** a
-  submodule to open its type's NED file.
+  submodule to open its type's NED file. **`Ctrl`/`Cmd`-click** a submodule drills into
+  it — pinning the preview on that submodule's resolved type (as if following a link).
+  The same drill-in is available as a **Show** item in the right-click menu of such a
+  submodule.
 - **Hover** for tooltips (resolved type incl. `like` resolution, inheritance origin,
   gates/channel, `tt`/`bgtt` texts). **Drag** anywhere to pan the canvas.
 - Toolbar: **zoom** in/out/1:1/fit buttons (also `Ctrl`+wheel), and a **type search box**

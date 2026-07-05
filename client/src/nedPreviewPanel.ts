@@ -149,6 +149,12 @@ export class NedPreviewPanel {
     void this.panel.webview.postMessage({ type: 'command', command });
   }
 
+  /** Pin the preview to an exact fq-name (the "Show" context-menu item). */
+  async showType(fqName: string): Promise<void> {
+    await this.context.workspaceState.update(PIN_KEY, fqName);
+    void this.update(true);
+  }
+
   // ---- scene updates ----
 
   private async fetchScene(): Promise<PreviewScene | null> {
@@ -389,6 +395,9 @@ export class NedPreviewPanel {
 export function registerNedPreview(context: vscode.ExtensionContext, client: LanguageClient): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('omnetpp.showNedPreview', () => NedPreviewPanel.createOrShow(context, client)),
+    vscode.commands.registerCommand('omnetpp.previewShowType', (ctx?: { fqName?: string }) => {
+      if (ctx?.fqName) void NedPreviewPanel.current?.showType(ctx.fqName);
+    }),
     vscode.commands.registerCommand('omnetpp.previewRelayout', () => NedPreviewPanel.current?.sendCommand('relayout')),
     vscode.commands.registerCommand('omnetpp.previewExportSvg', () => NedPreviewPanel.current?.sendCommand('exportSvg')),
     vscode.commands.registerCommand('omnetpp.previewExportPng', () => NedPreviewPanel.current?.sendCommand('exportPng')),

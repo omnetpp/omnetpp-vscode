@@ -114,6 +114,23 @@ async function rerender(): Promise<void> {
   applyZoom();
   canvas.replaceChildren(svg);
   empty.style.display = 'none';
+  tagSubmoduleContexts(current);
+}
+
+// Give each submodule figure that has a resolved type its own
+// `data-vscode-context`, so a right-click there offers a "Show" item (a
+// distinct webviewSection the package.json menu matches) that drills into
+// that type; the fqName rides along and reaches the command handler.
+function tagSubmoduleContexts(current: PreviewScene): void {
+  for (const el of canvas.querySelectorAll('[data-sub]')) {
+    const fqName = current.submodules?.[Number(el.getAttribute('data-sub'))]?.resolvedTypeFqName;
+    if (fqName) {
+      el.setAttribute(
+        'data-vscode-context',
+        JSON.stringify({ webviewSection: 'nedPreviewSub', preventDefaultContextMenuItems: true, fqName }),
+      );
+    }
+  }
 }
 
 function applyZoom(): void {
@@ -275,7 +292,8 @@ function doExportPng(): void {
   img.src = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(serializeSvg())))}`;
 }
 
-// ---- interactions: click to navigate, double-click to open the type ----
+// ---- interactions: click to navigate, ctrl/cmd-click a submodule to drill
+// into its type (pin), double-click to open the type ----
 
 function figureAt(target: EventTarget | null): { kind: 'sub' | 'conn'; index: number } | undefined {
   if (!(target instanceof Element)) return undefined;
@@ -289,6 +307,15 @@ function figureAt(target: EventTarget | null): { kind: 'sub' | 'conn'; index: nu
 canvas.addEventListener('click', (e) => {
   const hit = figureAt(e.target);
   if (!hit || !scene) return;
+  // Ctrl/Cmd-click a submodule with a resolved type: pin the preview to that
+  // type, drilling into it (like following a hyperlink).
+  if ((e.ctrlKey || e.metaKey) && hit.kind === 'sub') {
+    const fqName = scene.submodules?.[hit.index]?.resolvedTypeFqName;
+    if (fqName) {
+      vscode.postMessage({ type: 'setPin', fqName });
+      return;
+    }
+  }
   const target = hit.kind === 'sub' ? scene.submodules?.[hit.index] : scene.connections?.[hit.index];
   if (target) post('navigate', target.declUri, target.declRange);
 });
