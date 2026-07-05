@@ -165,6 +165,11 @@ export class NedPreviewPanel {
     void vscode.commands.executeCommand('setContext', 'omnetpp.previewPinned', !!this.pinnedFqName());
   }
 
+  /** Forward a context-menu command (re-layout, export) to the webview app. */
+  sendCommand(command: 'relayout' | 'exportSvg' | 'exportPng'): void {
+    void this.panel.webview.postMessage({ type: 'command', command });
+  }
+
   // ---- scene updates ----
 
   private async fetchScene(): Promise<PreviewScene | null> {
@@ -327,7 +332,6 @@ export class NedPreviewPanel {
              color: var(--vscode-button-secondaryForeground, #333); border: none; border-radius: 2px;
              padding: 2px 8px; cursor: pointer; font-size: 12px; }
   #toolbar button:hover { background: var(--vscode-button-secondaryHoverBackground, #ccc); }
-  #toolbar .sep { width: 1px; height: 16px; background: var(--vscode-editorWidget-border, #888); margin: 0 4px; }
   #zoomLabel { min-width: 42px; text-align: center; font-size: 12px; }
   #pinState { margin-left: auto; font-size: 12px; opacity: .8; }
   #paper { flex: 1 1 auto; overflow: auto; background: #ffffff; position: relative;
@@ -353,6 +357,9 @@ export function registerNedPreview(context: vscode.ExtensionContext, client: Lan
     vscode.commands.registerCommand('omnetpp.showNedPreview', () => NedPreviewPanel.createOrShow(context, client)),
     vscode.commands.registerCommand('omnetpp.pinPreview', () => void NedPreviewPanel.current?.pin()),
     vscode.commands.registerCommand('omnetpp.unpinPreview', () => void NedPreviewPanel.current?.unpin()),
+    vscode.commands.registerCommand('omnetpp.previewRelayout', () => NedPreviewPanel.current?.sendCommand('relayout')),
+    vscode.commands.registerCommand('omnetpp.previewExportSvg', () => NedPreviewPanel.current?.sendCommand('exportSvg')),
+    vscode.commands.registerCommand('omnetpp.previewExportPng', () => NedPreviewPanel.current?.sendCommand('exportPng')),
     vscode.window.registerWebviewPanelSerializer(VIEW_TYPE, {
       deserializeWebviewPanel: (panel) => {
         NedPreviewPanel.revive(panel, context, client);

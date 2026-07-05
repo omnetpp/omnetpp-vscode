@@ -50,15 +50,18 @@ document.getElementById('root')!.innerHTML = `
     <button id="zoomIn" title="Zoom in">+</button>
     <button id="zoomReset" title="Zoom to 100%">1:1</button>
     <button id="zoomFit" title="Fit to view">Fit</button>
-    <span class="sep"></span>
-    <button id="relayout" title="Re-layout unpinned submodules (new seed)">Re-layout</button>
-    <span class="sep"></span>
-    <button id="exportSvg" title="Export as SVG">SVG</button>
-    <button id="exportPng" title="Export as PNG">PNG</button>
     <span id="pinState"></span>
   </div>
   <div id="paper"><div id="canvas"></div><div id="empty">Open a NED file to see its graphical preview.</div></div>
 `;
+
+// Replace the meaningless default webview context menu (copy/cut/paste) with
+// the extension's own items: package.json contributes Re-layout and the
+// exports to "webview/context", matched via this webviewSection.
+document.getElementById('root')!.dataset.vscodeContext = JSON.stringify({
+  webviewSection: 'nedPreview',
+  preventDefaultContextMenuItems: true,
+});
 
 // NOTE: no JS-injected <style> here. The page CSS lives in the host-generated
 // HTML (nedPreviewPanel.buildHtml) where it carries the CSP nonce — a
@@ -124,12 +127,13 @@ document.getElementById('zoomFit')!.addEventListener('click', () => {
   const pad = 24;
   setZoom(Math.min((paper.clientWidth - pad) / intrinsic.w, (paper.clientHeight - pad) / intrinsic.h));
 });
-document.getElementById('relayout')!.addEventListener('click', () => {
+// re-layout and the exports are reachable via the context menu (webview/context)
+function doRelayout(): void {
   if (!scene) return;
   state.seeds[scene.fqName] = seedFor(scene.fqName) + 1; // IDE: seed+1 per re-layout
   vscode.setState(state);
   void rerender();
-});
+}
 paper.addEventListener('wheel', (e) => {
   if (!e.ctrlKey) return;
   e.preventDefault();
@@ -191,12 +195,12 @@ function serializeSvg(): string {
   return svg ? new XMLSerializer().serializeToString(svg) : '';
 }
 
-document.getElementById('exportSvg')!.addEventListener('click', () => {
+function doExportSvg(): void {
   if (!svg || !scene) return;
   vscode.postMessage({ type: 'export', format: 'svg', data: serializeSvg(), suggestedName: `${scene.simpleName}.svg` });
-});
+}
 
-document.getElementById('exportPng')!.addEventListener('click', () => {
+function doExportPng(): void {
   if (!svg || !scene) return;
   const name = scene.simpleName;
   const scale = 2; // export at 2x for crispness
@@ -214,7 +218,7 @@ document.getElementById('exportPng')!.addEventListener('click', () => {
   };
   // data: URI (allowed by img-src) — all embedded icons are data URIs already
   img.src = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(serializeSvg())))}`;
-});
+}
 
 // ---- interactions: click to navigate, double-click to open the type ----
 
@@ -248,7 +252,14 @@ function post(type: 'navigate' | 'openType', uri: string, range?: Range): void {
 // ---- host messages ----
 
 window.addEventListener('message', (event: MessageEvent) => {
-  const msg = event.data as SceneMessage;
+  const msg = event.data as SceneMessage | { type: 'command'; command: string };
+  if (msg.type === 'command') {
+    // context-menu commands forwarded by the host panel
+    if (msg.command === 'relayout') doRelayout();
+    else if (msg.command === 'exportSvg') doExportSvg();
+    else if (msg.command === 'exportPng') doExportPng();
+    return;
+  }
   if (msg.type !== 'scene') return;
   scene = msg.scene;
   pinned = msg.pinned;

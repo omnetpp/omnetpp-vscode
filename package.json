@@ -222,6 +222,21 @@
         "title": "Unpin NED Preview",
         "category": "OMNeT++",
         "icon": "$(pinned)"
+      },
+      {
+        "command": "omnetpp.previewRelayout",
+        "title": "Re-layout",
+        "category": "OMNeT++"
+      },
+      {
+        "command": "omnetpp.previewExportSvg",
+        "title": "Export as SVG...",
+        "category": "OMNeT++"
+      },
+      {
+        "command": "omnetpp.previewExportPng",
+        "title": "Export as PNG...",
+        "category": "OMNeT++"
       }
     ],
     "menus": {
@@ -242,7 +257,27 @@
         { "command": "omnetpp.refreshConfigurations", "when": "true" },
         { "command": "omnetpp.showNedPreview", "when": "editorLangId == 'OMNeT++ NED'" },
         { "command": "omnetpp.pinPreview", "when": "false" },
-        { "command": "omnetpp.unpinPreview", "when": "false" }
+        { "command": "omnetpp.unpinPreview", "when": "false" },
+        { "command": "omnetpp.previewRelayout", "when": "false" },
+        { "command": "omnetpp.previewExportSvg", "when": "false" },
+        { "command": "omnetpp.previewExportPng", "when": "false" }
+      ],
+      "webview/context": [
+        {
+          "command": "omnetpp.previewRelayout",
+          "when": "webviewId == 'omnetpp.nedPreview' && webviewSection == 'nedPreview'",
+          "group": "1_layout@1"
+        },
+        {
+          "command": "omnetpp.previewExportSvg",
+          "when": "webviewId == 'omnetpp.nedPreview' && webviewSection == 'nedPreview'",
+          "group": "2_export@1"
+        },
+        {
+          "command": "omnetpp.previewExportPng",
+          "when": "webviewId == 'omnetpp.nedPreview' && webviewSection == 'nedPreview'",
+          "group": "2_export@2"
+        }
       ],
       "editor/context": [
         {
