@@ -108,7 +108,10 @@ function clipLineToRect(p1: Pt, p2: Pt, rect: Rect): void {
 function arrowcoordsContained(
   innerRect: Rect, outerRect: Rect, bundleI: number, bundleN: number, srcDir?: string,
 ): Pt[] {
-  let dir = srcDir;
+  // Only cardinal directions select an edge here; anything else (h/v) means
+  // auto. (The C++ switch would leave the coordinates uninitialized — UB we
+  // deliberately do not replicate.)
+  let dir = srcDir && 'nesw'.includes(srcDir) ? srcDir : undefined;
   if (!dir) {
     // auto: pick the nearest border
     const t = top(innerRect) - top(outerRect);

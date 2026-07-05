@@ -39,7 +39,7 @@
     "dev:build": "bun run copy:assets && bun run bundle",
     "copy:assets": "bun ./scripts/copy-assets.mjs",
     "prepackage": "bun run compile && bun run build:wasm && bun run copy:assets && bun ./esbuild.mjs --production",
-    "test": "bun run compile && bun test ./shared/src/test ./server/src/test",
+    "test": "bun run compile && bun test ./shared/src/test ./server/src/test ./client/webview/src/test",
     "package": "bun run prepackage && bun ./node_modules/@vscode/vsce/vsce package --no-dependencies",
     "deploy": "bun run prepackage && bun ./node_modules/@vscode/vsce/vsce publish --no-dependencies"
   },

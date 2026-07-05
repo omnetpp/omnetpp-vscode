@@ -13,5 +13,7 @@
     "moduleResolution": "Bundler"
   },
   "references": [{ "path": "../../shared" }],
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  // tests import bun:test and run via `bun test` directly over the sources
+  "exclude": ["src/test"]
 }
