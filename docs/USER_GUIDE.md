@@ -237,9 +237,10 @@ Each group shows a count; leaves jump to the using site.
 
 **Feature.** A read-only graphical rendering of the NED type under the cursor — the same
 visualization as the Eclipse-based IDE's graphical NED editor (types, not running
-instances). Open it with the **preview button** in the editor title of any NED file, or
-**"OMNeT++: Show NED Preview"** from the command palette. The panel opens beside the
-editor and *follows the cursor*: moving the caret into another type (or file) re-renders.
+instances). Open it with the **preview button** in the editor title of any NED file,
+**"OMNeT++: Show Graphical Preview"** from the command palette, or the same item in the
+NED editor's right-click menu. The panel opens beside the editor and *follows the
+cursor*: moving the caret into another type (or file) re-renders.
 
 **What is drawn.** Compound modules and networks show their full diagram: submodules
 (icons, shapes, tints, status icons, ranges, queue markers, text labels — the complete

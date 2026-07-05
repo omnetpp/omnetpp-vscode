@@ -207,7 +207,7 @@
       },
       {
         "command": "omnetpp.showNedPreview",
-        "title": "Show NED Preview",
+        "title": "Show Graphical Preview",
         "category": "OMNeT++",
         "icon": "$(open-preview)"
       },
@@ -277,6 +277,11 @@
         }
       ],
       "editor/context": [
+        {
+          "command": "omnetpp.showNedPreview",
+          "when": "editorLangId == 'OMNeT++ NED'",
+          "group": "navigation@1"
+        },
         {
           "command": "omnetpp.setActiveConfiguration",
           "when": "editorLangId == 'OMNeT++ INI'",
