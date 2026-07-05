@@ -18,6 +18,7 @@ import {
 } from 'vscode-languageclient/node';
 import { OmnetppMethods, type OmnetppSettings } from '@omnetpp/shared/protocol';
 import { registerViews } from './views';
+import { registerNedPreview } from './nedPreviewPanel';
 import { startMcpBridge } from './mcpBridge';
 
 let client: LanguageClient | undefined;
@@ -90,6 +91,7 @@ export function activate(context: ExtensionContext): void {
 
   void client.start();
   registerViews(context, client);
+  registerNedPreview(context, client);
   registerRevalidationTriggers(context);
 
   // Push setting changes to the server so they apply without a window reload.

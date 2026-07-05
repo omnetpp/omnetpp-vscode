@@ -204,6 +204,24 @@
         "title": "Refresh Configurations",
         "category": "OMNeT++",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "omnetpp.showNedPreview",
+        "title": "Show NED Preview",
+        "category": "OMNeT++",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "omnetpp.pinPreview",
+        "title": "Pin NED Preview",
+        "category": "OMNeT++",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "omnetpp.unpinPreview",
+        "title": "Unpin NED Preview",
+        "category": "OMNeT++",
+        "icon": "$(pinned)"
       }
     ],
     "menus": {
@@ -221,13 +239,33 @@
         { "command": "omnetpp.setActiveConfigItem", "when": "false" },
         { "command": "omnetpp.filterConfigurations", "when": "true" },
         { "command": "omnetpp.clearConfigurationsFilter", "when": "omnetpp.configFilterActive" },
-        { "command": "omnetpp.refreshConfigurations", "when": "true" }
+        { "command": "omnetpp.refreshConfigurations", "when": "true" },
+        { "command": "omnetpp.showNedPreview", "when": "editorLangId == 'OMNeT++ NED'" },
+        { "command": "omnetpp.pinPreview", "when": "false" },
+        { "command": "omnetpp.unpinPreview", "when": "false" }
       ],
       "editor/context": [
         {
           "command": "omnetpp.setActiveConfiguration",
           "when": "editorLangId == 'OMNeT++ INI'",
           "group": "navigation@1"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "omnetpp.showNedPreview",
+          "when": "editorLangId == 'OMNeT++ NED'",
+          "group": "navigation"
+        },
+        {
+          "command": "omnetpp.pinPreview",
+          "when": "activeWebviewPanelId == 'omnetpp.nedPreview' && !omnetpp.previewPinned",
+          "group": "navigation"
+        },
+        {
+          "command": "omnetpp.unpinPreview",
+          "when": "activeWebviewPanelId == 'omnetpp.nedPreview' && omnetpp.previewPinned",
+          "group": "navigation"
         }
       ],
       "view/title": [
