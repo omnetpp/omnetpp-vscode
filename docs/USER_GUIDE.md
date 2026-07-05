@@ -261,6 +261,13 @@ immediately.
   submodule.
 - **Hover** for tooltips (resolved type incl. `like` resolution, inheritance origin,
   gates/channel, `tt`/`bgtt` texts). **Drag** anywhere to pan the canvas.
+- **Back / Forward**: each type you deliberately pin (drill-in, the search box, the pin
+  button) is recorded in a history you can step through — the **←/→ toolbar buttons**, the
+  **mouse back/forward buttons**, or `Alt+Left`/`Alt+Right` while the preview is focused,
+  mirroring VS Code's normal navigation. Drilling in while following the cursor also
+  records the module you drilled *from*, so **Back** returns to it (this pins the preview;
+  unpin to resume cursor-following). The history holds only real pinned NED types;
+  cursor-following and clearing the pin are not entries.
 - Toolbar: **zoom** in/out/1:1/fit buttons (also `Ctrl`+wheel), and a **type search box**
   on the right. While unpinned the box shows the currently previewed type as its hint
   text; type or pick a type name (with completion) to pin the preview on it.

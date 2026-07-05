@@ -217,6 +217,16 @@
         "category": "OMNeT++"
       },
       {
+        "command": "omnetpp.previewBack",
+        "title": "Back",
+        "category": "OMNeT++"
+      },
+      {
+        "command": "omnetpp.previewForward",
+        "title": "Forward",
+        "category": "OMNeT++"
+      },
+      {
         "command": "omnetpp.previewRelayout",
         "title": "Re-layout",
         "category": "OMNeT++"
@@ -250,6 +260,8 @@
         { "command": "omnetpp.refreshConfigurations", "when": "true" },
         { "command": "omnetpp.showNedPreview", "when": "editorLangId == 'OMNeT++ NED'" },
         { "command": "omnetpp.previewShowType", "when": "false" },
+        { "command": "omnetpp.previewBack", "when": "false" },
+        { "command": "omnetpp.previewForward", "when": "false" },
         { "command": "omnetpp.previewRelayout", "when": "false" },
         { "command": "omnetpp.previewExportSvg", "when": "false" },
         { "command": "omnetpp.previewExportPng", "when": "false" }
@@ -433,6 +445,20 @@
         "scopeName": "source.omnetpp-ini",
         "path": "./syntaxes/omnetpp-ini.tmLanguage.json",
         "unbalancedBracketScopes": ["comment", "string"]
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "omnetpp.previewBack",
+        "key": "alt+left",
+        "mac": "ctrl+-",
+        "when": "activeWebviewPanelId == 'omnetpp.nedPreview'"
+      },
+      {
+        "command": "omnetpp.previewForward",
+        "key": "alt+right",
+        "mac": "ctrl+shift+-",
+        "when": "activeWebviewPanelId == 'omnetpp.nedPreview'"
       }
     ],
     "configuration": {

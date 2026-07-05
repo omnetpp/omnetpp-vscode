@@ -40,7 +40,10 @@ type HostMessage =
   | { type: 'navigate'; uri: string; range?: Range }
   | { type: 'openType'; uri: string; range?: Range }
   | { type: 'export'; format: 'svg' | 'png'; data: string; suggestedName: string }
-  | { type: 'setPin'; fqName?: string };
+  | { type: 'setPin'; fqName?: string }
+  | { type: 'drillIn'; fqName: string }
+  | { type: 'historyBack' }
+  | { type: 'historyForward' };
 
 function activeNedContext(): { uri: string; position: Pos } | undefined {
   const ed = vscode.window.activeTextEditor;
@@ -67,6 +70,16 @@ export class NedPreviewPanel {
   private lastTypeListKey?: string;
   private lastSceneKey?: string;
   private bundledIndex?: Record<string, [number, number]>;
+
+  /**
+   * Navigation history of deliberate pins (drill-in, search, pin/clear), for
+   * back/forward. Each entry is a pinned fq-name or `undefined` (unpinned /
+   * follow-cursor). Cursor movement in unpinned mode does NOT push history.
+   */
+  private history: string[] = [];
+  private historyIndex = -1;
+  /** fq-name of the type currently shown (pinned or under the cursor), if any. */
+  private currentFqName?: string;
 
   static createOrShow(context: vscode.ExtensionContext, client: LanguageClient): void {
     if (NedPreviewPanel.current) {
@@ -106,6 +119,10 @@ export class NedPreviewPanel {
     private readonly context: vscode.ExtensionContext,
     private readonly client: LanguageClient,
   ) {
+    // seed history from the persisted pin, if any (unpinned ⇒ index -1)
+    const pin = this.pinnedFqName();
+    this.history = pin ? [pin] : [];
+    this.historyIndex = pin ? 0 : -1;
     this.panel.webview.html = this.buildHtml();
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
     this.panel.webview.onDidReceiveMessage((m: HostMessage) => void this.onMessage(m), null, this.disposables);
@@ -149,10 +166,69 @@ export class NedPreviewPanel {
     void this.panel.webview.postMessage({ type: 'command', command });
   }
 
-  /** Pin the preview to an exact fq-name (the "Show" context-menu item). */
+  /**
+   * Drill into a type (the "Show" context-menu item / Ctrl-click). If the
+   * preview was following the cursor, the type currently shown is recorded
+   * first, so Back returns to where the user started exploring from. This
+   * pins the preview — intended, since the user is now navigating by drill-in
+   * and back/forward; a later unpin resumes cursor-following.
+   */
   async showType(fqName: string): Promise<void> {
+    if (this.historyIndex < 0 && this.currentFqName && this.currentFqName !== fqName) {
+      this.history = [this.currentFqName];
+      this.historyIndex = 0;
+    }
+    await this.navigateTo(fqName);
+  }
+
+  // ---- navigation history (back/forward) ----
+  // The history holds ONLY existing, pinned NED types. The unpinned
+  // (follow-cursor) state is not an entry — it is the position *before* the
+  // first entry, represented by historyIndex === -1.
+
+  /**
+   * Record a deliberate navigation to an existing type and apply it: drop any
+   * forward history, push the type, and pin to it. A no-op when it is already
+   * the current entry so a stray re-pin doesn't create a dead history entry.
+   */
+  private async navigateTo(fqName: string): Promise<void> {
+    if (this.historyIndex >= 0 && this.history[this.historyIndex] === fqName) return;
+    this.history = this.history.slice(0, this.historyIndex + 1);
+    this.history.push(fqName);
+    this.historyIndex = this.history.length - 1;
+    await this.applyPin(fqName);
+  }
+
+  /** Clear the pin (resume cursor-following) — the unpinned position (-1). */
+  private async clearPin(): Promise<void> {
+    this.historyIndex = -1;
+    await this.applyPin(undefined);
+  }
+
+  private async applyPin(fqName: string | undefined): Promise<void> {
     await this.context.workspaceState.update(PIN_KEY, fqName);
-    void this.update(true);
+    await this.update(true);
+  }
+
+  async back(): Promise<void> {
+    if (this.historyIndex <= 0) return; // stop at the first pinned type
+    this.historyIndex--;
+    await this.applyPin(this.history[this.historyIndex]);
+  }
+
+  async forward(): Promise<void> {
+    if (this.historyIndex >= this.history.length - 1) return;
+    this.historyIndex++;
+    await this.applyPin(this.history[this.historyIndex]);
+  }
+
+  /** Tell the webview whether the back/forward toolbar buttons are enabled. */
+  private postHistory(): void {
+    void this.panel.webview.postMessage({
+      type: 'history',
+      canGoBack: this.historyIndex > 0,
+      canGoForward: this.historyIndex < this.history.length - 1,
+    });
   }
 
   // ---- scene updates ----
@@ -170,9 +246,11 @@ export class NedPreviewPanel {
 
   async update(force = false): Promise<void> {
     if (!this.webviewReady) return;
+    this.postHistory();
     const scene = await this.fetchScene();
     // without a NED editor (or on request failure) keep showing the last scene
     if (!scene && !force) return;
+    this.currentFqName = scene?.fqName;
 
     const key = scene ? JSON.stringify(scene) : 'empty';
     if (force || key !== this.lastSceneKey) {
@@ -208,28 +286,38 @@ export class NedPreviewPanel {
     void this.panel.webview.postMessage({ type: 'typeList', types });
   }
 
-  /** Pin request from the search box: resolve loose input to a known type. */
+  /**
+   * Pin request from the search box: empty input clears the pin; otherwise the
+   * loose input is resolved to an *existing* NED type before pinning. A name
+   * that resolves to no indexed type is ignored, so the history only ever holds
+   * real pinned types.
+   */
   private async setPinFromSearch(text: string | undefined): Promise<void> {
-    let fqName = text?.trim() || undefined;
-    if (fqName && !fqName.includes('.')) {
-      // a bare simple name: prefer a unique fq match from the index
-      try {
-        const result = await this.client.sendRequest<{ fqName: string }[]>(OmnetppMethods.mcpCallTool, {
-          name: 'list_ned_types',
-          arguments: {},
-        });
-        const needle = fqName.toLowerCase();
-        const matches = result.filter((t) => {
-          const simple = t.fqName.split('.').pop() ?? t.fqName;
-          return simple.toLowerCase() === needle;
-        });
-        if (matches.length >= 1) fqName = matches[0].fqName;
-      } catch {
-        /* index unavailable: pin verbatim */
-      }
+    const raw = text?.trim();
+    if (!raw) {
+      await this.clearPin();
+      return;
     }
-    await this.context.workspaceState.update(PIN_KEY, fqName);
-    void this.update(true);
+    const fqName = await this.resolveKnownType(raw);
+    if (fqName) await this.navigateTo(fqName);
+  }
+
+  /** Resolve loose input to an indexed NED type's fq-name (exact, else unique
+   *  simple-name match); undefined if no such type exists. */
+  private async resolveKnownType(text: string): Promise<string | undefined> {
+    let types: { fqName: string }[];
+    try {
+      types = await this.client.sendRequest<{ fqName: string }[]>(OmnetppMethods.mcpCallTool, {
+        name: 'list_ned_types',
+        arguments: {},
+      });
+    } catch {
+      return text; // index unavailable: best-effort pin verbatim
+    }
+    if (types.some((t) => t.fqName === text)) return text; // exact fq-name
+    const needle = text.toLowerCase();
+    const matches = types.filter((t) => (t.fqName.split('.').pop() ?? t.fqName).toLowerCase() === needle);
+    return matches.length >= 1 ? matches[0].fqName : undefined;
   }
 
   // ---- icon resolution (Eclipse search order) ----
@@ -320,6 +408,15 @@ export class NedPreviewPanel {
       case 'setPin':
         await this.setPinFromSearch(msg.fqName);
         break;
+      case 'drillIn':
+        await this.showType(msg.fqName);
+        break;
+      case 'historyBack':
+        await this.back();
+        break;
+      case 'historyForward':
+        await this.forward();
+        break;
       case 'export': {
         const filters: Record<string, string[]> =
           msg.format === 'svg' ? { 'SVG image': ['svg'] } : { 'PNG image': ['png'] };
@@ -365,7 +462,8 @@ export class NedPreviewPanel {
              background: var(--vscode-button-secondaryBackground, #ddd);
              color: var(--vscode-button-secondaryForeground, #333); border: none; border-radius: 2px;
              cursor: pointer; font-size: 12px; }
-  #toolbar button:hover { background: var(--vscode-button-secondaryHoverBackground, #ccc); }
+  #toolbar button:hover:not(:disabled) { background: var(--vscode-button-secondaryHoverBackground, #ccc); }
+  #toolbar button:disabled { opacity: 0.4; cursor: default; }
   #toolbar button svg { display: block; }
   #zoomLabel { min-width: 42px; text-align: center; font-size: 12px; }
   #typeSearch { margin-left: auto; flex: 0 1 280px; min-width: 90px; height: 20px; box-sizing: border-box;
@@ -398,6 +496,8 @@ export function registerNedPreview(context: vscode.ExtensionContext, client: Lan
     vscode.commands.registerCommand('omnetpp.previewShowType', (ctx?: { fqName?: string }) => {
       if (ctx?.fqName) void NedPreviewPanel.current?.showType(ctx.fqName);
     }),
+    vscode.commands.registerCommand('omnetpp.previewBack', () => void NedPreviewPanel.current?.back()),
+    vscode.commands.registerCommand('omnetpp.previewForward', () => void NedPreviewPanel.current?.forward()),
     vscode.commands.registerCommand('omnetpp.previewRelayout', () => NedPreviewPanel.current?.sendCommand('relayout')),
     vscode.commands.registerCommand('omnetpp.previewExportSvg', () => NedPreviewPanel.current?.sendCommand('exportSvg')),
     vscode.commands.registerCommand('omnetpp.previewExportPng', () => NedPreviewPanel.current?.sendCommand('exportPng')),

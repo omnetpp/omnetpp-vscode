@@ -46,6 +46,8 @@ let renderToken = 0;
 
 // self-contained inline SVG icons (codicon look-alikes; no external fonts)
 const ICON = {
+  back: `<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M9.5 3 5 8l4.5 5"/></svg>`,
+  forward: `<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M6.5 3 11 8l-4.5 5"/></svg>`,
   zoomOut: `<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6.5" cy="6.5" r="4.75"/><path d="M10.5 10.5 14.5 14.5"/><path d="M4.5 6.5h4"/></g></svg>`,
   zoomIn: `<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6.5" cy="6.5" r="4.75"/><path d="M10.5 10.5 14.5 14.5"/><path d="M4.5 6.5h4M6.5 4.5v4"/></g></svg>`,
   zoomReset: `<svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><text x="8" y="11.5" text-anchor="middle" font-size="8.5" font-weight="bold" font-family="sans-serif" fill="currentColor">1:1</text></svg>`,
@@ -56,6 +58,8 @@ const ICON = {
 
 document.getElementById('root')!.innerHTML = `
   <div id="toolbar">
+    <button id="histBack" title="Back (Alt+Left / mouse back button)" disabled>${ICON.back}</button>
+    <button id="histForward" title="Forward (Alt+Right / mouse forward button)" disabled>${ICON.forward}</button>
     <button id="zoomOut" title="Zoom out">${ICON.zoomOut}</button>
     <span id="zoomLabel">100%</span>
     <button id="zoomIn" title="Zoom in">${ICON.zoomIn}</button>
@@ -88,6 +92,8 @@ const zoomLabel = document.getElementById('zoomLabel')!;
 const typeSearch = document.getElementById('typeSearch') as HTMLInputElement;
 const typeOptions = document.getElementById('typeOptions') as HTMLDataListElement;
 const pinBtn = document.getElementById('pinBtn') as HTMLButtonElement;
+const histBack = document.getElementById('histBack') as HTMLButtonElement;
+const histForward = document.getElementById('histForward') as HTMLButtonElement;
 
 // ---- rendering ----
 
@@ -148,6 +154,29 @@ function setZoom(z: number): void {
 }
 
 // ---- toolbar ----
+
+// ---- history (back / forward) ----
+// The host owns the pin history; these just request a move and mirror the
+// mouse back/forward buttons and the Alt+Left / Alt+Right keybindings.
+
+histBack.addEventListener('click', () => vscode.postMessage({ type: 'historyBack' }));
+histForward.addEventListener('click', () => vscode.postMessage({ type: 'historyForward' }));
+
+// Mouse back/forward buttons (X buttons 3/4) navigate the preview history —
+// the same gesture VS Code uses for global back/forward navigation. The events
+// land inside this focused webview, so we handle them here.
+window.addEventListener('mousedown', (e) => {
+  if (e.button === 3 || e.button === 4) e.preventDefault(); // suppress any default nav
+});
+window.addEventListener('mouseup', (e) => {
+  if (e.button === 3) {
+    e.preventDefault();
+    vscode.postMessage({ type: 'historyBack' });
+  } else if (e.button === 4) {
+    e.preventDefault();
+    vscode.postMessage({ type: 'historyForward' });
+  }
+});
 
 document.getElementById('zoomIn')!.addEventListener('click', () => setZoom(state.zoom * 1.25));
 document.getElementById('zoomOut')!.addEventListener('click', () => setZoom(state.zoom / 1.25));
@@ -312,7 +341,7 @@ canvas.addEventListener('click', (e) => {
   if ((e.ctrlKey || e.metaKey) && hit.kind === 'sub') {
     const fqName = scene.submodules?.[hit.index]?.resolvedTypeFqName;
     if (fqName) {
-      vscode.postMessage({ type: 'setPin', fqName });
+      vscode.postMessage({ type: 'drillIn', fqName });
       return;
     }
   }
@@ -337,7 +366,13 @@ window.addEventListener('message', (event: MessageEvent) => {
   const msg = event.data as
     | SceneMessage
     | { type: 'command'; command: string }
-    | { type: 'typeList'; types: string[] };
+    | { type: 'typeList'; types: string[] }
+    | { type: 'history'; canGoBack: boolean; canGoForward: boolean };
+  if (msg.type === 'history') {
+    histBack.disabled = !msg.canGoBack;
+    histForward.disabled = !msg.canGoForward;
+    return;
+  }
   if (msg.type === 'command') {
     // context-menu commands forwarded by the host panel
     if (msg.command === 'relayout') doRelayout();
