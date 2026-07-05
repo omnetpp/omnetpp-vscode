@@ -311,12 +311,32 @@ export class NedPreviewPanel {
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; connect-src ${webview.cspSource}; style-src 'nonce-${nonce}' 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; connect-src ${webview.cspSource}; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NED Preview</title>
 <style nonce="${nonce}">
   html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
-  #root { height: 100%; }
+  /* The whole page stylesheet lives here (not injected from the webview
+     script): style-src carries a nonce, so a JS-appended <style> without one
+     would be blocked — 'unsafe-inline' is ignored when a nonce is present. */
+  #root { display: flex; flex-direction: column; height: 100%; font-family: var(--vscode-font-family); }
+  #toolbar { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; padding: 4px 8px;
+             background: var(--vscode-editorWidget-background); color: var(--vscode-foreground);
+             border-bottom: 1px solid var(--vscode-editorWidget-border, transparent); }
+  #toolbar button { background: var(--vscode-button-secondaryBackground, #ddd);
+             color: var(--vscode-button-secondaryForeground, #333); border: none; border-radius: 2px;
+             padding: 2px 8px; cursor: pointer; font-size: 12px; }
+  #toolbar button:hover { background: var(--vscode-button-secondaryHoverBackground, #ccc); }
+  #toolbar .sep { width: 1px; height: 16px; background: var(--vscode-editorWidget-border, #888); margin: 0 4px; }
+  #zoomLabel { min-width: 42px; text-align: center; font-size: 12px; }
+  #pinState { margin-left: auto; font-size: 12px; opacity: .8; }
+  #paper { flex: 1 1 auto; overflow: auto; background: #ffffff; position: relative;
+           cursor: grab; user-select: none; }
+  #paper.panning { cursor: grabbing; }
+  #paper.panning * { cursor: grabbing !important; }
+  #canvas { padding: 8px; width: max-content; }
+  #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+           color: #888; font-size: 13px; text-align: center; padding: 0 24px; }
 </style>
 </head>
 <body>

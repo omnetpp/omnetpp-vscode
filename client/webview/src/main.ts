@@ -60,25 +60,10 @@ document.getElementById('root')!.innerHTML = `
   <div id="paper"><div id="canvas"></div><div id="empty">Open a NED file to see its graphical preview.</div></div>
 `;
 
-const style = document.createElement('style');
-style.textContent = `
-  #root { display: flex; flex-direction: column; height: 100%; font-family: var(--vscode-font-family); }
-  #toolbar { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; padding: 4px 8px;
-             background: var(--vscode-editorWidget-background); color: var(--vscode-foreground);
-             border-bottom: 1px solid var(--vscode-editorWidget-border, transparent); }
-  #toolbar button { background: var(--vscode-button-secondaryBackground, #ddd);
-             color: var(--vscode-button-secondaryForeground, #333); border: none; border-radius: 2px;
-             padding: 2px 8px; cursor: pointer; font-size: 12px; }
-  #toolbar button:hover { background: var(--vscode-button-secondaryHoverBackground, #ccc); }
-  #toolbar .sep { width: 1px; height: 16px; background: var(--vscode-editorWidget-border, #888); margin: 0 4px; }
-  #zoomLabel { min-width: 42px; text-align: center; font-size: 12px; }
-  #pinState { margin-left: auto; font-size: 12px; opacity: .8; }
-  #paper { flex: 1 1 auto; overflow: auto; background: #ffffff; position: relative; }
-  #canvas { padding: 8px; width: max-content; }
-  #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-           color: #888; font-size: 13px; text-align: center; padding: 0 24px; }
-`;
-document.head.appendChild(style);
+// NOTE: no JS-injected <style> here. The page CSS lives in the host-generated
+// HTML (nedPreviewPanel.buildHtml) where it carries the CSP nonce — a
+// dynamically appended stylesheet has no nonce, and 'unsafe-inline' would be
+// IGNORED by the browser because the CSP's style-src carries a nonce.
 
 const paper = document.getElementById('paper')!;
 const canvas = document.getElementById('canvas')!;
@@ -150,6 +135,55 @@ paper.addEventListener('wheel', (e) => {
   e.preventDefault();
   setZoom(state.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
 }, { passive: false });
+
+// ---- drag panning ----
+// Left- or middle-button drag scrolls the paper. A small threshold keeps
+// plain clicks working (click-to-navigate); once a real pan happened, the
+// click that follows pointerup is swallowed.
+
+const PAN_THRESHOLD = 4;
+let panStart: { x: number; y: number; left: number; top: number; pointerId: number } | undefined;
+let panned = false;
+
+paper.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 && e.button !== 1) return;
+  if (e.button === 1) e.preventDefault(); // no middle-click autoscroll
+  panStart = { x: e.clientX, y: e.clientY, left: paper.scrollLeft, top: paper.scrollTop, pointerId: e.pointerId };
+  panned = false;
+});
+
+paper.addEventListener('pointermove', (e) => {
+  if (!panStart || e.pointerId !== panStart.pointerId) return;
+  const dx = e.clientX - panStart.x;
+  const dy = e.clientY - panStart.y;
+  if (!panned && Math.hypot(dx, dy) < PAN_THRESHOLD) return;
+  if (!panned) {
+    panned = true;
+    paper.classList.add('panning');
+    paper.setPointerCapture(panStart.pointerId);
+  }
+  paper.scrollLeft = panStart.left - dx;
+  paper.scrollTop = panStart.top - dy;
+});
+
+function endPan(e: PointerEvent): void {
+  if (!panStart || e.pointerId !== panStart.pointerId) return;
+  if (panned) paper.releasePointerCapture(panStart.pointerId);
+  panStart = undefined;
+  paper.classList.remove('panning');
+  // `panned` stays true until the trailing click has been swallowed below
+}
+paper.addEventListener('pointerup', endPan);
+paper.addEventListener('pointercancel', endPan);
+
+// capture phase: runs before the navigation click handler on #canvas
+paper.addEventListener('click', (e) => {
+  if (panned) {
+    e.stopPropagation();
+    e.preventDefault();
+    panned = false;
+  }
+}, { capture: true });
 
 // ---- export ----
 
