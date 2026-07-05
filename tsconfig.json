@@ -4,6 +4,7 @@
     { "path": "./shared" },
     { "path": "./server" },
     { "path": "./client" },
+    { "path": "./client/webview" },
     { "path": "./mcp" }
   ]
 }

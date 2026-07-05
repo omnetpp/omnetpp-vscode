@@ -1,6 +1,6 @@
 // Copies runtime assets into dist/: the language grammar WASM files, the
 // web-tree-sitter runtime WASM, and the bundled config-option registry snapshot.
-import { existsSync, mkdirSync, copyFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, copyFileSync, cpSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -40,6 +40,15 @@ copyInto(
 const configSrc = join(root, 'resources', 'config');
 for (const f of readdirSync(configSrc)) {
   if (f.endsWith('.json')) copyInto(join(configSrc, f), join(dist, 'config'), f);
+}
+
+// 4) bundled icon snapshot for the graphical NED preview (gen-icons.mjs)
+const iconsSrc = join(root, 'resources', 'icons');
+if (existsSync(iconsSrc)) {
+  cpSync(iconsSrc, join(dist, 'icons'), { recursive: true });
+  console.log(`copied ${iconsSrc} -> ${join(dist, 'icons')}`);
+} else {
+  console.warn('resources/icons not found - run "bun scripts/gen-icons.mjs <omnetpp-src>" (preview icons will be missing).');
 }
 
 console.log('Assets copied.');

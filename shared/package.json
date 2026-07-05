@@ -16,6 +16,10 @@
     "./protocol": {
       "types": "./out/protocol.d.ts",
       "default": "./out/protocol.js"
+    },
+    "./preview": {
+      "types": "./out/preview.d.ts",
+      "default": "./out/preview.js"
     }
   },
   "dependencies": {

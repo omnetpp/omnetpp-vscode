@@ -337,6 +337,13 @@ export class DisplayString {
 export const EMPTY_DEFAULTS = new DisplayString(EMPTY_DEFAULTS_STR);
 export const VARIABLE_DEFAULTS = new DisplayString(VARIABLE_DEFAULTS_STR);
 
+/** Rebuild the linked DisplayString from a nearest-first fallback chain. */
+export function displayStringFromChain(chain: string[]): DisplayString {
+  let ds: DisplayString | undefined;
+  for (let i = chain.length - 1; i >= 0; i--) ds = new DisplayString(chain[i], ds);
+  return ds ?? new DisplayString();
+}
+
 // ---- AST extraction ---------------------------------------------------------
 
 /**

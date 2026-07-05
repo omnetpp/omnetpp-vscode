@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./out",
+    "tsBuildInfoFile": "./out/tsconfig.tsbuildinfo",
+    // Webview code runs in the webview's browser context: DOM instead of
+    // node/vscode types. It may import ONLY '@omnetpp/shared/preview' (plus
+    // type-only protocol imports) so the browser bundle stays lean.
+    "lib": ["ES2021", "DOM", "DOM.Iterable"],
+    "types": [],
+    "module": "ESNext",
+    "moduleResolution": "Bundler"
+  },
+  "references": [{ "path": "../../shared" }],
+  "include": ["src/**/*.ts"]
+}

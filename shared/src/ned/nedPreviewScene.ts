@@ -2,8 +2,10 @@ import type { Range } from '../model/location';
 import { NedResourceCache } from './nedResourceCache';
 import { NedTypeInfo } from './nedTypeInfo';
 import { ConnectionInfo, NedTypeKind, SubmoduleInfo, nameNode } from './nedAst';
-import { DisplayString, Prop, displayStringLiteralOf } from './displayStringModel';
+import { Prop, displayStringFromChain, displayStringLiteralOf } from './displayStringModel';
 import { firstChildOfType, nodeRange } from '../parser/treeUtils';
+
+export { displayStringFromChain };
 
 /**
  * The serializable scene model of the graphical NED preview: everything the
@@ -79,13 +81,6 @@ export interface PreviewScene {
   connections?: PreviewConnection[];
   /** All icon ids referenced anywhere in the scene (for URI prefetching). */
   icons: PreviewIcon[];
-}
-
-/** Rebuild the linked DisplayString from a nearest-first fallback chain. */
-export function displayStringFromChain(chain: string[]): DisplayString {
-  let ds: DisplayString | undefined;
-  for (let i = chain.length - 1; i >= 0; i--) ds = new DisplayString(chain[i], ds);
-  return ds ?? new DisplayString();
 }
 
 /** Map the `is` tag's canonical enum name to the icon file-variant suffix. */
