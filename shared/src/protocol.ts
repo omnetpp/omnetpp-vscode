@@ -14,6 +14,7 @@ import type { ModuleHierNode } from './ned/nedModuleHierarchy';
 import type { ParamAssign, ParamHierNode } from './ned/nedParamHierarchy';
 import type { ConfigSummary } from './ini/iniDocument';
 import type { ToolDef } from './mcp/tools';
+import type { PreviewScene, PreviewSubmodule, PreviewConnection, PreviewIcon } from './ned/nedPreviewScene';
 
 export type {
   Position,
@@ -24,6 +25,10 @@ export type {
   ParamAssign,
   ConfigSummary,
   ToolDef,
+  PreviewScene,
+  PreviewSubmodule,
+  PreviewConnection,
+  PreviewIcon,
 };
 
 // Runtime re-export for the client: the canonical `[Config X]` header-name rule
@@ -57,6 +62,8 @@ export const OmnetppMethods = {
   configNetwork: 'omnetpp/configNetwork',
   /** request: ListConfigurationsParams → IniFileConfigs[] */
   listConfigurations: 'omnetpp/listConfigurations',
+  /** request: ViewFocusParams → PreviewScene | null (graphical NED preview) */
+  nedPreview: 'omnetpp/nedPreview',
   /** request: void → ToolDef[] (the MCP tool schemas) */
   mcpListTools: 'omnetpp/mcp/listTools',
   /** request: McpCallToolParams → tool-specific result */

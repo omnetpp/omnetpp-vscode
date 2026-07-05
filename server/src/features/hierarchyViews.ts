@@ -25,7 +25,7 @@ import type { IndexContext } from './context';
 // ---- auxiliary tree views ----
 
 /** The NED type whose definition spans `pos`, if any. */
-function typeAtPos(parsed: ParsedDocument, pos: Position | undefined, ctx: IndexContext): NedTypeInfo | undefined {
+export function typeAtPos(parsed: ParsedDocument, pos: Position | undefined, ctx: IndexContext): NedTypeInfo | undefined {
   if (!pos) return undefined;
   const contains = (t: NedTypeInfo) =>
     (t.node.startPosition.row < pos.line ||

@@ -50,6 +50,7 @@ export {
   inheritanceSpineFor,
 } from './ned/nedHierarchy';
 export { type ModuleHierNode, moduleHierarchyRoot, moduleHierarchyChildren } from './ned/nedModuleHierarchy';
+export { type PreviewScene, buildPreviewScene, previewSceneByFq } from './ned/nedPreviewScene';
 export {
   type ParamHierNode,
   type ParamAssign,

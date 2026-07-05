@@ -26,6 +26,7 @@ import {
   buildConfigCtx,
 } from './features/hierarchyViews';
 import { computeTypeHierarchySubtypes } from './features/typeHierarchy';
+import { computePreviewScene, computePreviewSceneByFq } from './features/nedPreview';
 import type { IndexContext } from './features/context';
 import { ServerState, ctx, iniDocFor, languageOfDoc } from './serverState';
 
@@ -85,6 +86,15 @@ export function registerViewRequests(
     const parsed = params.uri ? state.store?.get(params.uri) : undefined;
     if (!parsed) return [];
     return computeModuleHierarchy(parsed, params.position, c);
+  });
+
+  connection.onRequest(OmnetppMethods.nedPreview, (params: ViewFocusParams) => {
+    const c = ctx(state);
+    if (!c) return null;
+    if (params.fqName) return computePreviewSceneByFq(params.fqName, c) ?? null;
+    const parsed = params.uri ? state.store?.get(params.uri) : undefined;
+    if (!parsed) return null;
+    return computePreviewScene(parsed, params.position, c) ?? null;
   });
 
   connection.onRequest(OmnetppMethods.moduleHierarchyChildren, (params: FqNameParams) => {
