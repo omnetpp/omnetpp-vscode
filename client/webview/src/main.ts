@@ -265,7 +265,7 @@ function doExportPng(): void {
     c.width = intrinsic.w * scale;
     c.height = intrinsic.h * scale;
     const ctx = c.getContext('2d')!;
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = '#a0e0a0'; // Qtenv's canvas green (like its print/export)
     ctx.fillRect(0, 0, c.width, c.height);
     ctx.drawImage(img, 0, 0, c.width, c.height);
     const data = c.toDataURL('image/png').replace(/^data:image\/png;base64,/, '');

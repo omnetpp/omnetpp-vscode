@@ -263,8 +263,7 @@ immediately.
 - **Pin button** next to the search box: pressing it copies the shown type's fully
   qualified name into the box, pinning the preview (it stops following the cursor). The
   button then turns into a **clear** icon — pressing it empties the box and resumes
-  cursor-following. The pin persists per workspace (also available in the panel title
-  bar).
+  cursor-following. The pin persists per workspace.
 - **Right-click** context menu: **Re-layout** (new layout seed for unpinned submodules,
   like the IDE's re-layout action) and **Export as SVG/PNG**.
 

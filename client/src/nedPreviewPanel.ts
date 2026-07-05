@@ -125,7 +125,6 @@ export class NedPreviewPanel {
         if (e.document.languageId === NED_LANG) this.invalidateAndUpdate(debounced);
       }),
     );
-    this.syncPinContext();
   }
 
   /** Text edits change content under the same focus key: force a re-render. */
@@ -137,34 +136,12 @@ export class NedPreviewPanel {
   private dispose(): void {
     NedPreviewPanel.current = undefined;
     for (const d of this.disposables.splice(0)) d.dispose();
-    void vscode.commands.executeCommand('setContext', 'omnetpp.previewPinned', false);
   }
 
-  // ---- pinning ----
+  // ---- pinning (driven by the webview's search box / pin button) ----
 
   pinnedFqName(): string | undefined {
     return this.context.workspaceState.get<string>(PIN_KEY);
-  }
-
-  async pin(): Promise<void> {
-    const scene = await this.fetchScene();
-    if (!scene) {
-      void vscode.window.showInformationMessage('OMNeT++: no NED type to pin the preview on.');
-      return;
-    }
-    await this.context.workspaceState.update(PIN_KEY, scene.fqName);
-    this.syncPinContext();
-    void this.update(true);
-  }
-
-  async unpin(): Promise<void> {
-    await this.context.workspaceState.update(PIN_KEY, undefined);
-    this.syncPinContext();
-    void this.update(true);
-  }
-
-  private syncPinContext(): void {
-    void vscode.commands.executeCommand('setContext', 'omnetpp.previewPinned', !!this.pinnedFqName());
   }
 
   /** Forward a context-menu command (re-layout, export) to the webview app. */
@@ -246,7 +223,6 @@ export class NedPreviewPanel {
       }
     }
     await this.context.workspaceState.update(PIN_KEY, fqName);
-    this.syncPinContext();
     void this.update(true);
   }
 
@@ -391,7 +367,8 @@ export class NedPreviewPanel {
              border: 1px solid var(--vscode-input-border, #0000); border-radius: 2px;
              padding: 0 6px; font-size: 12px; font-family: var(--vscode-font-family); }
   #typeSearch::placeholder { color: var(--vscode-input-placeholderForeground, #888); }
-  #paper { flex: 1 1 auto; overflow: auto; background: #ffffff; position: relative;
+  /* Qtenv's canvas shade behind everything (colors::LIGHTGREEN in qtutil.cc) */
+  #paper { flex: 1 1 auto; overflow: auto; background: #a0e0a0; position: relative;
            cursor: grab; user-select: none; }
   #paper.panning { cursor: grabbing; }
   #paper.panning * { cursor: grabbing !important; }
@@ -412,8 +389,6 @@ export class NedPreviewPanel {
 export function registerNedPreview(context: vscode.ExtensionContext, client: LanguageClient): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('omnetpp.showNedPreview', () => NedPreviewPanel.createOrShow(context, client)),
-    vscode.commands.registerCommand('omnetpp.pinPreview', () => void NedPreviewPanel.current?.pin()),
-    vscode.commands.registerCommand('omnetpp.unpinPreview', () => void NedPreviewPanel.current?.unpin()),
     vscode.commands.registerCommand('omnetpp.previewRelayout', () => NedPreviewPanel.current?.sendCommand('relayout')),
     vscode.commands.registerCommand('omnetpp.previewExportSvg', () => NedPreviewPanel.current?.sendCommand('exportSvg')),
     vscode.commands.registerCommand('omnetpp.previewExportPng', () => NedPreviewPanel.current?.sendCommand('exportPng')),
