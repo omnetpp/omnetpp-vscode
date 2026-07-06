@@ -7,6 +7,7 @@ import { ExpandResult, expandNetwork } from './moduleTree';
 import { ConfigRegistry } from './configRegistry';
 import { classifyKey } from './iniConfigChecks';
 import type { IniDocument, IniSection, IniEntry } from './iniDocument';
+import { sectionCanonicalName } from './iniDocument';
 import { iniKeyToRegex, normIndices } from './keyMatch';
 
 export { iniKeyToRegex, normIndices };
@@ -26,32 +27,129 @@ export function generalSection(doc: IniDocument): IniSection | undefined {
   return doc.sections.find((s) => s.type === 'general');
 }
 
-/** Resolve the effective `network` for a section through extends chain and [General]. */
+// ---- C3 linearization of the section fallback chain --------------------------
+// A faithful port of OMNeT++'s SectionBasedConfiguration section-chain resolution
+// (src/envir/sectionbasedconfig.cc): getBaseConfigIds + computeSectionChain +
+// mergeSectionChains/selectNext. Config sections may `extends=` several bases;
+// C3 (the Python-MRO algorithm) produces a single, consistent precedence order
+// even for diamond inheritance, which the previous depth-first walk did not.
+
+/** Direct base sections (OMNeT++ getBaseConfigIds): none for [General]; the
+ *  implicit [General] when there is no `extends`; else the listed configs that
+ *  exist (unknown bases are reported by the structure check, skipped here). */
+function baseSections(section: IniSection, byName: Map<string, IniSection>): IniSection[] {
+  if (section.type === 'general') return [];
+  if (section.extends.length === 0) {
+    const general = byName.get('General');
+    return general ? [general] : [];
+  }
+  const out: IniSection[] = [];
+  for (const name of section.extends) {
+    const base = byName.get(name);
+    if (base) out.push(base);
+  }
+  return out;
+}
+
+/** C3 merge (OMNeT++ mergeSectionChains + selectNext), comparing by canonical
+ *  name. Appends the linearized order onto `result`. On an inconsistent
+ *  hierarchy the merge stops early and the remaining sections are appended
+ *  deduped, so none are dropped from resolution. */
+function mergeChains(chains: IniSection[][], result: IniSection[]): void {
+  const nameAt = (s: IniSection) => sectionCanonicalName(s);
+  // reversed copies so each chain's head sits at the back (cheap to pop)
+  const rev = chains.map((c) => c.slice().reverse());
+  const nonEmpty = () => rev.some((c) => c.length > 0);
+
+  while (nonEmpty()) {
+    let next: IniSection | undefined;
+    for (const chain of rev) {
+      if (!chain.length) continue;
+      const candidate = chain[chain.length - 1];
+      const cname = nameAt(candidate);
+      // valid iff the candidate is in no chain's *tail* (everything but the head)
+      let inTail = false;
+      for (const c of rev) {
+        for (let i = 0; i < c.length - 1 && !inTail; i++) if (nameAt(c[i]) === cname) inTail = true;
+        if (inTail) break;
+      }
+      if (!inTail) {
+        next = candidate;
+        break;
+      }
+    }
+    if (!next) break; // inconsistency → fall through to the degrade path below
+    const nname = nameAt(next);
+    result.push(next);
+    for (const c of rev) if (c.length && nameAt(c[c.length - 1]) === nname) c.pop();
+  }
+
+  const placed = new Set(result.map(nameAt));
+  for (const c of rev)
+    for (let i = c.length - 1; i >= 0; i--) {
+      const n = nameAt(c[i]);
+      if (!placed.has(n)) {
+        placed.add(n);
+        result.push(c[i]);
+      }
+    }
+}
+
+/** OMNeT++ computeSectionChain: L[C] = C + merge(L[B1]…L[Bn], [B1…Bn]). */
+function computeChain(
+  section: IniSection,
+  byName: Map<string, IniSection>,
+  cache: Map<string, IniSection[]>,
+  visiting: Set<string>,
+): IniSection[] {
+  const key = sectionCanonicalName(section);
+  const cached = cache.get(key);
+  if (cached) return cached;
+  if (visiting.has(key)) return [section]; // extends cycle: break, best-effort
+  visiting.add(key);
+
+  const bases = baseSections(section, byName);
+  const chains: IniSection[][] = bases.map((b) => computeChain(b, byName, cache, visiting));
+  chains.push(bases);
+
+  const result: IniSection[] = [section];
+  mergeChains(chains, result);
+
+  visiting.delete(key);
+  cache.set(key, result);
+  return result;
+}
+
+/**
+ * The C3-linearized fallback chain of `section`: the section itself, then its
+ * base sections in C3 (MRO) order, ending at [General]. Mirrors OMNeT++'s
+ * section-chain resolution so first-match-wins lookup follows the identical
+ * precedence — including diamond inheritance from multiple `extends=` bases.
+ */
+export function sectionChain(doc: IniDocument, section: IniSection): IniSection[] {
+  const byName = new Map<string, IniSection>();
+  for (const s of doc.sections) {
+    const n = sectionCanonicalName(s);
+    if (!byName.has(n)) byName.set(n, s);
+  }
+  return computeChain(section, byName, new Map(), new Set());
+}
+
+/** Resolve the effective `network` for a section along its C3 fallback chain. */
 export function effectiveNetwork(doc: IniDocument, section: IniSection): string | undefined {
-  const seen = new Set<string>();
-  const walk = (sec: IniSection | undefined): string | undefined => {
-    if (!sec || seen.has(sec.rawName)) return undefined;
-    seen.add(sec.rawName);
+  for (const sec of sectionChain(doc, section)) {
     let net: string | undefined;
     for (const e of sec.entries) if (e.key === 'network') net = e.value;
     if (net) return net;
-    for (const base of sec.extends) {
-      const r = walk(findSection(doc, base));
-      if (r) return r;
-    }
-    return undefined;
-  };
-  const direct = walk(section);
-  if (direct) return direct;
-  // fall back to [General]
-  return walk(generalSection(doc));
+  }
+  return undefined;
 }
 
 /**
  * Parameter-assignment entries visible to a section, in OMNeT++ lookup-precedence
- * order: the section's own entries (file order), then its `extends` parents
- * (depth-first), then `[General]`. The first entry whose pattern matches a path
- * wins. Config-option keys (network=, sim-time-limit=, etc.) are excluded.
+ * order: the C3-linearized section chain (self → bases in MRO order → [General]),
+ * each section's entries in file order. The first entry whose pattern matches a
+ * path wins. Config-option keys (network=, sim-time-limit=, etc.) are excluded.
  */
 export function configEntriesInScope(
   doc: IniDocument,
@@ -59,40 +157,28 @@ export function configEntriesInScope(
   registry: ConfigRegistry,
 ): IniEntry[] {
   const out: IniEntry[] = [];
-  const seen = new Set<string>();
-  const visit = (sec: IniSection | undefined) => {
-    if (!sec || seen.has(sec.rawName)) return;
-    seen.add(sec.rawName);
+  for (const sec of sectionChain(doc, section)) {
     for (const e of sec.entries) {
       if (classifyKey(registry, e.key).kind === 'param-assignment') out.push(e);
     }
-    for (const base of sec.extends) visit(findSection(doc, base));
-  };
-  visit(section);
-  visit(generalSection(doc));
+  }
   return out;
 }
 
 /**
- * The `*.typename` assignment entries visible to a section (own + extends + General).
+ * The `*.typename` assignment entries visible to a section, along its C3 chain.
  * These bind `like` submodule slots to concrete types during network expansion.
  * No registry needed — a `typename` leaf is always a parameter assignment.
  */
 export function collectTypenameEntries(doc: IniDocument, section: IniSection): IniEntry[] {
   const out: IniEntry[] = [];
-  const seen = new Set<string>();
-  const visit = (sec: IniSection | undefined) => {
-    if (!sec || seen.has(sec.rawName)) return;
-    seen.add(sec.rawName);
+  for (const sec of sectionChain(doc, section)) {
     for (const e of sec.entries) {
       const dot = e.key.lastIndexOf('.');
       const leaf = dot < 0 ? e.key : e.key.slice(dot + 1);
       if (leaf === 'typename') out.push(e);
     }
-    for (const base of sec.extends) visit(findSection(doc, base));
-  };
-  visit(section);
-  visit(generalSection(doc));
+  }
   return out;
 }
 

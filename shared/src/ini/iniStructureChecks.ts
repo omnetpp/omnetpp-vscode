@@ -2,14 +2,12 @@ import { Diagnostic, DiagnosticSeverity } from '../model/location';
 import { ConfigRegistry } from './configRegistry';
 import { classifyKey } from './iniConfigChecks';
 import type { IniDocument, IniSection } from './iniDocument';
+import { sectionCanonicalName } from './iniDocument';
 import { NedResourceCache } from '../ned/nedResourceCache';
 import { resolveNetworkType } from './iniParamResolution';
 
 /** The bare section name (config name), e.g. "General" or "Foo" for [Config Foo]/[Foo]. */
-export function sectionName(sec: IniSection): string {
-  if (sec.type === 'general') return 'General';
-  return sec.configName ?? sec.rawName;
-}
+export const sectionName = sectionCanonicalName;
 
 /**
  * Structural & placement diagnostics for an ini document, mirroring

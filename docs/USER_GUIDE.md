@@ -71,8 +71,11 @@ parameters** and values whose **type conflicts** with the NED declaration, and o
 go-to-definition / hover from an INI key straight to the NED parameter it assigns.
 
 **How to use it.** Open an `omnetpp.ini`. Resolution uses the config's `network` (and its
-`extends` chain). To resolve against a particular configuration interactively, set it as
-the **active configuration** (see [Configurations](#configurations-view)).
+`extends` chain). A config may `extends=` **several** base configs; their precedence is
+resolved with **C3 linearization** — the same algorithm the OMNeT++ kernel uses — so
+first-match-wins lookup is correct even for diamond inheritance. To resolve against a
+particular configuration interactively, set it as the **active configuration** (see
+[Configurations](#configurations-view)).
 
 **Advantage.** The single most error-prone part of an OMNeT++ setup — wiring parameters
 through a deep module tree — becomes verifiable. Dead keys (that match nothing) and

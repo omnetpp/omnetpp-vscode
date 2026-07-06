@@ -229,6 +229,14 @@ export function parseIni(text: string, uri?: string): IniDocument {
   return { sections, includes, uri };
 }
 
+/** The canonical config name of a section: 'General' for [General], else the
+ *  `Config `-stripped name. The identity used for `extends=`/section-chain
+ *  matching (OMNeT++ resolves bases by this name). */
+export function sectionCanonicalName(sec: IniSection): string {
+  if (sec.type === 'general') return 'General';
+  return sec.configName ?? sec.rawName;
+}
+
 /** A config section summarized for the Configurations view / run selectors. */
 export interface ConfigSummary {
   /** Canonical config name (the `Config ` prefix, if any, stripped). */

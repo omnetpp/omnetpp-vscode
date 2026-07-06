@@ -1,6 +1,7 @@
 import { Diagnostic, DiagnosticSeverity, Position, Range } from '../model/location';
 import type { IniDocument, IniEntry, IniSection } from './iniDocument';
 import { sectionName } from './iniStructureChecks';
+import { sectionChain } from './iniParamResolution';
 
 /** Predefined OMNeT++ configuration variables (always valid as ${var} references). */
 export const PREDEFINED_VARS = new Set([
@@ -75,25 +76,9 @@ function isReference(content: string): boolean {
   return IDENT.test(content.trim());
 }
 
-function findByName(doc: IniDocument, name: string): IniSection | undefined {
-  return doc.sections.find((s) => sectionName(s) === name);
-}
-
-/** The section's fallback chain: self, its extends ancestors (DFS), then [General]. */
-export function sectionChain(doc: IniDocument, section: IniSection): IniSection[] {
-  const out: IniSection[] = [];
-  const seen = new Set<string>();
-  const visit = (sec: IniSection | undefined) => {
-    if (!sec || seen.has(sec.rawName)) return;
-    seen.add(sec.rawName);
-    out.push(sec);
-    for (const base of sec.extends) visit(findByName(doc, base));
-  };
-  visit(section);
-  const general = doc.sections.find((s) => s.type === 'general');
-  if (general && !seen.has(general.rawName)) out.push(general);
-  return out;
-}
+// The section fallback chain (self → bases → [General]) is the C3 linearization
+// implemented in iniParamResolution; re-exported here for the variable-scope code.
+export { sectionChain };
 
 /** Named iteration variables declared directly in a section. */
 export function namedIterations(section: IniSection): Map<string, IterVar> {

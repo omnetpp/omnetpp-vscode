@@ -146,6 +146,7 @@ export { iniHover, iniCompletion } from './ini/iniNavigation';
 export { iniEntryAt, leafSegment, keySegmentPrefixAt, isWildcardSegment, extendsLabelAt } from './ini/iniKeySegments';
 export {
   effectiveNetwork,
+  sectionChain,
   findSection,
   generalSection,
   configEntriesInScope,

@@ -1,5 +1,6 @@
 import { Diagnostic, DiagnosticSeverity } from '../model/location';
 import type { IniDocument, IniEntry, IniSection } from './iniDocument';
+import { sectionCanonicalName } from './iniDocument';
 
 /**
  * `include` support. OMNeT++ processes an `include otherfile.ini` directive by
@@ -13,12 +14,6 @@ import type { IniDocument, IniEntry, IniSection } from './iniDocument';
  * pointing at the file it physically lives in, so callers can keep diagnostics
  * and navigation attached to the right file.
  */
-
-/** The canonical config name of a section (matches `sectionName` in the checks). */
-function canonicalName(sec: IniSection): string {
-  if (sec.type === 'general') return 'General';
-  return sec.configName ?? sec.rawName;
-}
 
 /**
  * Resolve an `include` path (relative to the including file) to a `file:` URI.
@@ -121,7 +116,7 @@ export function expandIncludes(
   const byName = new Map<string, IniSection>();
   const order: IniSection[] = [];
   for (const { uri, section } of fragments) {
-    const name = canonicalName(section);
+    const name = sectionCanonicalName(section);
     const tagged = section.entries.map((e) => ({ ...e, sourceUri: e.sourceUri ?? uri }));
     const existing = byName.get(name);
     if (!existing) {
