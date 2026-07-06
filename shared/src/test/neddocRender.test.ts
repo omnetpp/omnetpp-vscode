@@ -121,6 +121,42 @@ test('neddoc html: diagram sections render inline SVG when a renderer is wired',
   assert.ok(netPage.includes('href="lib.Node.html"'), netPage.match(/href="[^"]*lib\.Node[^"]*"/)?.[0]);
 });
 
+test('neddoc html-readthedocs: RTD chrome and theme over the same content/data/JS', async () => {
+  const { files } = await collectNeddoc(await buildInput({ 'file:///lib.ned': LIB }), { format: 'html-readthedocs' });
+  const paths = files.map((f) => f.relativePath);
+  // same layout, assets and data files as the modern html theme
+  assert.ok(paths.includes('types/lib.Node.html'), paths.join());
+  assert.ok(paths.includes('assets/style.css'));
+  assert.ok(paths.includes('assets/neddoc.js'));
+  assert.ok(paths.includes('assets/navtree-data.js'));
+  assert.ok(paths.includes('assets/search-data.js'));
+
+  // the neddoc.js hooks (#search / #navtree) are present so search + tree work,
+  // wrapped in the Read-the-Docs chrome
+  const nodePage = files.find((f) => f.relativePath === 'types/lib.Node.html')!.content as string;
+  assert.ok(nodePage.includes('class="wy-nav-side"'), 'RTD sidebar missing');
+  assert.ok(nodePage.includes('wy-side-nav-search'), 'RTD search header missing');
+  assert.ok(nodePage.includes('<input id="search"'), 'search hook missing');
+  assert.ok(nodePage.includes('<div id="navtree">'), 'navtree hook missing');
+  assert.ok(nodePage.includes('assets/neddoc.js'), 'shared JS not linked');
+  // same page content as the html theme (badge, heading, cross links)
+  assert.ok(nodePage.includes('badge-simple'));
+  assert.ok(nodePage.includes('<h1>Node</h1>'));
+  assert.ok(nodePage.includes('<a href="lib.Sink.html">Sink</a>'), nodePage);
+
+  // the stylesheet is the RTD theme, not the default one
+  const css = files.find((f) => f.relativePath === 'assets/style.css')!.content as string;
+  assert.ok(css.includes('Read the Docs'), css.slice(0, 80));
+  assert.ok(css.includes('.wy-nav-side'), 'RTD css missing');
+
+  // a custom stylesheet still replaces the theme css
+  const custom = await collectNeddoc(await buildInput({ 'file:///lib.ned': LIB }), {
+    format: 'html-readthedocs',
+    customCss: '/* mine */',
+  });
+  assert.equal(custom.files.find((f) => f.relativePath === 'assets/style.css')!.content, '/* mine */');
+});
+
 // ---- markdown output ---------------------------------------------------------
 
 test('neddoc markdown: pages, SUMMARY.md, tables and links', async () => {

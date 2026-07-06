@@ -38,7 +38,7 @@ interface CliOptions {
   toggles: Partial<NeddocOptions>;
 }
 
-const FORMATS: DocFormat[] = ['html', 'legacy-html', 'markdown', 'rst'];
+const FORMATS: DocFormat[] = ['html', 'html-readthedocs', 'legacy-html', 'markdown', 'rst'];
 
 const USAGE = `opp_neddoc — generate documentation for OMNeT++ NED/MSG files
 
@@ -54,7 +54,8 @@ Options:
   -o <dir>            Output directory (default: <projectdir>/doc/neddoc).
                       Existing files are overwritten but the directory is not
                       cleaned first.
-  --format=<fmt>      Output format: html (default) | legacy-html | markdown | rst.
+  --format=<fmt>      Output format: html (default) | html-readthedocs |
+                      legacy-html | markdown | rst.
   --ned-path=<dirs>   Extra NED source roots for cross-file resolution
                       (libraries), ';'- or ':'-separated. Indexed, not documented.
   --title=<text>      Documentation title (default: the project dir name).

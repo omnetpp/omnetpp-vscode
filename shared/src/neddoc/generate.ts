@@ -10,6 +10,7 @@ import { pageIdForType, type DiagramRequest, type DocModel } from './docModel';
 import { cooperativeYielder, defaultNeddocOptions, type NeddocOptions } from './options';
 import { dirOf, pageById, relativeRef, type GeneratedFile, type NeddocRenderer, type RenderCtx } from './renderer';
 import { HtmlRenderer } from './renderHtml';
+import { RtdHtmlRenderer } from './renderRtdHtml';
 import { LegacyHtmlRenderer } from './renderLegacyHtml';
 import { MarkdownRenderer } from './renderMarkdown';
 import { RstRenderer } from './renderRst';
@@ -85,6 +86,8 @@ export function rendererForFormat(options: NeddocOptions): NeddocRenderer {
   switch (options.format) {
     case 'html':
       return new HtmlRenderer();
+    case 'html-readthedocs':
+      return new RtdHtmlRenderer();
     case 'legacy-html':
       if (!options.legacyAssets)
         throw new Error('legacy-html format needs the vendored template assets (options.legacyAssets)');

@@ -6,7 +6,7 @@
 
 import type { IncludeResolution } from './commentAst';
 
-export type DocFormat = 'html' | 'legacy-html' | 'markdown' | 'rst';
+export type DocFormat = 'html' | 'html-readthedocs' | 'legacy-html' | 'markdown' | 'rst';
 
 export interface NeddocOptions {
   /** Output format (default 'html'). */

@@ -10,11 +10,13 @@
 
 import { emitHtml, escapeHtmlAll, escapeHtmlText } from './commentEmit';
 import type { DocCell, DocModel, DocPage, DocPageRef, DocSection, NavNode } from './docModel';
+import type { DocFormat } from './options';
 import type { NeddocRenderer, RenderCtx, GeneratedFile } from './renderer';
 import { defaultPagePath, dirOf, pageById, relativeRef } from './renderer';
 
 export class HtmlRenderer implements NeddocRenderer {
-  readonly format = 'html' as const;
+  // widened so themed subclasses (RtdHtmlRenderer) can set their own format
+  readonly format: DocFormat = 'html';
   readonly pageExtension = '.html';
 
   pagePath(ref: DocPageRef): string {
@@ -32,6 +34,16 @@ export class HtmlRenderer implements NeddocRenderer {
     const body = page.sections.map((s) => this.renderSection(s, page, ctx, linkTo, fromDir)).filter(Boolean).join('\n');
     const title = escapeHtmlAll(page.ref.title);
     const projectTitle = escapeHtmlAll(ctx.options.projectTitle ?? 'NED Documentation');
+    return this.pageShell({ root, pageId: page.ref.id, title, projectTitle, body });
+  }
+
+  /** The full HTML document around a page's rendered `body` (already-escaped
+   *  `title`/`projectTitle`). The head — stylesheet + the nav/search data and
+   *  logic scripts, and the `#search`/`#search-results`/`#navtree` hooks
+   *  neddoc.js drives — is shared by all HTML themes; subclasses override this
+   *  to change only the surrounding chrome, and `styleCss()` for the theme. */
+  protected pageShell(p: { root: string; pageId: string; title: string; projectTitle: string; body: string }): string {
+    const { root, pageId, title, projectTitle, body } = p;
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -39,7 +51,7 @@ export class HtmlRenderer implements NeddocRenderer {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title} - ${projectTitle}</title>
 <link rel="stylesheet" href="${root}assets/style.css">
-<script>var NEDDOC_ROOT = ${JSON.stringify(root)}; var NEDDOC_PAGE = ${JSON.stringify(page.ref.id)};</script>
+<script>var NEDDOC_ROOT = ${JSON.stringify(root)}; var NEDDOC_PAGE = ${JSON.stringify(pageId)};</script>
 <script defer src="${root}assets/navtree-data.js"></script>
 <script defer src="${root}assets/search-data.js"></script>
 <script defer src="${root}assets/neddoc.js"></script>
@@ -58,6 +70,11 @@ ${body}
 </body>
 </html>
 `;
+  }
+
+  /** The theme stylesheet (subclasses override; `options.customCss` still wins). */
+  protected styleCss(): string {
+    return STYLE_CSS;
   }
 
   private renderCells(cells: DocCell[], page: DocPage, ctx: RenderCtx, linkTo: (p: string, a?: string) => string): string {
@@ -124,7 +141,7 @@ ${body}
 
   auxFiles(ctx: RenderCtx): GeneratedFile[] {
     return [
-      { relativePath: 'assets/style.css', content: ctx.options.customCss ?? STYLE_CSS },
+      { relativePath: 'assets/style.css', content: ctx.options.customCss ?? this.styleCss() },
       { relativePath: 'assets/neddoc.js', content: NEDDOC_JS },
       {
         relativePath: 'assets/navtree-data.js',

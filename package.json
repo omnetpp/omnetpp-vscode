@@ -483,9 +483,10 @@
         },
         "omnetpp.neddoc.format": {
           "type": "string",
-          "enum": ["html", "legacy-html", "markdown", "rst"],
+          "enum": ["html", "html-readthedocs", "legacy-html", "markdown", "rst"],
           "enumDescriptions": [
             "Browsable static site with a navigation sidebar and client-side search.",
+            "Same static site, styled like the popular Read the Docs (Sphinx RTD) theme.",
             "The Eclipse IDE's neddoc look & feel (Material template, flat file layout).",
             "Markdown files with a SUMMARY.md navigation index.",
             "Sphinx-ready reStructuredText files with toctrees and :ref: labels."
@@ -571,7 +572,7 @@
           "type": "string",
           "default": "",
           "order": 20,
-          "markdownDescription": "Path to a stylesheet that replaces the generated `style.css` (html and legacy-html formats); relative paths are resolved against the workspace folder."
+          "markdownDescription": "Path to a stylesheet that replaces the generated `style.css` (the html, html-readthedocs and legacy-html formats); relative paths are resolved against the workspace folder."
         },
         "omnetpp.neddoc.doxytagsFile": {
           "type": "string",
