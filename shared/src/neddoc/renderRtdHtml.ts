@@ -119,25 +119,26 @@ a:hover { color: #3091d1; text-decoration: underline; }
 #search-results .kind { color: #999; font-size: .8rem; margin-left: 6px; }
 
 /* navigation menu --------------------------------------------------------- */
-.wy-menu-vertical { width: 300px; padding: 8px 0 24px; }
+.wy-menu-vertical { width: 300px; padding: 2px 0 12px; }
 #navtree ul { list-style: none; margin: 0; padding: 0; }
 #navtree li { margin: 0; }
 #navtree a {
-  display: block; color: #d9d9d9; padding: 6px 24px; font-size: .9rem; line-height: 1.3; border: none;
+  display: block; color: #d9d9d9; padding: 2px 16px; font-size: .8rem; line-height: 1.35; border: none;
 }
 #navtree a:hover { background: #4e4a4a; color: #d9d9d9; text-decoration: none; cursor: pointer; }
 #navtree a.current { background: #fcfcfc; color: #404040; font-weight: 700; border-left: 3px solid #2980b9; }
-#navtree ul ul a { padding-left: 40px; }
-#navtree ul ul ul a { padding-left: 56px; }
+#navtree ul ul a { padding-left: 28px; }
+#navtree ul ul ul a { padding-left: 40px; }
+#navtree ul ul ul ul a { padding-left: 52px; }
 #navtree details > summary {
   display: block; list-style: none; cursor: pointer; color: #55a5d9; text-transform: uppercase;
-  font-size: .8rem; font-weight: 700; letter-spacing: .05em; padding: 10px 24px 6px; margin-top: 4px;
+  font-size: .72rem; font-weight: 700; letter-spacing: .04em; padding: 4px 16px 2px; margin-top: 2px;
 }
 #navtree details > summary::-webkit-details-marker { display: none; }
 #navtree details > summary::before { content: "\\25B8 "; color: #4e4a4a; }
 #navtree details[open] > summary::before { content: "\\25BE "; }
 #navtree details > summary a { display: inline; padding: 0; color: inherit; }
-#navtree details details > summary { text-transform: none; color: #b3b3b3; font-weight: 400; letter-spacing: 0; }
+#navtree details details > summary { text-transform: none; color: #b3b3b3; font-weight: 400; letter-spacing: 0; margin-top: 0; }
 
 /* content ----------------------------------------------------------------- */
 [role="main"] { padding-bottom: 3em; }
