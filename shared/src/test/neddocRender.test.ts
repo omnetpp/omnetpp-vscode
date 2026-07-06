@@ -144,10 +144,19 @@ test('neddoc html-readthedocs: RTD chrome and theme over the same content/data/J
   assert.ok(nodePage.includes('<h1>Node</h1>'));
   assert.ok(nodePage.includes('<a href="lib.Sink.html">Sink</a>'), nodePage);
 
-  // the stylesheet is the RTD theme, not the default one
+  // the stylesheet is the RTD theme, not the default one, with the ported
+  // sphinx_rtd_theme nav rules (toctree levels, current chain, captions)
   const css = files.find((f) => f.relativePath === 'assets/style.css')!.content as string;
   assert.ok(css.includes('Read the Docs'), css.slice(0, 80));
   assert.ok(css.includes('.wy-nav-side'), 'RTD css missing');
+  assert.ok(css.includes('.wy-menu-vertical li.toctree-l2.current'), 'RTD toctree spacing missing');
+  assert.ok(css.includes('.wy-menu-vertical p.caption'), 'RTD caption rule missing');
+
+  // the RTD nav builder (not the shared <details> tree) is shipped as neddoc.js
+  const js = files.find((f) => f.relativePath === 'assets/neddoc.js')!.content as string;
+  assert.ok(js.includes("'toctree-l'"), 'RTD toctree markup builder missing');
+  assert.ok(js.includes("el('p', 'caption'"), 'RTD caption builder missing');
+  assert.ok(js.includes('toctree-expand'), 'RTD expand toggle missing');
 
   // a custom stylesheet still replaces the theme css
   const custom = await collectNeddoc(await buildInput({ 'file:///lib.ned': LIB }), {
