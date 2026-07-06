@@ -310,6 +310,61 @@ test('neddoc extract: nav tree categories and search index', async () => {
   assert.ok(model.searchIndex.some((e) => e.fqName === 'lib.Node' && e.page === 'lib.Node'));
 });
 
+// ---- full project-wide diagram pages -----------------------------------------------------------
+
+test('neddoc extract: full diagram pages are off by default', async () => {
+  const model = extract(await buildInput({ 'file:///lib.ned': LIB }, { 'file:///p.msg': MSG }));
+  assert.ok(!model.pages.some((p) => p.ref.kind === 'fulldiagram'));
+  assert.ok(!model.navRoot.children.some((n) => n.title === 'Diagrams'));
+});
+
+test('neddoc extract: full diagram pages, nav node and graph-carrying requests', async () => {
+  const model = extract(await buildInput({ 'file:///lib.ned': LIB, 'file:///net.ned': NET }, { 'file:///p.msg': MSG }), {
+    fullUsageDiagrams: true,
+    fullInheritanceDiagrams: true,
+  });
+  // Eclipse page ids/titles
+  for (const id of ['full-ned-usage-diagram', 'full-ned-inheritance-diagram', 'full-msg-usage-diagram', 'full-msg-inheritance-diagram'])
+    page(model, id);
+  assert.equal(page(model, 'full-ned-usage-diagram').ref.title, 'Full NED Usage Diagram');
+  assert.equal(page(model, 'full-ned-usage-diagram').ref.kind, 'fulldiagram');
+
+  // nav "Diagrams" node right after Overview
+  const titles = model.navRoot.children.map((n) => n.title);
+  assert.equal(titles[0], 'Overview');
+  assert.equal(titles[1], 'Diagrams');
+  const diagrams = model.navRoot.children[1];
+  assert.deepEqual(
+    diagrams.children.map((c) => c.title),
+    ['Full NED Usage Diagram', 'Full NED Inheritance Diagram', 'Full MSG Usage Diagram', 'Full MSG Inheritance Diagram'],
+  );
+
+  // graph-carrying requests covering the whole project
+  const fullInh = model.diagrams.find((d) => d.image === 'images/full-ned-inheritance-diagram.svg')!;
+  assert.ok(fullInh);
+  assert.equal(fullInh.diagram, 'inheritance');
+  const nodeIds = fullInh.graph!.nodes.map((n) => n.id);
+  assert.ok(nodeIds.includes('lib.Node') && nodeIds.includes('lib.Sink') && nodeIds.includes('lib.Net'), nodeIds.join());
+  assert.ok(fullInh.graph!.edges.some((e) => e.src === 'lib.Node' && e.dest === 'lib.Sink'), 'Node->Sink edge missing');
+  // UdpApp implements IApp -> interface edge
+  assert.ok(fullInh.graph!.edges.some((e) => e.src === 'lib.IApp' && e.dest === 'lib.UdpApp' && e.kind === 'interface'));
+
+  const fullUsage = model.diagrams.find((d) => d.image === 'images/full-ned-usage-diagram.svg')!;
+  assert.ok(fullUsage.graph!.edges.some((e) => e.src === 'lib.Net' && e.dest === 'lib.Node' && e.kind === 'usage'));
+
+  const msgInh = model.diagrams.find((d) => d.image === 'images/full-msg-inheritance-diagram.svg')!;
+  assert.ok(msgInh.graph!.edges.some((e) => e.src === 'msg-lib--FooPkt' && e.dest === 'msg-lib--BarPkt'));
+});
+
+test('neddoc extract: msg full diagram pages skipped without msg types', async () => {
+  const model = extract(await buildInput({ 'file:///lib.ned': LIB }), {
+    fullUsageDiagrams: true,
+    fullInheritanceDiagrams: true,
+  });
+  page(model, 'full-ned-usage-diagram');
+  assert.ok(!model.pages.some((p) => p.ref.id === 'full-msg-usage-diagram'));
+});
+
 // ---- diagram requests -----------------------------------------------------------------------------------
 
 test('neddoc extract: diagram placeholders and requests honor options', async () => {

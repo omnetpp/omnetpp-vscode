@@ -144,6 +144,27 @@ test('typeFigure: simple modules render the card', async () => {
   assert.ok(result!.svg.includes('>simple</text>'), 'kind caption expected');
 });
 
+test('neddoc end-to-end: full inheritance diagram page renders a linked SVG', async () => {
+  const cache = await nedCache({ 'file:///lib.ned': LIB });
+  const renderDiagram = createDiagramRenderer({ nedCache: cache, icons: fakeIcons });
+  const { files } = await collectNeddoc(
+    { nedCache: cache },
+    { format: 'html', fullInheritanceDiagrams: true, fullUsageDiagrams: true },
+    renderDiagram,
+  );
+  const paths = files.map((f) => f.relativePath);
+  assert.ok(paths.includes('full-ned-inheritance-diagram.html'), paths.join());
+  assert.ok(paths.includes('images/full-ned-inheritance-diagram.svg'));
+  assert.ok(paths.includes('full-ned-usage-diagram.html'));
+  const svg = files.find((f) => f.relativePath === 'images/full-ned-inheritance-diagram.svg')!.content as string;
+  // every documented type appears as a linked node
+  for (const fq of ['lib.Node', 'lib.Sink', 'lib.Net'])
+    assert.ok(svg.includes(`<a href="../types/${fq}.html" target="_top">`), `${fq} node link missing`);
+  const html = files.find((f) => f.relativePath === 'full-ned-inheritance-diagram.html')!.content as string;
+  assert.ok(html.includes('<div class="diagram"><svg'), 'inline svg missing');
+  assert.ok(html.includes('Unresolved types are missing'), 'blurb missing');
+});
+
 test('neddoc end-to-end: diagrams rendered and referenced by the html output', async () => {
   const cache = await nedCache({ 'file:///lib.ned': LIB });
   const renderDiagram = createDiagramRenderer({ nedCache: cache, icons: fakeIcons });

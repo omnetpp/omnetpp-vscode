@@ -8,7 +8,7 @@
 import type { DocBlock } from './commentAst';
 import type { DocGraph } from './graphDiagram';
 
-export type PageKind = 'index' | 'packages' | 'namespaces' | 'nedtype' | 'msgtype';
+export type PageKind = 'index' | 'packages' | 'namespaces' | 'nedtype' | 'msgtype' | 'fulldiagram';
 
 export interface DocPageRef {
   /** Stable page id; the renderer derives the output path from it. Type pages

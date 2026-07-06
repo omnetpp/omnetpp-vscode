@@ -159,6 +159,7 @@ class Extraction {
   run(): DocModel {
     for (const t of this.nedTypes) this.pages.push(this.nedTypePage(t));
     for (const t of this.msgTypes) this.pages.push(this.msgTypePage(t));
+    this.pages.push(...this.fullDiagramPages());
     this.pages.unshift(this.indexPage(), ...this.packagesPage(), ...this.namespacesPage());
     return {
       pages: this.pages,
@@ -454,6 +455,150 @@ class Extraction {
       edges.push({ src: node.id, dest: focus.id, kind: 'usage' });
     }
     return { nodes: [...nodes.values()], edges };
+  }
+
+  // ---- full project-wide diagrams (Eclipse generateFullDiagrams) ----
+
+  private fullNedUsageGraph(): DocGraph {
+    const nodes = new Map<string, DocGraphNode>();
+    const edges: DocGraphEdge[] = [];
+    for (const t of this.nedTypes) {
+      const node = this.nedGraphNode(t, false);
+      if (!nodes.has(node.id)) nodes.set(node.id, node);
+      for (const used of this.usedBy.get(t.fqName) ?? []) {
+        const usedNode = this.nedGraphNode(used, false);
+        if (!nodes.has(usedNode.id)) nodes.set(usedNode.id, usedNode);
+        edges.push({ src: node.id, dest: usedNode.id, kind: 'usage' });
+      }
+    }
+    return { nodes: [...nodes.values()], edges };
+  }
+
+  private fullNedInheritanceGraph(): DocGraph {
+    const nodes = new Map<string, DocGraphNode>();
+    const edges: DocGraphEdge[] = [];
+    const isInterface = (x: NedTypeInfo) => x.kind === 'moduleinterface' || x.kind === 'channelinterface';
+    for (const t of this.nedTypes) {
+      const node = this.nedGraphNode(t, false);
+      if (!nodes.has(node.id)) nodes.set(node.id, node);
+      for (const sup of t.directSupertypes()) {
+        const supNode = this.nedGraphNode(sup, false);
+        if (!nodes.has(supNode.id)) nodes.set(supNode.id, supNode);
+        edges.push({
+          src: supNode.id,
+          dest: node.id,
+          kind: !isInterface(t) && isInterface(sup) ? 'interface' : 'inheritance',
+        });
+      }
+    }
+    return { nodes: [...nodes.values()], edges };
+  }
+
+  private fullMsgUsageGraph(): DocGraph {
+    const nodes = new Map<string, DocGraphNode>();
+    const edges: DocGraphEdge[] = [];
+    for (const t of this.msgTypes) {
+      const node = this.msgGraphNode(t, false);
+      if (!nodes.has(node.id)) nodes.set(node.id, node);
+      for (const used of this.msgUsedBy.get(t.fqName) ?? []) {
+        const usedNode = this.msgGraphNode(used, false);
+        if (!nodes.has(usedNode.id)) nodes.set(usedNode.id, usedNode);
+        edges.push({ src: node.id, dest: usedNode.id, kind: 'usage' });
+      }
+    }
+    return { nodes: [...nodes.values()], edges };
+  }
+
+  private fullMsgInheritanceGraph(): DocGraph {
+    const nodes = new Map<string, DocGraphNode>();
+    const edges: DocGraphEdge[] = [];
+    for (const t of this.msgTypes) {
+      const node = this.msgGraphNode(t, false);
+      if (!nodes.has(node.id)) nodes.set(node.id, node);
+      const sup = t.superType();
+      if (sup) {
+        const supNode = this.msgGraphNode(sup, false);
+        if (!nodes.has(supNode.id)) nodes.set(supNode.id, supNode);
+        edges.push({ src: supNode.id, dest: node.id, kind: 'inheritance' });
+      }
+    }
+    return { nodes: [...nodes.values()], edges };
+  }
+
+  private fullDiagramPage(
+    id: string,
+    title: string,
+    blurb: string,
+    language: 'ned' | 'msg',
+    diagram: 'usage' | 'inheritance',
+    graph: DocGraph,
+  ): DocPage {
+    const image = `images/${id}.svg`;
+    this.diagrams.push({ diagram, typeFqName: '', language, image, graph });
+    return {
+      ref: { id, title, kind: 'fulldiagram' },
+      sections: [
+        {
+          kind: 'para',
+          cells: [{ kind: 'text', text: `${blurb}\nUnresolved types are missing from the diagram.` }],
+        },
+        { kind: 'diagram', diagram, image, title },
+      ],
+    };
+  }
+
+  /** The full-ned/msg-usage/inheritance-diagram pages (Eclipse names). */
+  private fullDiagramPages(): DocPage[] {
+    const pages: DocPage[] = [];
+    if (this.options.fullUsageDiagrams && this.nedTypes.length > 0) {
+      pages.push(
+        this.fullDiagramPage(
+          'full-ned-usage-diagram',
+          'Full NED Usage Diagram',
+          'The following diagram shows usage relationships between simple and compound modules, module interfaces, networks, channels and channel interfaces.',
+          'ned',
+          'usage',
+          this.fullNedUsageGraph(),
+        ),
+      );
+    }
+    if (this.options.fullInheritanceDiagrams && this.nedTypes.length > 0) {
+      pages.push(
+        this.fullDiagramPage(
+          'full-ned-inheritance-diagram',
+          'Full NED Inheritance Diagram',
+          'The following diagram shows the inheritance hierarchy between simple and compound modules, module interfaces, networks, channels and channel interfaces.',
+          'ned',
+          'inheritance',
+          this.fullNedInheritanceGraph(),
+        ),
+      );
+    }
+    if (this.options.fullUsageDiagrams && this.msgTypes.length > 0) {
+      pages.push(
+        this.fullDiagramPage(
+          'full-msg-usage-diagram',
+          'Full MSG Usage Diagram',
+          'The following diagram shows usage relationships between messages, packets, classes and structs.',
+          'msg',
+          'usage',
+          this.fullMsgUsageGraph(),
+        ),
+      );
+    }
+    if (this.options.fullInheritanceDiagrams && this.msgTypes.length > 0) {
+      pages.push(
+        this.fullDiagramPage(
+          'full-msg-inheritance-diagram',
+          'Full MSG Inheritance Diagram',
+          'The following diagram shows the inheritance hierarchy between messages, packets, classes and structs.',
+          'msg',
+          'inheritance',
+          this.fullMsgInheritanceGraph(),
+        ),
+      );
+    }
+    return pages;
   }
 
   // ---- NED type page ----
@@ -1017,6 +1162,15 @@ class Extraction {
 
     const root: NavNode = { title: this.options.projectTitle ?? 'NED Documentation', children: [] };
     root.children.push(leaf('Overview', 'index'));
+
+    // full-diagram pages under a "Diagrams" node (as in Eclipse)
+    const diagramPages = this.pages.filter((p) => p.ref.kind === 'fulldiagram');
+    if (diagramPages.length > 0) {
+      root.children.push({
+        title: 'Diagrams',
+        children: diagramPages.map((p) => leaf(p.ref.title, p.ref.id)),
+      });
+    }
 
     if (this.nedTypes.length > 0) {
       const packages: NavNode = { title: 'Packages', page: 'packages', children: [] };
