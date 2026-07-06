@@ -65,7 +65,7 @@ network Net { submodules: t: Tx; }
   const msgCache = new MsgResourceCache();
   msgCache.addFile('file:///p.msg', svc.parse('msg', 'namespace demo;\npacket FooPkt { int seq; }\n'));
 
-  const model = extractDocModel(
+  const model = await extractDocModel(
     { nedCache, msgCache },
     { ...defaultNeddocOptions(), doxytags: { xml: TAGFILE, urlPrefix: '../doxy' } },
   );

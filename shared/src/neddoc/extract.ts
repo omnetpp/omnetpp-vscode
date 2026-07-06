@@ -38,7 +38,7 @@ import {
   type NavNode,
   type SearchEntry,
 } from './docModel';
-import type { NeddocOptions } from './options';
+import { cooperativeYielder, type NeddocOptions } from './options';
 import type { DocGraph, DocGraphEdge, DocGraphNode } from './graphDiagram';
 import { doxyUrlFor, parseDoxyTags } from './doxytags';
 import { collectUnassignedParameters, paramAssignmentsOf } from './unassignedParams';
@@ -88,13 +88,13 @@ function defaultDisplayPath(uri: string): string {
 // Extraction
 // ---------------------------------------------------------------------------
 
-export function extractDocModel(
+export async function extractDocModel(
   input: NeddocInput,
   options: NeddocOptions,
   /** Per-type extraction progress (page building parses every doc comment —
    *  a significant phase on large projects). */
   onType?: (done: number, total: number) => void,
-): DocModel {
+): Promise<DocModel> {
   const warnings: string[] = [];
   const nedCache = input.nedCache;
   const isTarget = (uri: string) =>
@@ -162,15 +162,20 @@ class Extraction {
     };
   }
 
-  run(onType?: (done: number, total: number) => void): DocModel {
+  async run(onType?: (done: number, total: number) => void): Promise<DocModel> {
+    // page building is CPU-bound; yield periodically so the host can flush
+    // progress notifications (and paint its progress bar) while we work
+    const maybeYield = cooperativeYielder();
     const total = this.nedTypes.length + this.msgTypes.length;
     let done = 0;
     for (const t of this.nedTypes) {
       onType?.(done++, total);
+      await maybeYield();
       this.pages.push(this.nedTypePage(t));
     }
     for (const t of this.msgTypes) {
       onType?.(done++, total);
+      await maybeYield();
       this.pages.push(this.msgTypePage(t));
     }
     onType?.(total, total);

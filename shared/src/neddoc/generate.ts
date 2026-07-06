@@ -7,7 +7,7 @@
 
 import { extractDocModel, type NeddocInput } from './extract';
 import { pageIdForType, type DiagramRequest, type DocModel } from './docModel';
-import { defaultNeddocOptions, type NeddocOptions } from './options';
+import { cooperativeYielder, defaultNeddocOptions, type NeddocOptions } from './options';
 import { dirOf, pageById, relativeRef, type GeneratedFile, type NeddocRenderer, type RenderCtx } from './renderer';
 import { HtmlRenderer } from './renderHtml';
 import { LegacyHtmlRenderer } from './renderLegacyHtml';
@@ -116,8 +116,13 @@ export async function generateNeddoc(
   // weighted x3 (layout + SVG per diagram dominates wall-clock)
   const EXTRACT_BAND = 15;
   const DIAGRAM_WEIGHT = 3;
+  // CPU-bound stretches yield periodically (cooperativeYielder inside
+  // extraction, maybeYield below) so hosts can flush queued progress
+  // notifications and paint the bar while we work
+  const maybeYield = cooperativeYielder();
   progress?.report?.('Extracting types', 0, 1, 0);
-  const model = extractDocModel(input, options, (done, total) => {
+  await new Promise<void>((resolve) => setTimeout(resolve, 0)); // let the 0% report out
+  const model = await extractDocModel(input, options, (done, total) => {
     checkCancelled();
     progress?.report?.('Extracting types', done, total, total ? (done / total) * EXTRACT_BAND : EXTRACT_BAND);
   });
@@ -135,6 +140,7 @@ export async function generateNeddoc(
       checkCancelled();
       progress?.report?.('Rendering diagrams', done, model.diagrams.length, percentAt(done * DIAGRAM_WEIGHT));
       done++;
+      await maybeYield();
       const imageOut = renderer.imagePath?.(req.image) ?? req.image;
       const diagramCtx: DiagramRenderCtx = {
         model,
@@ -167,6 +173,7 @@ export async function generateNeddoc(
     checkCancelled();
     progress?.report?.('Writing pages', done, model.pages.length, percentAt(diagramUnits + done));
     done++;
+    await maybeYield();
     await emit({ relativePath: renderer.pagePath(page.ref), content: renderer.renderPage(page, ctx) });
   }
   for (const file of renderer.auxFiles(ctx)) {

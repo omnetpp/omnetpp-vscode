@@ -17,7 +17,7 @@ async function buildInput(nedFiles: Record<string, string>, msgFiles: Record<str
   return { nedCache, msgCache };
 }
 
-function extract(input: NeddocInput, opts: Partial<NeddocOptions> = {}): DocModel {
+function extract(input: NeddocInput, opts: Partial<NeddocOptions> = {}): Promise<DocModel> {
   return extractDocModel(input, { ...defaultNeddocOptions(), ...opts });
 }
 
@@ -103,7 +103,7 @@ packet BarPkt extends FooPkt
 // ---- pages & structure -----------------------------------------------------------
 
 test('neddoc extract: produces index, packages, namespaces and type pages', async () => {
-  const model = extract(await buildInput({ 'file:///lib.ned': LIB, 'file:///net.ned': NET }, { 'file:///p.msg': MSG }));
+  const model = await extract(await buildInput({ 'file:///lib.ned': LIB, 'file:///net.ned': NET }, { 'file:///p.msg': MSG }));
   page(model, 'index');
   page(model, 'packages');
   page(model, 'namespaces');
@@ -115,12 +115,12 @@ test('neddoc extract: produces index, packages, namespaces and type pages', asyn
 });
 
 test('neddoc extract: includeBuiltins pulls in the built-in NED declarations', async () => {
-  const model = extract(await buildInput({ 'file:///lib.ned': LIB }), { includeBuiltins: true });
+  const model = await extract(await buildInput({ 'file:///lib.ned': LIB }), { includeBuiltins: true });
   page(model, 'ned.DelayChannel');
 });
 
 test('neddoc extract: NED page section order follows the Eclipse layout', async () => {
-  const model = extract(await buildInput({ 'file:///lib.ned': LIB, 'file:///net.ned': NET }));
+  const model = await extract(await buildInput({ 'file:///lib.ned': LIB, 'file:///net.ned': NET }));
   const p = page(model, 'lib.Node');
   const kinds = p.sections.map((s) => (s.kind === 'subheading' ? `h:${s.text}` : s.kind));
   // package line, badge, description first
@@ -138,7 +138,7 @@ test('neddoc extract: NED page section order follows the Eclipse layout', async 
 // ---- parameters ---------------------------------------------------------------------
 
 test('neddoc extract: parameters table with local/inherited rows and default values', async () => {
-  const model = extract(await buildInput({ 'file:///lib.ned': LIB }));
+  const model = await extract(await buildInput({ 'file:///lib.ned': LIB }));
   const sink = tableAfter(page(model, 'lib.Sink'), 'Parameters');
   assert.deepEqual(sink.columns, ['Name', 'Type', 'Default value', 'Description']);
   const byName = new Map(sink.rows.map((r) => [cellText(r.cells[0]), r]));
@@ -154,7 +154,7 @@ test('neddoc extract: parameters table with local/inherited rows and default val
 });
 
 test('neddoc extract: parameter description comes from the declaring type', async () => {
-  const model = extract(await buildInput({ 'file:///lib.ned': LIB }));
+  const model = await extract(await buildInput({ 'file:///lib.ned': LIB }));
   const sink = tableAfter(page(model, 'lib.Sink'), 'Parameters');
   const rate = sink.rows.find((r) => cellText(r.cells[0]) === 'rate')!;
   const doc = rate.cells[3][0];
@@ -166,7 +166,7 @@ test('neddoc extract: parameter description comes from the declaring type', asyn
 // ---- gates -------------------------------------------------------------------------------
 
 test('neddoc extract: gates table shows direction and vector marker', async () => {
-  const model = extract(await buildInput({ 'file:///lib.ned': LIB }));
+  const model = await extract(await buildInput({ 'file:///lib.ned': LIB }));
   const gates = tableAfter(page(model, 'lib.Node'), 'Gates');
   assert.deepEqual(gates.columns, ['Name', 'Direction', 'Size', 'Description']);
   const g = gates.rows[0];
@@ -178,7 +178,7 @@ test('neddoc extract: gates table shows direction and vector marker', async () =
 // ---- signals / statistics ------------------------------------------------------------------
 
 test('neddoc extract: signals and statistics tables from indexed properties', async () => {
-  const model = extract(await buildInput({ 'file:///lib.ned': LIB }, { 'file:///p.msg': MSG }));
+  const model = await extract(await buildInput({ 'file:///lib.ned': LIB }, { 'file:///p.msg': MSG }));
   const p = page(model, 'lib.Node');
   const signals = tableAfter(p, 'Signals');
   assert.equal(cellText(signals.rows[0].cells[0]), 'pktSent');
@@ -196,7 +196,7 @@ test('neddoc extract: signals and statistics tables from indexed properties', as
 });
 
 test('neddoc extract: signals are inherited by subtypes', async () => {
-  const model = extract(await buildInput({ 'file:///lib.ned': LIB }));
+  const model = await extract(await buildInput({ 'file:///lib.ned': LIB }));
   const sink = page(model, 'lib.Sink');
   const signals = tableAfter(sink, 'Signals');
   assert.equal(cellText(signals.rows[0].cells[0]), 'pktSent');
@@ -205,7 +205,7 @@ test('neddoc extract: signals are inherited by subtypes', async () => {
 // ---- inheritance / usage tables -----------------------------------------------------------------
 
 test('neddoc extract: extends, known subclasses, implemented by, used in', async () => {
-  const model = extract(await buildInput({ 'file:///lib.ned': LIB, 'file:///net.ned': NET }));
+  const model = await extract(await buildInput({ 'file:///lib.ned': LIB, 'file:///net.ned': NET }));
 
   const sink = page(model, 'lib.Sink');
   const ext = tableAfter(sink, 'Extends');
@@ -225,7 +225,7 @@ test('neddoc extract: extends, known subclasses, implemented by, used in', async
 });
 
 test('neddoc extract: unresolved extends is reported', async () => {
-  const model = extract(await buildInput({ 'file:///x.ned': 'package x;\nsimple Foo extends Missing { }\n' }));
+  const model = await extract(await buildInput({ 'file:///x.ned': 'package x;\nsimple Foo extends Missing { }\n' }));
   const ext = tableAfter(page(model, 'x.Foo'), 'Extends');
   assert.equal(cellText(ext.rows[0].cells[0]), 'Missing');
   assert.ok(cellText(ext.rows[0].cells[1]).includes('unknown'));
@@ -234,7 +234,7 @@ test('neddoc extract: unresolved extends is reported', async () => {
 // ---- unassigned submodule parameters --------------------------------------------------------------
 
 test('neddoc extract: unassigned submodule parameters walk', async () => {
-  const model = extract(await buildInput({ 'file:///lib.ned': LIB, 'file:///net.ned': NET }));
+  const model = await extract(await buildInput({ 'file:///lib.ned': LIB, 'file:///net.ned': NET }));
   const net = page(model, 'lib.Net');
   const deep = tableAfter(net, 'Unassigned submodule parameters');
   const names = deep.rows.map((r) => cellText(r.cells[0]));
@@ -255,14 +255,14 @@ module Rec { submodules: inner: Rec2; }
 module Rec2 { submodules: back: Rec; }
 network N { submodules: top: Rec; }
 `;
-  const model = extract(await buildInput({ 'file:///r.ned': REC }));
+  const model = await extract(await buildInput({ 'file:///r.ned': REC }));
   page(model, 'r.N'); // completing extraction is the assertion
 });
 
 // ---- MSG pages ------------------------------------------------------------------------------------
 
 test('neddoc extract: msg fields table with inherited rows, vectors and type links', async () => {
-  const model = extract(await buildInput({}, { 'file:///p.msg': MSG }));
+  const model = await extract(await buildInput({}, { 'file:///p.msg': MSG }));
   const bar = page(model, 'msg-lib--BarPkt');
   const fields = tableAfter(bar, 'Fields');
   const byName = new Map(fields.rows.map((r) => [cellText(r.cells[0]), r]));
@@ -281,7 +281,7 @@ test('neddoc extract: msg fields table with inherited rows, vectors and type lin
 });
 
 test('neddoc extract: messageDefinitions=false drops msg pages', async () => {
-  const model = extract(await buildInput({ 'file:///lib.ned': LIB }, { 'file:///p.msg': MSG }), {
+  const model = await extract(await buildInput({ 'file:///lib.ned': LIB }, { 'file:///p.msg': MSG }), {
     messageDefinitions: false,
   });
   assert.ok(!model.pages.some((p) => p.ref.kind === 'msgtype'));
@@ -290,7 +290,7 @@ test('neddoc extract: messageDefinitions=false drops msg pages', async () => {
 // ---- comment type refs across languages -------------------------------------------------------------
 
 test('neddoc extract: ~refs in descriptions resolve to page ids', async () => {
-  const model = extract(await buildInput({ 'file:///lib.ned': LIB }));
+  const model = await extract(await buildInput({ 'file:///lib.ned': LIB }));
   const sink = page(model, 'lib.Sink');
   const doc = sink.sections.find((s) => s.kind === 'doc')!;
   const json = JSON.stringify(doc);
@@ -300,7 +300,7 @@ test('neddoc extract: ~refs in descriptions resolve to page ids', async () => {
 // ---- nav & search -------------------------------------------------------------------------------------
 
 test('neddoc extract: nav tree categories and search index', async () => {
-  const model = extract(await buildInput({ 'file:///lib.ned': LIB, 'file:///net.ned': NET }, { 'file:///p.msg': MSG }));
+  const model = await extract(await buildInput({ 'file:///lib.ned': LIB, 'file:///net.ned': NET }, { 'file:///p.msg': MSG }));
   const titles = model.navRoot.children.map((n) => n.title);
   assert.deepEqual(titles, ['Overview', 'Packages', 'Networks', 'Modules', 'Module Interfaces', 'Namespaces', 'Message Definitions']);
   const networks = model.navRoot.children.find((n) => n.title === 'Networks')!;
@@ -313,13 +313,13 @@ test('neddoc extract: nav tree categories and search index', async () => {
 // ---- full project-wide diagram pages -----------------------------------------------------------
 
 test('neddoc extract: full diagram pages are off by default', async () => {
-  const model = extract(await buildInput({ 'file:///lib.ned': LIB }, { 'file:///p.msg': MSG }));
+  const model = await extract(await buildInput({ 'file:///lib.ned': LIB }, { 'file:///p.msg': MSG }));
   assert.ok(!model.pages.some((p) => p.ref.kind === 'fulldiagram'));
   assert.ok(!model.navRoot.children.some((n) => n.title === 'Diagrams'));
 });
 
 test('neddoc extract: full diagram pages, nav node and graph-carrying requests', async () => {
-  const model = extract(await buildInput({ 'file:///lib.ned': LIB, 'file:///net.ned': NET }, { 'file:///p.msg': MSG }), {
+  const model = await extract(await buildInput({ 'file:///lib.ned': LIB, 'file:///net.ned': NET }, { 'file:///p.msg': MSG }), {
     fullUsageDiagrams: true,
     fullInheritanceDiagrams: true,
   });
@@ -357,7 +357,7 @@ test('neddoc extract: full diagram pages, nav node and graph-carrying requests',
 });
 
 test('neddoc extract: msg full diagram pages skipped without msg types', async () => {
-  const model = extract(await buildInput({ 'file:///lib.ned': LIB }), {
+  const model = await extract(await buildInput({ 'file:///lib.ned': LIB }), {
     fullUsageDiagrams: true,
     fullInheritanceDiagrams: true,
   });
@@ -369,9 +369,9 @@ test('neddoc extract: msg full diagram pages skipped without msg types', async (
 
 test('neddoc extract: diagram placeholders and requests honor options', async () => {
   const input = await buildInput({ 'file:///lib.ned': LIB, 'file:///net.ned': NET });
-  const model = extract(input);
+  const model = await extract(input);
   const forNet = model.diagrams.filter((d) => d.typeFqName === 'lib.Net');
   assert.deepEqual(forNet.map((d) => d.diagram).sort(), ['type', 'usage']);
-  const none = extract(input, { typeDiagrams: false, usageDiagrams: false, inheritanceDiagrams: false });
+  const none = await extract(input, { typeDiagrams: false, usageDiagrams: false, inheritanceDiagrams: false });
   assert.equal(none.diagrams.length, 0);
 });

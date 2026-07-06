@@ -62,6 +62,28 @@ export function excludePatternRegex(pattern: string): RegExp {
   return new RegExp(`${anywhere}${esc}(/|$)`);
 }
 
+/**
+ * Cooperative yielding for the generator's CPU-bound loops: returns a
+ * function that yields to the host event loop (macrotask) whenever
+ * `intervalMs` elapsed since the last yield, and is a cheap no-op otherwise.
+ * Without this, progress notifications queue up during synchronous stretches
+ * (extraction, diagram layout) and only flush at the end — the host UI's
+ * progress bar appears frozen. Uses the global setTimeout (available in both
+ * Node and browsers; no Node import needed).
+ */
+export function cooperativeYielder(intervalMs = 40): () => Promise<void> {
+  let last = Date.now();
+  return () => {
+    if (Date.now() - last < intervalMs) return Promise.resolve();
+    return new Promise<void>((resolve) =>
+      setTimeout(() => {
+        last = Date.now();
+        resolve();
+      }, 0),
+    );
+  };
+}
+
 export function defaultNeddocOptions(): NeddocOptions {
   return {
     format: 'html',
