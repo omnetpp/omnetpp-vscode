@@ -10,6 +10,7 @@ import type { Connection } from 'vscode-languageserver/node';
 import {
   OmnetppMethods,
   createDiagramRenderer,
+  excludePatternRegex,
   generateNeddoc,
   type GenerateDocsParams,
   type GenerateDocsProgress,
@@ -34,8 +35,13 @@ export function registerDocsRequests(connection: Connection, state: ServerState)
       }
       return undefined;
     };
-    const isTargetUri = (uri: string): boolean =>
-      uri.startsWith('file:') && projectRelative(fileURLToPath(uri)) !== undefined;
+    const excludes = (params.excludeDirs ?? []).map(excludePatternRegex);
+    const isTargetUri = (uri: string): boolean => {
+      if (!uri.startsWith('file:')) return false;
+      const rel = projectRelative(fileURLToPath(uri));
+      if (rel === undefined) return false;
+      return !excludes.some((re) => re.test(rel));
+    };
 
     const includeResolver = (fileRef: string, fromId: string | undefined): IncludeResolution | undefined => {
       try {
@@ -47,11 +53,39 @@ export function registerDocsRequests(connection: Connection, state: ServerState)
       }
     };
 
+    const warnings: string[] = [];
     const optionOverrides: Partial<NeddocOptions> = {
       format: params.format,
       includeResolver,
-      projectTitle: folders[0]?.split(sep).filter(Boolean).pop(),
+      projectTitle: params.title || folders[0]?.split(sep).filter(Boolean).pop(),
+      excludePatterns: params.excludeDirs ?? [],
+      typeDiagrams: params.networkDiagrams ?? true,
+      usageDiagrams: params.usageDiagrams ?? true,
+      inheritanceDiagrams: params.inheritanceDiagrams ?? true,
+      fullUsageDiagrams: params.fullUsageDiagram ?? false,
+      fullInheritanceDiagrams: params.fullInheritanceDiagram ?? false,
+      messageDefinitions: params.messageDefinitions ?? true,
+      sourceSnippets: params.sourceListings ?? true,
+      automaticHyperlinks: params.automaticHyperlinks ?? true,
+      includeBuiltins: params.includeBuiltins ?? false,
     };
+    if (params.customCssPath) {
+      try {
+        optionOverrides.customCss = readFileSync(params.customCssPath, 'utf8');
+      } catch {
+        warnings.push(`cannot read custom CSS file: ${params.customCssPath} (using the built-in stylesheet)`);
+      }
+    }
+    if (params.doxytagsPath) {
+      try {
+        optionOverrides.doxytags = {
+          xml: readFileSync(params.doxytagsPath, 'utf8'),
+          urlPrefix: params.doxyUrlPrefix ?? '',
+        };
+      } catch {
+        warnings.push(`cannot read doxygen tag file: ${params.doxytagsPath} (skipping C++ definition links)`);
+      }
+    }
     if (params.format === 'legacy-html') {
       const assetDir = join(__dirname, 'neddoc-legacy');
       if (!existsSync(join(assetDir, 'page.tmpl'))) throw new Error(`legacy template assets not found in ${assetDir}`);
@@ -129,7 +163,7 @@ export function registerDocsRequests(connection: Connection, state: ServerState)
       pages: result.pages,
       diagrams: result.diagrams,
       files,
-      warnings: result.warnings,
+      warnings: [...warnings, ...result.warnings],
       indexPath: join(outputDir, entry),
     };
   });

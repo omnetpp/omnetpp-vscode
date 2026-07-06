@@ -481,6 +481,110 @@
           "default": "",
           "markdownDescription": "Path to an OMNeT++ installation root. When set (or auto-detected), enables enriched features such as a live config-option registry and bundled NED libraries."
         },
+        "omnetpp.neddoc.format": {
+          "type": "string",
+          "enum": ["html", "legacy-html", "markdown", "rst"],
+          "enumDescriptions": [
+            "Browsable static site with a navigation sidebar and client-side search.",
+            "The Eclipse IDE's neddoc look & feel (Material template, flat file layout).",
+            "Markdown files with a SUMMARY.md navigation index.",
+            "Sphinx-ready reStructuredText files with toctrees and :ref: labels."
+          ],
+          "default": "html",
+          "order": 1,
+          "markdownDescription": "Default output format of the *Generate NED Documentation* command (the command still lets you pick a different format per run)."
+        },
+        "omnetpp.neddoc.outputDirectory": {
+          "type": "string",
+          "default": "doc/neddoc",
+          "order": 2,
+          "markdownDescription": "Where the generated documentation is written; relative paths are resolved against the workspace folder. Existing files are overwritten, but the directory is not cleaned first."
+        },
+        "omnetpp.neddoc.title": {
+          "type": "string",
+          "default": "",
+          "order": 3,
+          "markdownDescription": "Documentation title shown on the overview page and in the navigation header. Empty = the workspace folder name."
+        },
+        "omnetpp.neddoc.excludeDirs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "order": 4,
+          "markdownDescription": "Directories excluded from the documentation, as workspace-relative glob-ish patterns (`*` and `**` supported; a bare name matches at any depth), e.g. `examples` or `src/legacy/**`."
+        },
+        "omnetpp.neddoc.networkDiagrams": {
+          "type": "boolean",
+          "default": true,
+          "order": 10,
+          "markdownDescription": "Render the graphical module figure (submodules, icons, connections) on type pages."
+        },
+        "omnetpp.neddoc.usageDiagrams": {
+          "type": "boolean",
+          "default": true,
+          "order": 11,
+          "markdownDescription": "Per-type usage diagrams (the type, the types it uses, and the types using it)."
+        },
+        "omnetpp.neddoc.inheritanceDiagrams": {
+          "type": "boolean",
+          "default": true,
+          "order": 12,
+          "markdownDescription": "Per-type inheritance diagrams (direct supertypes, interfaces, subtypes and implementors)."
+        },
+        "omnetpp.neddoc.fullUsageDiagram": {
+          "type": "boolean",
+          "default": false,
+          "order": 13,
+          "markdownDescription": "Generate the project-wide *Full NED/MSG Usage Diagram* pages. Can get large on big projects."
+        },
+        "omnetpp.neddoc.fullInheritanceDiagram": {
+          "type": "boolean",
+          "default": false,
+          "order": 14,
+          "markdownDescription": "Generate the project-wide *Full NED/MSG Inheritance Diagram* pages. Can get large on big projects."
+        },
+        "omnetpp.neddoc.messageDefinitions": {
+          "type": "boolean",
+          "default": true,
+          "order": 15,
+          "markdownDescription": "Document MSG types (messages, packets, classes, structs, enums) too."
+        },
+        "omnetpp.neddoc.sourceListings": {
+          "type": "boolean",
+          "default": true,
+          "order": 16,
+          "markdownDescription": "Include the NED/MSG source of each type on its page."
+        },
+        "omnetpp.neddoc.automaticHyperlinks": {
+          "type": "boolean",
+          "default": true,
+          "order": 17,
+          "markdownDescription": "Automatically hyperlink every known type name mentioned in doc comments (`\\Name` suppresses a link). When off, only `~Name` tilde references are linked and unknown `~name`s are flagged."
+        },
+        "omnetpp.neddoc.includeBuiltins": {
+          "type": "boolean",
+          "default": false,
+          "order": 18,
+          "markdownDescription": "Also document the built-in NED types (`ned.DelayChannel`, `ned.DatarateChannel`, ...)."
+        },
+        "omnetpp.neddoc.customCss": {
+          "type": "string",
+          "default": "",
+          "order": 20,
+          "markdownDescription": "Path to a stylesheet that replaces the generated `style.css` (html and legacy-html formats); relative paths are resolved against the workspace folder."
+        },
+        "omnetpp.neddoc.doxytagsFile": {
+          "type": "string",
+          "default": "",
+          "order": 21,
+          "markdownDescription": "Path to a doxygen tag file (`GENERATE_TAGFILE` output of a doxygen run on the C++ sources). When set, simple-module and message pages link to the C++ documentation (\"C++ definition\"). Doxygen itself is never executed."
+        },
+        "omnetpp.neddoc.doxyUrlPrefix": {
+          "type": "string",
+          "default": "",
+          "order": 22,
+          "markdownDescription": "URL or path prefix for the doxygen links (e.g. `../doxy`), joined with the page names from the tag file."
+        },
         "omnetpp.diagnostics.scope": {
           "type": "string",
           "enum": [

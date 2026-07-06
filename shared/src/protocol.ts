@@ -74,13 +74,34 @@ export const OmnetppMethods = {
   generateDocsProgress: 'omnetpp/generateDocsProgress',
 } as const;
 
-/** Parameters of the omnetpp/generateDocs request. */
+/** Parameters of the omnetpp/generateDocs request. All option fields are
+ *  optional and default to the generator defaults (the client resolves the
+ *  omnetpp.neddoc.* settings into them; types inlined to keep this module
+ *  self-contained). */
 export interface GenerateDocsParams {
   /** Absolute filesystem path of the output directory. */
   outputDir: string;
-  /** Output format (see the neddoc DocFormat; inlined to keep this module
-   *  self-contained). */
+  /** Output format (see the neddoc DocFormat). */
   format: 'html' | 'legacy-html' | 'markdown' | 'rst';
+  /** Documentation title (defaults to the workspace folder name). */
+  title?: string;
+  /** Directory exclusion patterns (`*`/`**` globs, project-relative). */
+  excludeDirs?: string[];
+  /** Module figures on type pages. */
+  networkDiagrams?: boolean;
+  usageDiagrams?: boolean;
+  inheritanceDiagrams?: boolean;
+  fullUsageDiagram?: boolean;
+  fullInheritanceDiagram?: boolean;
+  messageDefinitions?: boolean;
+  sourceListings?: boolean;
+  automaticHyperlinks?: boolean;
+  includeBuiltins?: boolean;
+  /** Absolute path of a stylesheet replacing the generated style.css. */
+  customCssPath?: string;
+  /** Absolute path of a doxygen tag file for "C++ definition" links. */
+  doxytagsPath?: string;
+  doxyUrlPrefix?: string;
 }
 
 export interface GenerateDocsProgress {

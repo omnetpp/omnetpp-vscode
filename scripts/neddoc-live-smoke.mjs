@@ -106,6 +106,26 @@ try {
   if (progressed.length === 0) throw new Error('no progress notifications received');
   console.log(`progress notifications: OK (${progressed.length})`);
 
+  // options from the settings-backed params: title, custom css, full diagram
+  const cssFile = join(projectDir, 'my.css');
+  writeFileSync(cssFile, 'body { background: hotpink; }');
+  const out2 = join(projectDir, 'docs-out2');
+  const r2 = await request('omnetpp/generateDocs', {
+    outputDir: out2,
+    format: 'html',
+    title: 'Configured Title',
+    customCssPath: cssFile,
+    fullInheritanceDiagram: true,
+    sourceListings: false,
+  });
+  if (r2.pages < 3) throw new Error('second run failed');
+  if (!readFileSync(join(out2, 'index.html'), 'utf8').includes('Configured Title')) throw new Error('title not applied');
+  if (!readFileSync(join(out2, 'assets', 'style.css'), 'utf8').includes('hotpink')) throw new Error('custom css not applied');
+  if (!existsSync(join(out2, 'full-ned-inheritance-diagram.html'))) throw new Error('full inheritance page missing');
+  if (readFileSync(join(out2, 'types', 'DiskNode.html'), 'utf8').includes('Source code'))
+    throw new Error('source listings should be disabled');
+  console.log('settings-backed options: OK');
+
   console.log('NEDDOC LIVE SMOKE PASSED');
   cleanup();
   process.exit(0);

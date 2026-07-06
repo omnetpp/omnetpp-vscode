@@ -1,23 +1,73 @@
-// The "OMNeT++: Generate NED Documentation" command: asks for the output
-// format, runs the omnetpp/generateDocs request against the live language
-// server index with a cancellable progress notification, and offers to open
-// the generated documentation.
+// The "OMNeT++: Generate NED Documentation" command: resolves the
+// omnetpp.neddoc.* settings (the persistent generator configuration), asks
+// for the output format (preselected from the setting, with a shortcut into
+// the filtered Settings UI), runs the omnetpp/generateDocs request against
+// the live language server index with a cancellable progress notification,
+// and offers to open the generated documentation.
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { LanguageClient } from 'vscode-languageclient/node';
 import { OmnetppMethods } from '@omnetpp/shared/protocol';
 import type { GenerateDocsParams, GenerateDocsProgress, GenerateDocsResult } from '@omnetpp/shared/protocol';
 
+type DocFormat = GenerateDocsParams['format'];
+
 interface FormatItem extends vscode.QuickPickItem {
-  format: GenerateDocsParams['format'];
+  format?: DocFormat;
+  configure?: boolean;
 }
 
-const FORMATS: FormatItem[] = [
-  { label: 'HTML', description: 'browsable static site with navigation and search', format: 'html' },
-  { label: 'HTML (legacy)', description: 'the Eclipse IDE\'s neddoc look & feel', format: 'legacy-html' },
-  { label: 'Markdown', description: '.md files with SUMMARY.md navigation', format: 'markdown' },
-  { label: 'reStructuredText', description: 'Sphinx-ready .rst files', format: 'rst' },
+const FORMATS: { format: DocFormat; label: string; description: string }[] = [
+  { format: 'html', label: 'HTML', description: 'browsable static site with navigation and search' },
+  { format: 'legacy-html', label: 'HTML (legacy)', description: "the Eclipse IDE's neddoc look & feel" },
+  { format: 'markdown', label: 'Markdown', description: '.md files with SUMMARY.md navigation' },
+  { format: 'rst', label: 'reStructuredText', description: 'Sphinx-ready .rst files' },
 ];
+
+/** Resolve the omnetpp.neddoc.* settings into request params (paths made
+ *  absolute against the workspace folder). */
+function paramsFromSettings(folder: vscode.WorkspaceFolder, format: DocFormat): GenerateDocsParams {
+  const cfg = vscode.workspace.getConfiguration('omnetpp.neddoc');
+  const resolvePath = (value: string): string | undefined =>
+    value ? (path.isAbsolute(value) ? value : path.join(folder.uri.fsPath, value)) : undefined;
+  return {
+    outputDir: resolvePath(cfg.get<string>('outputDirectory', 'doc/neddoc'))!,
+    format,
+    title: cfg.get<string>('title', '') || folder.name,
+    excludeDirs: cfg.get<string[]>('excludeDirs', []),
+    networkDiagrams: cfg.get<boolean>('networkDiagrams', true),
+    usageDiagrams: cfg.get<boolean>('usageDiagrams', true),
+    inheritanceDiagrams: cfg.get<boolean>('inheritanceDiagrams', true),
+    fullUsageDiagram: cfg.get<boolean>('fullUsageDiagram', false),
+    fullInheritanceDiagram: cfg.get<boolean>('fullInheritanceDiagram', false),
+    messageDefinitions: cfg.get<boolean>('messageDefinitions', true),
+    sourceListings: cfg.get<boolean>('sourceListings', true),
+    automaticHyperlinks: cfg.get<boolean>('automaticHyperlinks', true),
+    includeBuiltins: cfg.get<boolean>('includeBuiltins', false),
+    customCssPath: resolvePath(cfg.get<string>('customCss', '')),
+    doxytagsPath: resolvePath(cfg.get<string>('doxytagsFile', '')),
+    doxyUrlPrefix: cfg.get<string>('doxyUrlPrefix', '') || undefined,
+  };
+}
+
+async function pickFormat(): Promise<DocFormat | undefined> {
+  const defaultFormat = vscode.workspace.getConfiguration('omnetpp.neddoc').get<DocFormat>('format', 'html');
+  const items: FormatItem[] = [
+    // the configured default first, marked
+    ...FORMATS.slice()
+      .sort((a, b) => Number(b.format === defaultFormat) - Number(a.format === defaultFormat))
+      .map((f) => ({ ...f, description: `${f.description}${f.format === defaultFormat ? '  (default)' : ''}` })),
+    { label: '', kind: vscode.QuickPickItemKind.Separator },
+    { label: '$(gear) Configure documentation settings...', configure: true },
+  ];
+  const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Documentation output format' });
+  if (!picked) return undefined;
+  if (picked.configure) {
+    void vscode.commands.executeCommand('workbench.action.openSettings', 'omnetpp.neddoc');
+    return undefined;
+  }
+  return picked.format;
+}
 
 export function registerDocsCommand(context: vscode.ExtensionContext, client: LanguageClient): void {
   context.subscriptions.push(
@@ -27,15 +77,10 @@ export function registerDocsCommand(context: vscode.ExtensionContext, client: La
         void vscode.window.showErrorMessage('Open a folder to generate NED documentation.');
         return;
       }
-      const lastFormat = context.workspaceState.get<string>('omnetpp.neddoc.format', 'html');
-      const picked = await vscode.window.showQuickPick(
-        FORMATS.map((f) => ({ ...f, picked: f.format === lastFormat })),
-        { placeHolder: 'Documentation output format' },
-      );
-      if (!picked) return;
-      void context.workspaceState.update('omnetpp.neddoc.format', picked.format);
+      const format = await pickFormat();
+      if (!format) return;
+      const params = paramsFromSettings(folder, format);
 
-      const outputDir = path.join(folder.uri.fsPath, 'doc', 'neddoc');
       try {
         const result = await vscode.window.withProgress<GenerateDocsResult>(
           {
@@ -48,7 +93,6 @@ export function registerDocsCommand(context: vscode.ExtensionContext, client: La
               progress.report({ message: p.total ? `${p.step} (${p.done}/${p.total})` : p.step });
             });
             try {
-              const params: GenerateDocsParams = { outputDir, format: picked.format };
               return await client.sendRequest<GenerateDocsResult>(OmnetppMethods.generateDocs, params, token);
             } finally {
               sub.dispose();
