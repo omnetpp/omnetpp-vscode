@@ -15,6 +15,7 @@ import { MarkdownRenderer } from './renderMarkdown';
 import { RstRenderer } from './renderRst';
 import { renderGraphDiagramSvg } from './graphDiagram';
 import { renderTypeFigureSvg } from './typeFigure';
+import { msgTagFile, nedTagFile } from './tagFiles';
 import type { NedResourceCache } from '../ned/nedResourceCache';
 import type { IconProvider, TextMeasurer } from '../graphics/diagramLayout';
 
@@ -156,6 +157,10 @@ export async function generateNeddoc(
     checkCancelled();
     await emit(file);
   }
+  // doxygen-style tag files for cross-project linking (as in Eclipse:
+  // nedtags.xml always, msgtags.xml when MSG types are documented)
+  await emit({ relativePath: 'nedtags.xml', content: nedTagFile(model, renderer) });
+  if (options.messageDefinitions) await emit({ relativePath: 'msgtags.xml', content: msgTagFile(model, renderer) });
   progress?.report?.('Done', model.pages.length, model.pages.length);
   return { pages: model.pages.length, diagrams: images.size, warnings: model.warnings };
 }

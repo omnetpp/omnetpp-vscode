@@ -87,6 +87,12 @@ try {
   assert(netPage.includes('<div class="diagram"><svg'), 'inline diagram missing from page');
   const inhSvg = read(out, 'images', 'demo.Node-inheritance.svg');
   assert(inhSvg.includes('href="../types/demo.Sink.html"'), 'diagram node link missing');
+  // Eclipse-style tag files for cross-project linking
+  const nedtags = read(out, 'nedtags.xml');
+  assert(nedtags.includes('<name>demo.Node</name>'), 'nedtags.xml entry missing');
+  assert(nedtags.includes('<filename>types/demo.Node.html</filename>'), 'nedtags.xml filename wrong');
+  const msgtags = read(out, 'msgtags.xml');
+  assert(msgtags.includes('<name>DemoPkt</name>'), 'msgtags.xml entry missing');
   console.log('html run: OK');
 
   // 2) explicit -o, --title, --no-message-definitions

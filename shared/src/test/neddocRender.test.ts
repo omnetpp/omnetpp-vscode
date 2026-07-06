@@ -1,6 +1,12 @@
 import { test } from 'bun:test';
 import assert from 'node:assert';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { getParsers } from './helpers';
+
+function resolveLegacyDir(): string {
+  return resolve(__dirname, '..', '..', '..', 'resources', 'neddoc-legacy');
+}
 import { BUILTIN_NED_TEXT, BUILTIN_URI, NedResourceCache } from '../ned/nedResourceCache';
 import { MsgResourceCache } from '../msg/msgResourceCache';
 import type { NeddocInput } from '../neddoc/extract';
@@ -175,4 +181,60 @@ test('neddoc rst: subheading underline lengths match text', async () => {
 test('neddoc: unknown format throws', async () => {
   const input = await buildInput({ 'file:///lib.ned': LIB });
   await assert.rejects(() => collectNeddoc(input, { format: 'bogus' as never }), /not implemented/);
+});
+
+// ---- nedtags.xml / msgtags.xml -----------------------------------------------
+
+const MSG = `namespace lib;
+packet FooPkt { int seq; }
+`;
+
+test('neddoc tag files: Eclipse-style nedtags.xml and msgtags.xml', async () => {
+  const { files } = await collectNeddoc(await buildInput({ 'file:///lib.ned': LIB }, { 'file:///p.msg': MSG }), {
+    format: 'html',
+  });
+  const nedtags = files.find((f) => f.relativePath === 'nedtags.xml')!.content as string;
+  assert.ok(nedtags.startsWith("<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>\n<tagfile>"), nedtags.slice(0, 80));
+  // qualified NED name + the renderer's page path
+  assert.ok(
+    nedtags.includes(
+      '  <compound kind="class">\n    <name>lib.Node</name>\n    <filename>types/lib.Node.html</filename>\n  </compound>',
+    ),
+    nedtags,
+  );
+  assert.ok(!nedtags.includes('FooPkt'), 'msg types must not appear in nedtags.xml');
+
+  const msgtags = files.find((f) => f.relativePath === 'msgtags.xml')!.content as string;
+  // MSG types are listed under their simple name (Eclipse behavior)
+  assert.ok(
+    msgtags.includes('<name>FooPkt</name>\n    <filename>types/msg-lib--FooPkt.html</filename>'),
+    msgtags,
+  );
+  assert.ok(!msgtags.includes('lib.Node'), 'ned types must not appear in msgtags.xml');
+});
+
+test('neddoc tag files: filenames follow the active format', async () => {
+  const input = await buildInput({ 'file:///lib.ned': LIB }, { 'file:///p.msg': MSG });
+  const md = await collectNeddoc(input, { format: 'markdown' });
+  const mdTags = md.files.find((f) => f.relativePath === 'nedtags.xml')!.content as string;
+  assert.ok(mdTags.includes('<filename>types/lib.Node.md</filename>'), mdTags);
+
+  // legacy layout: flat Eclipse naming, exactly what the Eclipse tag files carry
+  const legacyDir = resolveLegacyDir();
+  const legacyAssets: Record<string, string | Uint8Array> = {};
+  for (const f of readdirSync(legacyDir)) legacyAssets[f] = readFileSync(join(legacyDir, f));
+  const legacy = await collectNeddoc(input, { format: 'legacy-html', legacyAssets });
+  const legacyNed = legacy.files.find((f) => f.relativePath === 'nedtags.xml')!.content as string;
+  assert.ok(legacyNed.includes('<filename>lib.Node.html</filename>'), legacyNed);
+  const legacyMsg = legacy.files.find((f) => f.relativePath === 'msgtags.xml')!.content as string;
+  assert.ok(legacyMsg.includes('<filename>lib-FooPkt.html</filename>'), legacyMsg);
+});
+
+test('neddoc tag files: msgtags.xml omitted when message definitions are off', async () => {
+  const { files } = await collectNeddoc(await buildInput({ 'file:///lib.ned': LIB }, { 'file:///p.msg': MSG }), {
+    format: 'html',
+    messageDefinitions: false,
+  });
+  assert.ok(files.some((f) => f.relativePath === 'nedtags.xml'));
+  assert.ok(!files.some((f) => f.relativePath === 'msgtags.xml'));
 });
