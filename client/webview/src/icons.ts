@@ -7,9 +7,11 @@ export interface IconAsset {
   scalePct?: number;
 }
 
-/** A ready-to-render icon: data URI (export-safe) + drawing dimensions. */
+/** A ready-to-render icon: data URI (export-safe) + drawing dimensions.
+ *  Structurally satisfies the shared ResolvedIcon interface (`href` carries
+ *  the data URI; tinting happens here in canvas, so `tint` is never set). */
 export interface LoadedIcon {
-  dataUri: string;
+  href: string;
   width: number;
   height: number;
 }
@@ -75,6 +77,6 @@ export class IconStore {
       ctx.putImageData(data, 0, 0);
     }
 
-    return { dataUri: canvas.toDataURL('image/png'), width, height };
+    return { href: canvas.toDataURL('image/png'), width, height };
   }
 }

@@ -24,3 +24,23 @@ export { LcgRandom, BasicSpringEmbedderLayout, type SpringEmbedderOptions } from
 export { arrowcoords, type Pt, type Rect, type RoutingConstraint, type RoutingDir } from './graphics/arrowcoords';
 export { SvgBuilder, escapeXml, fmt, type Attrs } from './graphics/svgBuilder';
 export { approxTextWidth } from './graphics/textMetrics';
+export {
+  buildDiagram,
+  buildCardFigure,
+  type BackgroundSpec,
+  type ConnFigure,
+  type DiagramBuildOptions,
+  type DiagramModel,
+  type IconProvider,
+  type ResolvedIcon,
+  type ShapeSpec,
+  type SubFigure,
+  type TextMeasurer,
+} from './graphics/diagramLayout';
+export {
+  renderDiagramSvg,
+  renderCardSvg,
+  type DiagramRenderOptions,
+  type LinkArea,
+  type RenderedSvg,
+} from './graphics/diagramSvg';

@@ -1,16 +1,17 @@
 import { test } from 'bun:test';
 import assert from 'node:assert';
 import type { PreviewScene, PreviewSubmodule } from '@omnetpp/shared/protocol';
-import { buildCardFigure, buildDiagram } from '../figures';
-import type { IconStore } from '../icons';
+import { buildCardFigure, buildDiagram, type IconProvider } from '@omnetpp/shared/preview';
 
-// DOM-free checks of the figure/layout/routing pipeline. Icon loading and
-// text measurement are stubbed (they need a browser); scenes use an explicit
-// bgb so auto-sizing (which measures labels) is not exercised here.
+// DOM-free checks of the figure/layout/routing pipeline, exercising the
+// shared diagramLayout implementation directly with stubbed icon loading and
+// text measurement (the webview figures.ts adapter merely binds the
+// canvas-based implementations of these two).
 
-const fakeIcons = {
-  get: () => Promise.resolve({ dataUri: 'data:image/png;base64,', width: 32, height: 20 }),
-} as unknown as IconStore;
+const fakeIcons: IconProvider = {
+  get: () => Promise.resolve({ href: 'data:image/png;base64,', width: 32, height: 20 }),
+};
+const opts = (seed: number) => ({ icons: fakeIcons, measureText: (t: string) => 7 * t.length, seed });
 
 function sub(name: string, display: string[], extra: Partial<PreviewSubmodule> = {}): PreviewSubmodule {
   return {
@@ -54,7 +55,7 @@ test('figures: pinned position honored, unpinned laid out inside the area', asyn
     submodules: [sub('a', ['p=100,100', 'i=device/pc']), sub('b', ['i=device/pc'])],
     connections: [{ ...CONN, srcModule: 'a', destModule: 'b' }],
   });
-  const model = await buildDiagram(s, fakeIcons, 1);
+  const model = await buildDiagram(s, opts(1));
   assert.equal(model.background.width, 400);
   assert.equal(model.background.height, 300);
   const [a, b] = model.submodules;
@@ -62,9 +63,9 @@ test('figures: pinned position honored, unpinned laid out inside the area', asyn
   assert.ok(a.pinned && !b.pinned);
   assert.ok(b.cx > 0 && b.cx < 400 && b.cy > 0 && b.cy < 300, `b inside area: (${b.cx},${b.cy})`);
   // determinism per seed
-  const model2 = await buildDiagram(s, fakeIcons, 1);
+  const model2 = await buildDiagram(s, opts(1));
   assert.deepEqual([model2.submodules[1].cx, model2.submodules[1].cy], [b.cx, b.cy]);
-  const model3 = await buildDiagram(s, fakeIcons, 2);
+  const model3 = await buildDiagram(s, opts(2));
   assert.notDeepEqual([model3.submodules[1].cx, model3.submodules[1].cy], [b.cx, b.cy]);
 });
 
@@ -76,7 +77,7 @@ test('figures: shape/icon resolution follows the IDE rules', async () => {
       sub('faded', ['p=250,50;i=block/proc,red,50;q=jobs;t=hello,l;r=30,,red']),
     ],
   });
-  const model = await buildDiagram(s, fakeIcons, 1);
+  const model = await buildDiagram(s, opts(1));
   const [boxy, iconless, faded] = model.submodules;
   assert.equal(boxy.shape?.kind, 'oval');
   assert.equal(boxy.width, 60);
@@ -100,7 +101,7 @@ test('figures: vector label, connection styles, markers and bundling', async () 
       { ...CONN, destModule: 'm', bidirectional: true }, // from the parent border
     ],
   });
-  const model = await buildDiagram(s, fakeIcons, 1);
+  const model = await buildDiagram(s, opts(1));
   assert.equal(model.submodules[0].label, 'n[8]');
 
   const [styled, plain, self, border] = model.connections;
@@ -121,7 +122,7 @@ test('figures: vector label, connection styles, markers and bundling', async () 
 test('figures: card figure uses the type display chain', async () => {
   const card = await buildCardFigure(
     scene({ kind: 'simple', displayChain: ['i=block/sink,red;b=40,24'], submodules: undefined, connections: undefined }),
-    fakeIcons,
+    opts(1),
   );
   assert.equal(card.label, 'Net');
   assert.ok(card.shape);
