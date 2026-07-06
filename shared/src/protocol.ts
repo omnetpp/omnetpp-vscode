@@ -68,7 +68,35 @@ export const OmnetppMethods = {
   mcpListTools: 'omnetpp/mcp/listTools',
   /** request: McpCallToolParams → tool-specific result */
   mcpCallTool: 'omnetpp/mcp/callTool',
+  /** request: GenerateDocsParams → GenerateDocsResult (NED documentation) */
+  generateDocs: 'omnetpp/generateDocs',
+  /** notification server→client during generateDocs: GenerateDocsProgress */
+  generateDocsProgress: 'omnetpp/generateDocsProgress',
 } as const;
+
+/** Parameters of the omnetpp/generateDocs request. */
+export interface GenerateDocsParams {
+  /** Absolute filesystem path of the output directory. */
+  outputDir: string;
+  /** Output format (see the neddoc DocFormat; inlined to keep this module
+   *  self-contained). */
+  format: 'html' | 'legacy-html' | 'markdown' | 'rst';
+}
+
+export interface GenerateDocsProgress {
+  step: string;
+  done: number;
+  total: number;
+}
+
+export interface GenerateDocsResult {
+  pages: number;
+  diagrams: number;
+  files: number;
+  warnings: string[];
+  /** Absolute path of the generated entry page (index.html / index.md / ...). */
+  indexPath: string;
+}
 
 /** An editor cursor: the document and the position inside it. */
 export interface CursorParams {

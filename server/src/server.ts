@@ -41,6 +41,7 @@ import { registerWorkspaceDiagnostics } from './workspaceDiagnostics';
 import { registerIndexLifecycle } from './indexLifecycle';
 import { registerViewRequests } from './viewRequests';
 import { registerMcpRequests } from './mcpRequests';
+import { registerDocsRequests } from './docsRequests';
 import type { NedHierarchyItem } from '@omnetpp/shared';
 
 const connection = createConnection(ProposedFeatures.all);
@@ -61,6 +62,7 @@ const wsDiag = registerWorkspaceDiagnostics(connection, documents, state);
 const indexLifecycle = registerIndexLifecycle(connection, documents, state, wsDiag);
 registerViewRequests(connection, documents, state);
 registerMcpRequests(connection, documents, state);
+registerDocsRequests(connection, state);
 
 connection.onInitialize(async (params: InitializeParams): Promise<InitializeResult> => {
   state.workspaceFolders = (params.workspaceFolders ?? [])

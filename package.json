@@ -213,6 +213,12 @@
         "icon": "$(open-preview)"
       },
       {
+        "command": "omnetpp.generateNedDocumentation",
+        "title": "Generate NED Documentation",
+        "category": "OMNeT++",
+        "icon": "$(book)"
+      },
+      {
         "command": "omnetpp.previewShowType",
         "title": "Show",
         "category": "OMNeT++"
