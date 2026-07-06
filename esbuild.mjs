@@ -25,6 +25,8 @@ const targets = [
   { entryPoints: ['mcp/src/server.ts'], outfile: 'dist/opp_ide_mcp.js' },
   // standalone CLI linter — runnable directly (node shebang) and via the `bin` entry
   { entryPoints: ['mcp/src/lint.ts'], outfile: 'dist/opp_lint.js', banner: { js: '#!/usr/bin/env node' } },
+  // standalone CLI documentation generator
+  { entryPoints: ['mcp/src/neddoc.ts'], outfile: 'dist/opp_neddoc.js', banner: { js: '#!/usr/bin/env node' } },
   // the NED preview webview app: a browser IIFE (loaded via <script> in the
   // webview; imports only @omnetpp/shared/preview — no tree-sitter, no Node APIs)
   {

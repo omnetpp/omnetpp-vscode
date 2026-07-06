@@ -1,0 +1,114 @@
+// Drives the bundled CLI documentation generator (dist/opp_neddoc.js) against
+// a throwaway project and asserts: pages/assets are produced, type references
+// resolve to links, tables contain the expected rows, options and exit codes
+// behave. Run after `bun run dev:build`.
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const cli = join(root, 'dist', 'opp_neddoc.js');
+
+const proj = mkdtempSync(join(tmpdir(), 'opp-neddoc-'));
+mkdirSync(join(proj, 'src'));
+writeFileSync(
+  join(proj, 'src', 'demo.ned'),
+  `package demo;
+// The base node; see ~Sink.
+//
+// @author Testy
+simple Node
+{
+    parameters:
+        double rate @unit(bps) = default(100bps); // transmission rate
+    gates:
+        inout g[];
+}
+// Terminal node.
+simple Sink extends Node { }
+network Net
+{
+    submodules:
+        n: Node;
+        s: Sink;
+    connections:
+        n.g++ <--> s.g++;
+}
+`,
+);
+writeFileSync(
+  join(proj, 'src', 'demo.msg'),
+  `namespace demo;
+// A demo packet.
+packet DemoPkt { int seq; }
+`,
+);
+
+function run(args, cwd = proj) {
+  const r = spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', cwd });
+  return { code: r.status, out: r.stdout, err: r.stderr };
+}
+function cleanup() {
+  try { rmSync(proj, { recursive: true, force: true }); } catch { /* ignore */ }
+}
+function assert(cond, msg) {
+  if (!cond) {
+    console.error('FAILED:', msg);
+    cleanup();
+    process.exit(1);
+  }
+}
+function read(...parts) {
+  return readFileSync(join(...parts), 'utf8');
+}
+
+try {
+  // 1) default html run into <proj>/doc/neddoc
+  const html = run([proj]);
+  assert(html.code === 0, `expected exit 0, got ${html.code}: ${html.err}`);
+  const out = join(proj, 'doc', 'neddoc');
+  for (const f of ['index.html', 'packages.html', 'namespaces.html', 'assets/style.css', 'assets/neddoc.js']) {
+    assert(existsSync(join(out, f)), `missing ${f}`);
+  }
+  const nodePage = read(out, 'types', 'demo.Node.html');
+  assert(nodePage.includes('<a href="demo.Sink.html">Sink</a>'), '~Sink should link to the Sink page');
+  assert(nodePage.includes('id="param-rate"'), 'parameters table row anchor missing');
+  assert(nodePage.includes('transmission rate'), 'parameter description missing');
+  assert(nodePage.includes('<b>Author:</b>'), '@author formatting missing');
+  assert(nodePage.includes('<td>100bps</td>'), 'default value should be unwrapped in the table');
+  const netPage = read(out, 'types', 'demo.Net.html');
+  assert(/Unassigned submodule parameters/.test(netPage), 'unassigned parameters section missing');
+  assert(existsSync(join(out, 'types', 'msg-demo--DemoPkt.html')), 'msg type page missing');
+  console.log('html run: OK');
+
+  // 2) explicit -o, --title, --no-message-definitions
+  const out2 = join(proj, 'docs2');
+  const r2 = run(['-o', out2, '--title=Demo Docs', '--no-message-definitions', proj]);
+  assert(r2.code === 0, `expected exit 0, got ${r2.code}: ${r2.err}`);
+  assert(read(out2, 'index.html').includes('Demo Docs'), 'custom title missing');
+  assert(!existsSync(join(out2, 'types', 'msg-demo--DemoPkt.html')), 'msg pages should be disabled');
+  console.log('options run: OK');
+
+  // 3) exclusions: -x src excludes everything -> pages exist but no type pages
+  const out3 = join(proj, 'docs3');
+  const r3 = run(['-o', out3, '-x', 'src', proj]);
+  assert(r3.code === 0, `expected exit 0, got ${r3.code}: ${r3.err}`);
+  assert(!existsSync(join(out3, 'types', 'demo.Node.html')), '-x should exclude the src dir');
+  console.log('exclusion run: OK');
+
+  // 4) usage/runtime errors exit 2
+  assert(run(['--format=bogus', proj]).code === 2, 'invalid --format should exit 2');
+  assert(run(['--no-such-option', proj]).code === 2, 'unknown option should exit 2');
+  assert(run([join(proj, 'nonexistent-dir')]).code === 2, 'missing project dir should exit 2');
+  console.log('exit codes: OK');
+
+  console.log('NEDDOC CLI SMOKE PASSED');
+  cleanup();
+  process.exit(0);
+} catch (e) {
+  console.error('NEDDOC CLI SMOKE ERROR:', e.message);
+  cleanup();
+  process.exit(1);
+}

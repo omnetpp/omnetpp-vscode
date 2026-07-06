@@ -119,6 +119,8 @@ class Extraction {
   private msgUsersOf = new Map<string, MsgTypeInfo[]>();
   private msgUsedBy = new Map<string, MsgTypeInfo[]>();
   private commentCtx: CommentParseCtx;
+  /** URI of the file whose comments are being parsed (anchors `@include`). */
+  private currentUri?: string;
   private pages: DocPage[] = [];
   private diagrams: DiagramRequest[] = [];
   private searchIndex: SearchEntry[] = [];
@@ -136,10 +138,13 @@ class Extraction {
     for (const t of msgTypes) this.msgPageId.set(t.fqName, pageIdForType(t.fqName, 'msg'));
     this.collectTypeNames();
     this.collectRelations();
+    const includeResolver = this.options.includeResolver;
     this.commentCtx = {
       hyperlinkMode: this.options.automaticHyperlinks ? 'automatic' : 'tilde',
       lookupTypeName: (name) => this.typeNames.get(name),
-      resolveInclude: this.options.includeResolver,
+      // an @include in a type's comment resolves relative to the file the
+      // comment lives in; nested includes pass their own file id explicitly
+      resolveInclude: includeResolver ? (ref, fromId) => includeResolver(ref, fromId ?? this.currentUri) : undefined,
       warnings: this.warnings,
     };
   }
@@ -329,6 +334,7 @@ class Extraction {
   // ---- NED type page ----
 
   private nedTypePage(t: NedTypeInfo): DocPage {
+    this.currentUri = t.file.uri;
     const pageId = this.nedPageId.get(t.fqName)!;
     const kindLabel = nedKindLabel(t);
     const sections: DocSection[] = [];
@@ -649,6 +655,7 @@ class Extraction {
   // ---- MSG type page ----
 
   private msgTypePage(t: MsgTypeInfo): DocPage {
+    this.currentUri = t.file.uri;
     const pageId = this.msgPageId.get(t.fqName)!;
     const kindLabel = MSG_KIND_LABELS[t.kind] ?? t.kind;
     const sections: DocSection[] = [];

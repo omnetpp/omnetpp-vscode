@@ -13,8 +13,15 @@ import { paramInfo, paramNodes, type ParamInfo } from '../ned/nedAst';
 import { resolveSubmoduleType } from '../ned/nedPreviewScene';
 
 export interface ParamAssignment {
+  /** Display value: for `default(x)` assignments this is the inner `x`
+   *  (Eclipse's ParamElementEx.getValue() behaves the same). */
   value: string;
   isDefault: boolean;
+}
+
+function toAssignment(value: string): ParamAssignment {
+  const dflt = /^default\s*\(([\s\S]*)\)$/.exec(value.trim());
+  return dflt ? { value: dflt[1].trim(), isDefault: true } : { value: value.trim(), isDefault: false };
 }
 
 /** Merged parameter assignments over the inheritance chain, nearest override
@@ -25,7 +32,7 @@ export function paramAssignmentsOf(type: NedTypeInfo): Map<string, ParamAssignme
     for (const node of paramNodes(t.node)) {
       const info = paramInfo(node);
       if (!info.name || info.isPattern || info.value === undefined) continue;
-      if (!out.has(info.name)) out.set(info.name, { value: info.value, isDefault: /^default\s*\(/.test(info.value) });
+      if (!out.has(info.name)) out.set(info.name, toAssignment(info.value));
     }
   }
   return out;
@@ -37,7 +44,7 @@ function submoduleBodyAssignments(subNode: SyntaxNode): Map<string, ParamAssignm
   for (const node of paramNodes(subNode)) {
     const info = paramInfo(node);
     if (!info.name || info.isPattern || info.value === undefined) continue;
-    if (!out.has(info.name)) out.set(info.name, { value: info.value, isDefault: /^default\s*\(/.test(info.value) });
+    if (!out.has(info.name)) out.set(info.name, toAssignment(info.value));
   }
   return out;
 }
