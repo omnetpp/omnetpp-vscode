@@ -117,6 +117,31 @@ export { CppResourceCache } from './cpp/cppResourceCache';
 // MCP tool layer (host-agnostic; no MCP SDK dependency)
 export { type ToolContext, lintFile, OMNETPP_TOOLS, handleTool } from './mcp/tools';
 
+// NED documentation generator (neddoc)
+export { type DocFormat, type NeddocOptions, defaultNeddocOptions } from './neddoc/options';
+export {
+  type DocModel,
+  type DocPage,
+  type DocPageRef,
+  type DocSection,
+  type DocCell,
+  type DiagramRequest,
+  type NavNode,
+  type SearchEntry,
+} from './neddoc/docModel';
+export { type NeddocInput, extractDocModel } from './neddoc/extract';
+export { type GeneratedFile, type NeddocRenderer, type RenderCtx } from './neddoc/renderer';
+export {
+  type NeddocProgress,
+  type NeddocResult,
+  type DiagramSvgRenderer,
+  NeddocCancelled,
+  generateNeddoc,
+  collectNeddoc,
+  rendererForFormat,
+} from './neddoc/generate';
+export { type IncludeResolution } from './neddoc/commentAst';
+
 // MSG
 export { msgNameNode, isMsgTypeHeaderLine } from './msg/msgAst';
 export { msgDocumentSymbols } from './msg/msgSymbols';
