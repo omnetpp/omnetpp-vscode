@@ -158,6 +158,12 @@ export class LegacyHtmlRenderer implements NeddocRenderer {
   auxFiles(ctx: RenderCtx): GeneratedFile[] {
     const files: GeneratedFile[] = [];
     for (const name of STATIC_ASSETS) {
+      // a custom stylesheet replaces the template's style.css (Eclipse's
+      // copyStaticResources(cssPath) behavior)
+      if (name === 'style.css' && ctx.options.customCss !== undefined) {
+        files.push({ relativePath: name, content: ctx.options.customCss });
+        continue;
+      }
       if (name in this.assets) files.push({ relativePath: name, content: this.assets[name] });
     }
     files.push({ relativePath: 'navtreedata.js', content: this.navTreeData(ctx.model) });

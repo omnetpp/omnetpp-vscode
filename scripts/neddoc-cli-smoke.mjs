@@ -95,12 +95,23 @@ try {
   assert(msgtags.includes('<name>DemoPkt</name>'), 'msgtags.xml entry missing');
   console.log('html run: OK');
 
-  // 2) explicit -o, --title, --no-message-definitions
+  // 2) explicit -o, --title, --no-message-definitions, full diagrams, custom css
+  const cssFile = join(proj, 'my.css');
+  writeFileSync(cssFile, 'body { background: hotpink; }');
   const out2 = join(proj, 'docs2');
-  const r2 = run(['-o', out2, '--title=Demo Docs', '--no-message-definitions', proj]);
+  const r2 = run([
+    '-o', out2, '--title=Demo Docs', '--no-message-definitions',
+    '--full-inheritance-diagrams', '--full-usage-diagrams', `--custom-css=${cssFile}`, proj,
+  ]);
   assert(r2.code === 0, `expected exit 0, got ${r2.code}: ${r2.err}`);
   assert(read(out2, 'index.html').includes('Demo Docs'), 'custom title missing');
   assert(!existsSync(join(out2, 'types', 'msg-demo--DemoPkt.html')), 'msg pages should be disabled');
+  assert(read(out2, 'assets', 'style.css').includes('hotpink'), 'custom css not applied');
+  assert(existsSync(join(out2, 'full-ned-inheritance-diagram.html')), 'full inheritance page missing');
+  assert(existsSync(join(out2, 'images', 'full-ned-usage-diagram.svg')), 'full usage svg missing');
+  const fullSvg = read(out2, 'images', 'full-ned-inheritance-diagram.svg');
+  assert(fullSvg.includes('href="../types/demo.Sink.html"'), 'full diagram node link missing');
+  assert(run([`--custom-css=${join(proj, 'nonexistent.css')}`, proj]).code === 2, 'bad css file should exit 2');
   console.log('options run: OK');
 
   // 3) exclusions: -x src excludes everything -> pages exist but no type pages

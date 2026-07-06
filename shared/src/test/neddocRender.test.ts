@@ -230,6 +230,30 @@ test('neddoc tag files: filenames follow the active format', async () => {
   assert.ok(legacyMsg.includes('<filename>lib-FooPkt.html</filename>'), legacyMsg);
 });
 
+// ---- custom CSS -------------------------------------------------------------------
+
+test('neddoc custom css: replaces the generated stylesheet in html and legacy-html', async () => {
+  const input = await buildInput({ 'file:///lib.ned': LIB });
+  const CUSTOM = 'body { background: hotpink; }';
+  const html = await collectNeddoc(input, { format: 'html', customCss: CUSTOM });
+  assert.equal(html.files.find((f) => f.relativePath === 'assets/style.css')!.content, CUSTOM);
+
+  const legacyDir = resolveLegacyDir();
+  const legacyAssets: Record<string, string | Uint8Array> = {};
+  for (const f of readdirSync(legacyDir)) legacyAssets[f] = readFileSync(join(legacyDir, f));
+  const legacy = await collectNeddoc(input, { format: 'legacy-html', legacyAssets, customCss: CUSTOM });
+  assert.equal(legacy.files.find((f) => f.relativePath === 'style.css')!.content, CUSTOM);
+  // other template assets still ship untouched
+  assert.ok(legacy.files.some((f) => f.relativePath === 'jquery.js'));
+});
+
+test('neddoc custom css: default stylesheets used when unset', async () => {
+  const input = await buildInput({ 'file:///lib.ned': LIB });
+  const html = await collectNeddoc(input, { format: 'html' });
+  const css = html.files.find((f) => f.relativePath === 'assets/style.css')!.content as string;
+  assert.ok(css.includes('neddoc'), 'built-in stylesheet expected');
+});
+
 test('neddoc tag files: msgtags.xml omitted when message definitions are off', async () => {
   const { files } = await collectNeddoc(await buildInput({ 'file:///lib.ned': LIB }, { 'file:///p.msg': MSG }), {
     format: 'html',

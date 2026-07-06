@@ -124,7 +124,7 @@ ${body}
 
   auxFiles(ctx: RenderCtx): GeneratedFile[] {
     return [
-      { relativePath: 'assets/style.css', content: STYLE_CSS },
+      { relativePath: 'assets/style.css', content: ctx.options.customCss ?? STYLE_CSS },
       { relativePath: 'assets/neddoc.js', content: NEDDOC_JS },
       {
         relativePath: 'assets/navtree-data.js',

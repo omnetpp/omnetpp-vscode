@@ -39,10 +39,27 @@ export interface NeddocOptions {
   includeResolver?: (fileRef: string, fromId: string | undefined) => IncludeResolution | undefined;
   /** Title shown on the overview page and in the navigation header. */
   projectTitle?: string;
+  /** Custom stylesheet CONTENT replacing the generated style.css in the
+   *  html/legacy-html outputs (Eclipse's custom CSS option; hosts read the
+   *  file). */
+  customCss?: string;
   /** The vendored Eclipse "material" template files, keyed by filename
    *  (page.tmpl, navtree.tmpl, style.css, jquery.js, ...). Required for the
    *  legacy-html format; the host reads them from dist/neddoc-legacy/. */
   legacyAssets?: Record<string, string | Uint8Array>;
+}
+
+/** Compile an Eclipse-style exclusion pattern (`*`, `**`) to a RegExp tested
+ *  against project-relative paths. A bare name matches at any depth. */
+export function excludePatternRegex(pattern: string): RegExp {
+  const p = pattern.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  const esc = p
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*\*/g, ' ')
+    .replace(/\*/g, '[^/]*')
+    .replace(/ /g, '.*');
+  const anywhere = !p.includes('/') ? '(^|/)' : '^';
+  return new RegExp(`${anywhere}${esc}(/|$)`);
 }
 
 export function defaultNeddocOptions(): NeddocOptions {
