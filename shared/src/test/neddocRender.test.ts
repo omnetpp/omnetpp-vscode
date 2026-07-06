@@ -115,7 +115,64 @@ test('neddoc html: diagram sections render inline SVG when a renderer is wired',
   assert.ok(netPage.includes('href="lib.Node.html"'), netPage.match(/href="[^"]*lib\.Node[^"]*"/)?.[0]);
 });
 
-test('neddoc html: unknown format throws', async () => {
+// ---- markdown output ---------------------------------------------------------
+
+test('neddoc markdown: pages, SUMMARY.md, tables and links', async () => {
+  const { files } = await collectNeddoc(await buildInput({ 'file:///lib.ned': LIB }), { format: 'markdown' });
+  const paths = files.map((f) => f.relativePath);
+  assert.ok(paths.includes('index.md'));
+  assert.ok(paths.includes('types/lib.Node.md'));
+  assert.ok(paths.includes('SUMMARY.md'));
+
+  const nodePage = files.find((f) => f.relativePath === 'types/lib.Node.md')!.content as string;
+  assert.ok(nodePage.startsWith('# Node'), nodePage.slice(0, 40));
+  // ~ref resolves to a relative md link
+  assert.ok(nodePage.includes('[Sink](lib.Sink.md)'), nodePage);
+  // parameters pipe table
+  assert.ok(nodePage.includes('| Name | Type | Default value | Description |'), nodePage);
+  assert.ok(/\| rate \| double \| 100bps \|.*transmission rate.*\|/.test(nodePage), nodePage);
+  // fenced source with language tag
+  assert.ok(nodePage.includes('```ned\n'));
+  // heading anchors for section links
+  assert.ok(nodePage.includes('<a id="parameters"></a>'));
+
+  const summary = files.find((f) => f.relativePath === 'SUMMARY.md')!.content as string;
+  assert.ok(summary.includes('- [Overview](index.md)'));
+  assert.ok(summary.includes('  - [Net](types/lib.Net.md)'), summary);
+});
+
+// ---- rst output ------------------------------------------------------------------
+
+test('neddoc rst: labels, refs, list-tables and toctree', async () => {
+  const { files } = await collectNeddoc(await buildInput({ 'file:///lib.ned': LIB }), { format: 'rst' });
+  const paths = files.map((f) => f.relativePath);
+  assert.ok(paths.includes('index.rst'));
+  assert.ok(paths.includes('types/lib.Node.rst'));
+
+  const nodePage = files.find((f) => f.relativePath === 'types/lib.Node.rst')!.content as string;
+  // page label + title underline
+  assert.ok(nodePage.startsWith('.. _neddoc-lib-node:\n\nNode\n===='), nodePage.slice(0, 60));
+  // ~ref resolves to a :ref: role against the target page label
+  assert.ok(nodePage.includes(':ref:`Sink <neddoc-lib-sink>`'), nodePage);
+  // parameters list-table with section label
+  assert.ok(nodePage.includes('.. _neddoc-lib-node-parameters:'), nodePage);
+  assert.ok(nodePage.includes('.. list-table::'), nodePage);
+  assert.ok(nodePage.includes('     - transmission rate'), nodePage);
+  // source code block
+  assert.ok(nodePage.includes('.. code-block:: ned'));
+
+  const index = files.find((f) => f.relativePath === 'index.rst')!.content as string;
+  assert.ok(index.includes('.. toctree::'));
+  assert.ok(index.includes('   types/lib.Node'), index);
+});
+
+test('neddoc rst: subheading underline lengths match text', async () => {
+  const { files } = await collectNeddoc(await buildInput({ 'file:///lib.ned': LIB }), { format: 'rst' });
+  const nodePage = files.find((f) => f.relativePath === 'types/lib.Node.rst')!.content as string;
+  assert.ok(nodePage.includes('Parameters\n----------'), nodePage);
+});
+
+test('neddoc: unknown format throws', async () => {
   const input = await buildInput({ 'file:///lib.ned': LIB });
-  await assert.rejects(() => collectNeddoc(input, { format: 'markdown' }), /not implemented/);
+  await assert.rejects(() => collectNeddoc(input, { format: 'bogus' as never }), /not implemented/);
 });

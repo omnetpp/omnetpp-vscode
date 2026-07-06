@@ -98,7 +98,28 @@ try {
   assert(!existsSync(join(out3, 'types', 'demo.Node.html')), '-x should exclude the src dir');
   console.log('exclusion run: OK');
 
-  // 4) usage/runtime errors exit 2
+  // 4) markdown format
+  const outMd = join(proj, 'docs-md');
+  const rMd = run(['-o', outMd, '--format=markdown', proj]);
+  assert(rMd.code === 0, `markdown run failed: ${rMd.err}`);
+  assert(existsSync(join(outMd, 'SUMMARY.md')), 'SUMMARY.md missing');
+  const mdNode = read(outMd, 'types', 'demo.Node.md');
+  assert(mdNode.includes('[Sink](demo.Sink.md)'), 'md ~ref link missing');
+  assert(mdNode.includes('| Name | Type | Default value | Description |'), 'md parameters table missing');
+  console.log('markdown run: OK');
+
+  // 5) rst format
+  const outRst = join(proj, 'docs-rst');
+  const rRst = run(['-o', outRst, '--format=rst', proj]);
+  assert(rRst.code === 0, `rst run failed: ${rRst.err}`);
+  const rstIndex = read(outRst, 'index.rst');
+  assert(rstIndex.includes('.. toctree::'), 'rst toctree missing');
+  const rstNode = read(outRst, 'types', 'demo.Node.rst');
+  assert(rstNode.includes(':ref:`Sink <neddoc-demo-sink>`'), 'rst :ref: link missing');
+  assert(rstNode.includes('.. list-table::'), 'rst list-table missing');
+  console.log('rst run: OK');
+
+  // 6) usage/runtime errors exit 2
   assert(run(['--format=bogus', proj]).code === 2, 'invalid --format should exit 2');
   assert(run(['--no-such-option', proj]).code === 2, 'unknown option should exit 2');
   assert(run([join(proj, 'nonexistent-dir')]).code === 2, 'missing project dir should exit 2');

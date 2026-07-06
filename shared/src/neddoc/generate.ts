@@ -10,6 +10,8 @@ import type { DiagramRequest, DocModel } from './docModel';
 import { defaultNeddocOptions, type NeddocOptions } from './options';
 import type { GeneratedFile, NeddocRenderer, RenderCtx } from './renderer';
 import { HtmlRenderer } from './renderHtml';
+import { MarkdownRenderer } from './renderMarkdown';
+import { RstRenderer } from './renderRst';
 
 export interface NeddocProgress {
   report?(step: string, done: number, total: number): void;
@@ -37,6 +39,10 @@ export function rendererForFormat(options: NeddocOptions): NeddocRenderer {
   switch (options.format) {
     case 'html':
       return new HtmlRenderer();
+    case 'markdown':
+      return new MarkdownRenderer();
+    case 'rst':
+      return new RstRenderer();
     default:
       throw new Error(`output format not implemented yet: ${options.format}`);
   }
