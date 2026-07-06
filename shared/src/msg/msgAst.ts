@@ -42,12 +42,19 @@ export function msgBodyNode(node: SyntaxNode): SyntaxNode | null {
  * precedes the type name and strip the markers.
  */
 export function msgLeadingDocComment(node: SyntaxNode): string | undefined {
+  const raw = msgLeadingDocCommentRaw(node);
+  return raw === undefined ? undefined : stripCommentMarkers(raw);
+}
+
+/** Like {@link msgLeadingDocComment}, but keeps the `//` markers (the neddoc
+ *  generator's comment pipeline needs the raw form for `//#` and `@include`). */
+export function msgLeadingDocCommentRaw(node: SyntaxNode): string | undefined {
   const lines: string[] = [];
   for (const c of node.namedChildren) {
     if (!c || c.type !== 'comment') break; // the run ends at the type name/keyword
     lines.push(c.text);
   }
-  return lines.length ? stripCommentMarkers(lines.join('\n')) : undefined;
+  return lines.length ? lines.join('\n') : undefined;
 }
 
 /**

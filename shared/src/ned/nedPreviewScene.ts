@@ -105,7 +105,7 @@ function typeDisplayChain(type: NedTypeInfo | undefined): string[] {
  * (last/most-derived wins) → default pattern (first wins) → `<default("X")>`
  * bracket. INI typename bindings don't exist at the type level.
  */
-function resolveSubmoduleType(
+export function resolveSubmoduleType(
   cache: NedResourceCache,
   focus: NedTypeInfo,
   declOwner: NedTypeInfo,

@@ -545,6 +545,16 @@ export function allowsUnconnected(typeNode: SyntaxNode): boolean {
  * Returns the comment text with leading // markers stripped.
  */
 export function leadingDocComment(node: SyntaxNode): string | undefined {
+  const raw = leadingDocCommentRaw(node);
+  return raw === undefined ? undefined : stripCommentMarkers(raw);
+}
+
+/**
+ * Like {@link leadingDocComment}, but keeps the `//` markers. The neddoc
+ * generator needs the raw form: its comment pipeline gives `//#` (private
+ * lines) and `@include` directives marker-sensitive meanings.
+ */
+export function leadingDocCommentRaw(node: SyntaxNode): string | undefined {
   // The grammar emits one `comment` node per `//` line, so a multi-line banner
   // is a run of consecutive `comment` siblings. Walk backward over that run,
   // stopping at a non-contiguous gap or a trailing comment that shares its line
@@ -563,7 +573,7 @@ export function leadingDocComment(node: SyntaxNode): string | undefined {
   }
   if (lines.length === 0) return undefined;
   lines.reverse();
-  return stripCommentMarkers(lines.map((l) => l.text).join('\n'));
+  return lines.map((l) => l.text).join('\n');
 }
 
 export function stripCommentMarkers(text: string): string {
@@ -582,11 +592,18 @@ export function stripCommentMarkers(text: string): string {
  * attach at the block boundary). Returns the text with `//` markers stripped.
  */
 export function trailingDocComment(node: SyntaxNode): string | undefined {
+  const raw = trailingDocCommentRaw(node);
+  return raw === undefined ? undefined : stripCommentMarkers(raw);
+}
+
+/** Like {@link trailingDocComment}, but keeps the `//` markers (see
+ *  {@link leadingDocCommentRaw} for why the neddoc generator needs this). */
+export function trailingDocCommentRaw(node: SyntaxNode): string | undefined {
   const endRow = node.endPosition.row;
   const candidates = [node.nextNamedSibling, node.parent?.nextNamedSibling ?? null];
   for (const cand of candidates) {
     if (cand && cand.type === 'comment' && cand.startPosition.row === endRow) {
-      return stripCommentMarkers(cand.text);
+      return cand.text;
     }
   }
   return undefined;
@@ -600,4 +617,9 @@ export function trailingDocComment(node: SyntaxNode): string | undefined {
  */
 export function paramDocComment(node: SyntaxNode): string | undefined {
   return trailingDocComment(node) ?? leadingDocComment(node);
+}
+
+/** Raw-marker variant of {@link paramDocComment} for the neddoc generator. */
+export function paramDocCommentRaw(node: SyntaxNode): string | undefined {
+  return trailingDocCommentRaw(node) ?? leadingDocCommentRaw(node);
 }
