@@ -11,9 +11,11 @@ import type { NedTypeInfo } from '../ned/nedTypeInfo';
 import type { MsgResourceCache } from '../msg/msgResourceCache';
 import type { MsgTypeInfo } from '../msg/msgTypeInfo';
 import {
+  fileNamespace,
   gateInfo,
   gateNodes,
   leadingDocCommentRaw,
+  nedClassRefs,
   nedPropertyInfo,
   paramDocCommentRaw,
   propertyNodes,
@@ -38,6 +40,7 @@ import {
 } from './docModel';
 import type { NeddocOptions } from './options';
 import type { DocGraph, DocGraphEdge, DocGraphNode } from './graphDiagram';
+import { doxyUrlFor, parseDoxyTags } from './doxytags';
 import { collectUnassignedParameters, paramAssignmentsOf } from './unassignedParams';
 
 // ---------------------------------------------------------------------------
@@ -121,6 +124,7 @@ class Extraction {
   private msgUsersOf = new Map<string, MsgTypeInfo[]>();
   private msgUsedBy = new Map<string, MsgTypeInfo[]>();
   private commentCtx: CommentParseCtx;
+  private doxyMap?: Map<string, string>;
   /** URI of the file whose comments are being parsed (anchors `@include`). */
   private currentUri?: string;
   private pages: DocPage[] = [];
@@ -138,6 +142,7 @@ class Extraction {
   ) {
     for (const t of nedTypes) this.nedPageId.set(t.fqName, pageIdForType(t.fqName, 'ned'));
     for (const t of msgTypes) this.msgPageId.set(t.fqName, pageIdForType(t.fqName, 'msg'));
+    if (options.doxytags) this.doxyMap = parseDoxyTags(options.doxytags.xml);
     this.collectTypeNames();
     this.collectRelations();
     const includeResolver = this.options.includeResolver;
@@ -470,6 +475,19 @@ class Extraction {
     });
     sections.push({ kind: 'badge', typeKind: t.kind, label: `${kindLabel} ${t.simpleName}` });
 
+    // "C++ definition" link-out via a doxygen tag file (simple modules only,
+    // as in Eclipse; the class name comes from @class or the type name,
+    // qualified by the file's @namespace)
+    if (this.doxyMap && t.kind === 'simple') {
+      const cls = nedClassRefs(t.node)[0]?.className ?? t.simpleName;
+      const ns = fileNamespace(t.file.tree);
+      const href = doxyUrlFor(this.doxyMap, this.options.doxytags?.urlPrefix ?? '', [
+        ...(ns ? [`${ns}::${cls}`] : []),
+        cls,
+      ]);
+      if (href) sections.push({ kind: 'para', cells: [{ kind: 'exlink', text: 'C++ definition', href }] });
+    }
+
     // description
     const rawDoc = leadingDocCommentRaw(t.node);
     if (rawDoc === undefined) sections.push({ kind: 'para', cells: [{ kind: 'label', text: '(no description)' }] });
@@ -796,6 +814,12 @@ class Extraction {
       ],
     });
     sections.push({ kind: 'badge', typeKind: t.kind, label: `${kindLabel} ${t.simpleName}` });
+
+    // "C++ definition" link-out (message compiler generates a same-named class)
+    if (this.doxyMap) {
+      const href = doxyUrlFor(this.doxyMap, this.options.doxytags?.urlPrefix ?? '', [t.fqName, t.simpleName]);
+      if (href) sections.push({ kind: 'para', cells: [{ kind: 'exlink', text: 'C++ definition', href }] });
+    }
 
     const rawDoc = msgLeadingDocCommentRaw(t.node);
     if (rawDoc === undefined) sections.push({ kind: 'para', cells: [{ kind: 'label', text: '(no description)' }] });
