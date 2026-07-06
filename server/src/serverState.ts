@@ -38,15 +38,17 @@ export class ServerState {
 
 /** Build the `IndexContext` the feature analyzers query against, from the current index. */
 export function ctx(state: ServerState): IndexContext | undefined {
-  return state.index
-    ? {
-        nedCache: state.index.cache,
-        msgCache: state.index.msgCache,
-        registry: state.index.configRegistry,
-        db: state.index.db,
-        iniCache: state.index.iniCache,
-      }
-    : undefined;
+  if (!state.index) return undefined;
+  const index = state.index;
+  return {
+    nedCache: index.cache,
+    msgCache: index.msgCache,
+    registry: index.configRegistry,
+    db: index.db,
+    iniCache: index.iniCache,
+    // open buffer (unsaved edits) wins over the on-disk index
+    getIniDoc: (uri: string) => state.store?.get(uri)?.ini ?? index.iniCache.getDoc(uri),
+  };
 }
 
 export function currentNedPathDirs(state: ServerState): string[] {

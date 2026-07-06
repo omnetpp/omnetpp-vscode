@@ -135,6 +135,7 @@ export {
   configSummaries,
 } from './ini/iniDocument';
 export { IniResourceCache } from './ini/iniResourceCache';
+export { expandIncludes, resolveIncludeUri, entryInFile, iniIncludeDiagnostics } from './ini/iniInclude';
 export { iniDocumentSymbols } from './ini/iniSymbols';
 export { iniLocalDiagnostics } from './ini/iniLocalChecks';
 export { type ConfigOption, ConfigRegistry } from './ini/configRegistry';
@@ -145,6 +146,8 @@ export { iniHover, iniCompletion } from './ini/iniNavigation';
 export { iniEntryAt, leafSegment, keySegmentPrefixAt, isWildcardSegment, extendsLabelAt } from './ini/iniKeySegments';
 export {
   effectiveNetwork,
+  findSection,
+  generalSection,
   configEntriesInScope,
   effectiveResolver,
   resolveNetworkType,

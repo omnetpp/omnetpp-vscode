@@ -5,6 +5,7 @@ import {
   ConfigRegistry,
   SemanticDatabase,
   IniResourceCache,
+  IniDocument,
   NedTypeInfo,
   nodeRange,
   nameNode,
@@ -16,6 +17,9 @@ export interface IndexContext {
   registry: ConfigRegistry;
   db: SemanticDatabase;
   iniCache: IniResourceCache;
+  /** Resolve an ini URI to its freshest parsed document (open buffer first, then
+   *  the on-disk index) — used to follow `include` directives. */
+  getIniDoc: (uri: string) => IniDocument | undefined;
 }
 
 export function lineAt(text: string, line: number): string {

@@ -9,6 +9,10 @@ export interface IniEntry {
   valueRange: Range;
   /** 0-based line of the key. */
   line: number;
+  /** When the entry was merged in via `include`, the URI of the file it physically
+   *  lives in; undefined for an entry in the document's own file. Used to keep
+   *  diagnostics/navigation on the right file. */
+  sourceUri?: string;
 }
 
 export type SectionType = 'general' | 'config';
@@ -25,6 +29,9 @@ export interface IniSection {
   range: Range;
   headerRange: Range;
   entries: IniEntry[];
+  /** When merged from an `include`d file, the URI whose header this range refers
+   *  to; undefined for a section headed in the document's own file. */
+  sourceUri?: string;
 }
 
 export interface IniInclude {

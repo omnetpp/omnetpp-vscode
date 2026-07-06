@@ -3,7 +3,8 @@ import { NedResourceCache } from '../ned/nedResourceCache';
 import { ParamSlot, paramSlots } from './moduleTree';
 import { ConfigRegistry } from './configRegistry';
 import { classifyKey } from './iniConfigChecks';
-import type { IniDocument } from './iniDocument';
+import type { IniDocument, IniEntry } from './iniDocument';
+import { entryInFile } from './iniInclude';
 import { parseExpression } from '../expr/exprParser';
 import { inferType, isTypeMismatch } from '../expr/infer';
 import { unitsCompatible } from '../expr/units';
@@ -27,10 +28,17 @@ export function iniParamDiagnostics(
   doc: IniDocument,
   cache: NedResourceCache,
   registry: ConfigRegistry,
+  /** When `doc` is an include-expanded document, the URI of the file being linted:
+   *  only its own entries are flagged, while resolution still sees included ones. */
+  thisUri?: string,
 ): Diagnostic[] {
   const out: Diagnostic[] = [];
+  const own = (e: IniEntry) => !thisUri || entryInFile(e, thisUri);
 
   for (const section of doc.sections) {
+    // skip sections contributing no entry from the file being linted (e.g. a base
+    // config pulled in only via include — it is linted in its own file)
+    if (!section.entries.some(own)) continue;
     const netName = effectiveNetwork(doc, section);
     if (!netName) continue;
     const net = resolveNetworkType(cache, netName, doc.uri);
@@ -47,6 +55,7 @@ export function iniParamDiagnostics(
     for (const amb of expansion.ambiguities) {
       const slotNorm = normIndices(amb.path);
       for (const e of typenameEntries) {
+        if (!own(e)) continue; // flag only assignments written in this file
         const dot = e.key.lastIndexOf('.');
         const prefix = dot < 0 ? '' : e.key.slice(0, dot);
         if (e.value.replace(/^"|"$/g, '').trim() !== amb.typeName) continue;
@@ -70,6 +79,7 @@ export function iniParamDiagnostics(
     const isEffective = effectiveResolver(configEntriesInScope(doc, section, registry));
 
     for (const e of section.entries) {
+      if (!own(e)) continue; // flag only assignments written in this file
       if (classifyKey(registry, e.key).kind !== 'param-assignment') continue;
       const re = iniKeyToRegex(e.key);
       const matched = params.filter((p) => re.test(p.norm));

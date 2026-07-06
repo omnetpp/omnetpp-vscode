@@ -13,6 +13,10 @@ import {
   nedClassRefAt,
   msgDefinition,
   sectionName,
+  findSection,
+  generalSection,
+  expandIncludes,
+  resolveIncludeUri,
   posInRange,
   iniEntryAt,
   leafSegment,
@@ -31,7 +35,11 @@ export function computeDefinition(
 ): Location | Location[] | null {
   // INI has no tree — handle it before the tree guard below.
   if (parsed.language === 'ini' && parsed.ini) {
-    return iniDefinition(parsed.ini, parsed.uri, pos, ctx, fallbackNetwork);
+    const ownIni = parsed.ini;
+    const merged = ownIni.includes.length
+      ? expandIncludes(parsed.uri, (u) => (u === parsed.uri ? ownIni : ctx.getIniDoc(u)))
+      : ownIni;
+    return iniDefinition(ownIni, merged, parsed.uri, pos, ctx, fallbackNetwork);
   }
   if (!parsed.tree) return null;
   if (parsed.language === 'ned') {
@@ -74,14 +82,27 @@ export function computeDefinition(
  */
 function iniDefinition(
   ini: IniDocument,
+  merged: IniDocument,
   uri: string,
   pos: Position,
   ctx: IndexContext,
   fallbackNetwork?: string,
 ): Location | Location[] | null {
+  // an `include somefile.ini` line: jump to the included file.
+  const inc = ini.includes.find((i) => i.line === pos.line);
+  if (inc) {
+    const target = resolveIncludeUri(uri, inc.path);
+    return target ? { uri: target, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } } } : null;
+  }
+
   const hit = iniEntryAt(ini, pos);
   if (!hit) return null;
-  const { section, entry } = hit;
+  const { entry } = hit;
+  // resolve against the include-expanded document (base network/typenames/entries);
+  // the cursor's own section is matched there by name so its inherited scope is seen.
+  const section =
+    (hit.section.type === 'general' ? generalSection(merged) : findSection(merged, sectionName(hit.section))) ??
+    hit.section;
 
   // network= : either the key or the value navigates to the network type.
   if (entry.key === 'network') {
@@ -90,12 +111,13 @@ function iniDefinition(
     return net ? typeDeclLoc(net) : null;
   }
 
-  // extends= : each comma-separated label navigates to that section's header.
+  // extends= : each comma-separated label navigates to that section's header —
+  // possibly in an `include`d file (merged sections carry their source URI).
   if (entry.key === 'extends' && posInRange(pos, entry.valueRange)) {
     const label = extendsLabelAt(entry, pos);
     if (!label) return null;
-    const target = ini.sections.find((s) => sectionName(s) === label);
-    return target ? { uri, range: target.headerRange } : null;
+    const target = merged.sections.find((s) => sectionName(s) === label);
+    return target ? { uri: target.sourceUri ?? uri, range: target.headerRange } : null;
   }
 
   // typename value: the string denotes a NED type — navigate to it.
@@ -114,7 +136,7 @@ function iniDefinition(
     // last segment is a wildcard, i.e. names no specific module).
     const moduleTypeAt = (path: string): Location[] => {
       if (isWildcardSegment(leafSegment(path))) return [];
-      return dedupLocations(modulesAtPath(ini, ctx.nedCache, section, path, fallbackNetwork).map((m) => m.decl));
+      return dedupLocations(modulesAtPath(merged, ctx.nedCache, section, path, fallbackNetwork).map((m) => m.decl));
     };
 
     const seg = keySegmentPrefixAt(entry, pos);
@@ -129,7 +151,7 @@ function iniDefinition(
     }
     // a real-param leaf (or an unresolved earlier segment) -> the NED param decl(s)
     if (cls.kind === 'param-assignment')
-      return asDefResult(iniParamDefinition(ini, ctx.nedCache, section, entry.key, fallbackNetwork));
+      return asDefResult(iniParamDefinition(merged, ctx.nedCache, section, entry.key, fallbackNetwork));
     return null;
   }
   return null;

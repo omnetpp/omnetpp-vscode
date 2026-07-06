@@ -20,9 +20,13 @@ export function iniStructureDiagnostics(
   doc: IniDocument,
   cache: NedResourceCache,
   registry: ConfigRegistry,
+  /** Extra section names reachable via `include`, so `extends=` into an included
+   *  base config is not reported as unknown. */
+  includedSectionNames?: Iterable<string>,
 ): Diagnostic[] {
   const out: Diagnostic[] = [];
   const known = new Set(doc.sections.map(sectionName));
+  if (includedSectionNames) for (const n of includedSectionNames) known.add(n);
 
   for (const sec of doc.sections) {
     const name = sectionName(sec);

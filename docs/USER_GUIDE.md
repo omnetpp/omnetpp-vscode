@@ -47,7 +47,10 @@ needing the OMNeT++ IDE.
 - **INI** — configuration-option key and value-type validation (against a bundled snapshot
   of the OMNeT++ config registry), section-name validity, `extends=`/`network=` checks,
   global-option placement, iteration-variable (`${…}`) checks, and **full parameter
-  resolution** (see below).
+  resolution** (see below). `include` directives are followed: sections and parameter
+  assignments from included files participate in resolution (so `extends=` a base config
+  in another file resolves, and inherited `network=`/typenames are seen), a missing
+  included file is flagged, and **`Ctrl`/`Cmd`-clicking an `include` path opens that file**.
 - **Cross-reference diagnostics** with **"did-you-mean" quick-fixes** that suggest the
   closest known type/parameter name when a reference doesn't resolve.
 
