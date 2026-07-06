@@ -77,6 +77,36 @@ test('neddoc legacy-html: Eclipse flat file naming and page.tmpl chrome', async 
   assert.ok(nodePage.includes('<th class="defaultvalue">Default value</th>'), nodePage);
 });
 
+test('neddoc legacy-html: client-side type search is wired into the chrome', async () => {
+  const { files } = await collectNeddoc(await buildInput({ 'file:///lib.ned': LIB }, { 'file:///p.msg': MSG }), {
+    format: 'legacy-html',
+    legacyAssets: loadLegacyAssets(),
+  });
+  const paths = files.map((f) => f.relativePath);
+  // search assets emitted alongside the nav data
+  assert.ok(paths.includes('search-data.js'), paths.join());
+  assert.ok(paths.includes('neddoc-search.js'), paths.join());
+
+  // search-data.js is a JS global with flat root-relative hrefs and every type
+  const searchData = files.find((f) => f.relativePath === 'search-data.js')!.content as string;
+  assert.ok(searchData.startsWith('var NEDDOC_SEARCH = ['), searchData.slice(0, 60));
+  const index = JSON.parse(searchData.slice(searchData.indexOf('['), searchData.lastIndexOf(']') + 1));
+  const node = index.find((e: { n: string }) => e.n === 'Node');
+  assert.ok(node, searchData);
+  assert.strictEqual(node.f, 'lib.Node');
+  assert.strictEqual(node.k, 'simple module');
+  assert.strictEqual(node.p, 'lib.Node.html');
+  assert.ok(index.some((e: { n: string; p: string }) => e.n === 'FooPkt' && e.p === 'lib-FooPkt.html'), searchData);
+
+  // the header search box + script includes are injected into each page
+  const nodePage = files.find((f) => f.relativePath === 'lib.Node.html')!.content as string;
+  assert.ok(nodePage.includes('id="nd-search-input"'), 'search box not injected');
+  assert.ok(nodePage.includes('src="search-data.js"'), 'search-data.js not included');
+  assert.ok(nodePage.includes('src="neddoc-search.js"'), 'neddoc-search.js not included');
+  // the vendored template stays a verbatim Eclipse snapshot (spacer preserved)
+  assert.ok(nodePage.includes('<div class="mdl-layout-spacer"></div>'), 'spacer anchor lost');
+});
+
 test('neddoc legacy-html: index page is the Eclipse default overview', async () => {
   const { files } = await collectNeddoc(await buildInput({ 'file:///lib.ned': LIB }), {
     format: 'legacy-html',
