@@ -39,6 +39,10 @@ export interface NeddocOptions {
   includeResolver?: (fileRef: string, fromId: string | undefined) => IncludeResolution | undefined;
   /** Title shown on the overview page and in the navigation header. */
   projectTitle?: string;
+  /** The vendored Eclipse "material" template files, keyed by filename
+   *  (page.tmpl, navtree.tmpl, style.css, jquery.js, ...). Required for the
+   *  legacy-html format; the host reads them from dist/neddoc-legacy/. */
+  legacyAssets?: Record<string, string | Uint8Array>;
 }
 
 export function defaultNeddocOptions(): NeddocOptions {

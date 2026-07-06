@@ -27,6 +27,9 @@ export interface NeddocRenderer {
   readonly pageExtension: string;
   /** Output-relative path of a page. */
   pagePath(ref: DocPageRef): string;
+  /** Output path for a diagram SVG; defaults to the model's images/ path
+   *  (the legacy layout keeps images at the root under Eclipse names). */
+  imagePath?(image: string): string;
   renderPage(page: DocPage, ctx: RenderCtx): string;
   /** Non-page outputs: assets, nav data, SUMMARY.md, index toctrees, ... */
   auxFiles(ctx: RenderCtx): GeneratedFile[];

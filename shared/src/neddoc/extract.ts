@@ -867,7 +867,12 @@ class Extraction {
       const byPackage = new Map<string, NedTypeInfo[]>();
       for (const t of this.nedTypes) Extraction.addTo(byPackage, t.packageName || '(default)', t);
       for (const pkg of [...byPackage.keys()].sort())
-        packages.children.push({ title: pkg, page: 'packages', anchor: packageAnchor(pkg), children: [] });
+        packages.children.push({
+          title: pkg,
+          page: 'packages',
+          anchor: packageAnchor(pkg),
+          children: typeLeaves(byPackage.get(pkg)!),
+        });
       root.children.push(packages);
 
       const networks = this.nedTypes.filter((t) => t.isModuleType() && t.isNetworkType());
@@ -892,7 +897,7 @@ class Extraction {
           title: ns,
           page: 'namespaces',
           anchor: namespaceAnchor(ns === '(default)' ? '' : ns),
-          children: [],
+          children: msgLeaves(byNs.get(ns)!),
         });
       root.children.push(namespaces);
 

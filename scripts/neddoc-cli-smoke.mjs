@@ -119,7 +119,20 @@ try {
   assert(rstNode.includes('.. list-table::'), 'rst list-table missing');
   console.log('rst run: OK');
 
-  // 6) usage/runtime errors exit 2
+  // 6) legacy-html format (Eclipse-compatible output)
+  const outLegacy = join(proj, 'docs-legacy');
+  const rLegacy = run(['-o', outLegacy, '--format=legacy-html', proj]);
+  assert(rLegacy.code === 0, `legacy-html run failed: ${rLegacy.err}`);
+  assert(existsSync(join(outLegacy, 'demo.Node.html')), 'legacy flat type page missing');
+  assert(existsSync(join(outLegacy, 'demo-DemoPkt.html')), 'legacy msg page naming wrong');
+  assert(existsSync(join(outLegacy, 'navtreedata.js')), 'navtreedata.js missing');
+  assert(existsSync(join(outLegacy, 'jquery.js')), 'legacy template assets missing');
+  const legacyNode = read(outLegacy, 'demo.Node.html');
+  assert(legacyNode.includes('mdl-layout'), 'material template chrome missing');
+  assert(legacyNode.includes('<h3 class="subtitle">Parameters</h3>'), 'legacy table heading missing');
+  console.log('legacy-html run: OK');
+
+  // 7) usage/runtime errors exit 2
   assert(run(['--format=bogus', proj]).code === 2, 'invalid --format should exit 2');
   assert(run(['--no-such-option', proj]).code === 2, 'unknown option should exit 2');
   assert(run([join(proj, 'nonexistent-dir')]).code === 2, 'missing project dir should exit 2');

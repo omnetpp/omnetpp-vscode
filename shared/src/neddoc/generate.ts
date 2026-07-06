@@ -10,6 +10,7 @@ import type { DiagramRequest, DocModel } from './docModel';
 import { defaultNeddocOptions, type NeddocOptions } from './options';
 import type { GeneratedFile, NeddocRenderer, RenderCtx } from './renderer';
 import { HtmlRenderer } from './renderHtml';
+import { LegacyHtmlRenderer } from './renderLegacyHtml';
 import { MarkdownRenderer } from './renderMarkdown';
 import { RstRenderer } from './renderRst';
 
@@ -39,6 +40,10 @@ export function rendererForFormat(options: NeddocOptions): NeddocRenderer {
   switch (options.format) {
     case 'html':
       return new HtmlRenderer();
+    case 'legacy-html':
+      if (!options.legacyAssets)
+        throw new Error('legacy-html format needs the vendored template assets (options.legacyAssets)');
+      return new LegacyHtmlRenderer(options.legacyAssets);
     case 'markdown':
       return new MarkdownRenderer();
     case 'rst':
@@ -76,7 +81,7 @@ export async function generateNeddoc(
         const svg = await renderDiagram(req, model);
         if (svg) {
           images.set(req.image, svg);
-          await emit({ relativePath: req.image, content: svg });
+          await emit({ relativePath: renderer.imagePath?.(req.image) ?? req.image, content: svg });
         }
       } catch (err) {
         model.warnings.push(`diagram ${req.image}: ${err instanceof Error ? err.message : String(err)}`);

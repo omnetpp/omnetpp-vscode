@@ -51,4 +51,13 @@ if (existsSync(iconsSrc)) {
   console.warn('resources/icons not found - run "bun scripts/gen-icons.mjs <omnetpp-src>" (preview icons will be missing).');
 }
 
+// 5) legacy neddoc template snapshot (gen-neddoc-legacy-assets.mjs)
+const legacySrc = join(root, 'resources', 'neddoc-legacy');
+if (existsSync(legacySrc)) {
+  cpSync(legacySrc, join(dist, 'neddoc-legacy'), { recursive: true });
+  console.log(`copied ${legacySrc} -> ${join(dist, 'neddoc-legacy')}`);
+} else {
+  console.warn('resources/neddoc-legacy not found - run "bun scripts/gen-neddoc-legacy-assets.mjs <omnetpp-src>" (legacy-html docs will be unavailable).');
+}
+
 console.log('Assets copied.');
