@@ -19,26 +19,6 @@ function err(node: SyntaxNode, message: string, code: string, severity = Diagnos
   return { range: nodeRange(node), severity, message, source: 'omnetpp', code };
 }
 
-// Which base kinds are compatible with a derived kind.
-function baseKindOk(derived: NedTypeKind, base: NedTypeKind): boolean {
-  const moduleKinds: NedTypeKind[] = ['simple', 'compound', 'network'];
-  switch (derived) {
-    case 'simple':
-      return base === 'simple';
-    case 'compound':
-    case 'network':
-      return base === 'compound' || base === 'network';
-    case 'channel':
-      return base === 'channel';
-    case 'moduleinterface':
-      return base === 'moduleinterface';
-    case 'channelinterface':
-      return base === 'channelinterface';
-    default:
-      return moduleKinds.includes(base);
-  }
-}
-
 function checkType(info: NedTypeInfo, cache: NedResourceCache, out: Diagnostic[]): void {
   const ctxEnclosing = info.isInnerType ? info.enclosingFqName : undefined;
 
@@ -47,10 +27,6 @@ function checkType(info: NedTypeInfo, cache: NedResourceCache, out: Diagnostic[]
     const base = cache.lookupType(e.text, info.file, ctxEnclosing);
     if (!base) {
       out.push(err(e, `Unknown type '${e.text}'`, 'unknown-type'));
-    } else if (!baseKindOk(info.kind, base.kind)) {
-      out.push(
-        err(e, `A ${info.kind} cannot extend a ${base.kind} ('${e.text}')`, 'bad-extends'),
-      );
     }
   }
 

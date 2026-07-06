@@ -68,17 +68,15 @@ test('inheritance: merged params from base', async () => {
   assert.equal(d.superType()?.fqName, 'Base');
 });
 
-test('semantic diagnostics: unknown type and bad extends kind', async () => {
+test('semantic diagnostics: unknown type', async () => {
   const cache = await buildCache({
     'file:///X.ned': {
       text: `channel C { }
-simple S extends C { }
 module M { submodules: u: NoSuchType; }`,
     },
   });
   const diags = nedSemanticDiagnostics(cache, 'file:///X.ned');
   const msgs = diags.map((d) => d.message);
-  assert.ok(msgs.some((m) => /cannot extend a channel/.test(m)), 'bad extends kind');
   assert.ok(msgs.some((m) => /Unknown type 'NoSuchType'/.test(m)), 'unknown submodule type');
 });
 
