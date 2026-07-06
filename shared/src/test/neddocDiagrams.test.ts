@@ -79,7 +79,7 @@ test('graphDiagram: Eclipse colors, dashed interfaces, hollow arrowheads, links'
   // hollow triangle (white fill) for inheritance arrowheads
   assert.ok(/polygon[^>]*fill="white"/.test(svg), 'hollow arrowhead');
   // links on resolvable nodes only
-  assert.ok(svg.includes('<a href="../types/lib.Base.html">'), 'node link');
+  assert.ok(svg.includes('<a href="../types/lib.Base.html" target="_top">'), 'node link');
   assert.ok(!svg.includes('href="../types/unresolved'), 'no link for unresolved');
   // tooltips
   assert.ok(svg.includes('<title>simple module Node</title>'));
@@ -133,7 +133,7 @@ test('typeFigure: compound modules render the full diagram with submodule links'
     linkHrefFor: (fq) => `../types/${fq}.html`,
   });
   assert.ok(result);
-  assert.ok(result!.svg.includes('<a href="../types/lib.Node.html">'), result!.svg.slice(0, 400));
+  assert.ok(result!.svg.includes('<a href="../types/lib.Node.html" target="_top">'), result!.svg.slice(0, 400));
   assert.equal(result!.areas.length, 2);
 });
 
@@ -155,11 +155,11 @@ test('neddoc end-to-end: diagrams rendered and referenced by the html output', a
   assert.ok(files.some((f) => f.relativePath === 'images/lib.Node-usage.svg'));
   const inheritance = files.find((f) => f.relativePath === 'images/lib.Node-inheritance.svg')!.content as string;
   // subtype link relative to the images/ dir
-  assert.ok(inheritance.includes('<a href="../types/lib.Sink.html">'), inheritance);
+  assert.ok(inheritance.includes('<a href="../types/lib.Sink.html" target="_top">'), inheritance);
   // the Node page inlines the inheritance diagram
   const nodePage = files.find((f) => f.relativePath === 'types/lib.Node.html')!.content as string;
   assert.ok(nodePage.includes('Inheritance diagram'), 'diagram section missing');
   assert.ok(nodePage.includes('<div class="diagram"><svg'), 'inline svg missing');
   // links rebased for the page directory
-  assert.ok(nodePage.includes('<a href="lib.Sink.html">'), 'rebased link missing');
+  assert.ok(nodePage.includes('<a href="lib.Sink.html" target="_top">'), 'rebased link missing');
 });

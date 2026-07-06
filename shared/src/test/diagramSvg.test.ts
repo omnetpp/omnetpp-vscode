@@ -92,7 +92,7 @@ test('diagramSvg: linkHrefFor wraps submodules in <a href>', async () => {
   const { svg, areas } = renderDiagramSvg(await demoModel(), {
     linkHrefFor: (fq) => `../types/${fq}.html`,
   });
-  assert.ok(svg.includes('<a href="../types/demo.Node.html"><g data-sub="0"'), svg);
+  assert.ok(svg.includes('<a href="../types/demo.Node.html" target="_top"><g data-sub="0"'), svg);
   assert.equal(areas[1].href, '../types/demo.Sink.html');
 });
 

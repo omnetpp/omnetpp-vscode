@@ -154,7 +154,8 @@ export function renderGraphDiagramSvg(graph: DocGraph, opts: GraphDiagramOptions
     const [focusColor, plainColor] = NODE_COLORS[node.kind] ?? ['#dedede', '#f0f0f0'];
     const isInterface = node.kind === 'moduleinterface' || node.kind === 'channelinterface';
     const href = opts.hrefFor?.(node.id);
-    if (href) b.open('a', { href });
+    // target=_top: escape the <object>/<iframe> browsing context when embedded
+    if (href) b.open('a', { href, target: '_top' });
     b.open('g');
     if (node.tooltip) b.el('title', {}, node.tooltip);
     const rectAttrs: Record<string, string | number> = {

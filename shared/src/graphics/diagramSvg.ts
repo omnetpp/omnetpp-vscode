@@ -275,7 +275,9 @@ function iconTransformAttr(f: SubFigure, x: number, y: number, w: number, h: num
 
 function renderSubmodule(f: SubFigure, b: SvgBuilder, filters: TintFilters, opts: DiagramRenderOptions): void {
   const href = f.sub.resolvedTypeFqName ? opts.linkHrefFor?.(f.sub.resolvedTypeFqName) : undefined;
-  if (href) b.open('a', { href });
+  // target=_top: when the SVG is embedded via <object>/<iframe>, links must
+  // navigate the whole page, not the embedded browsing context
+  if (href) b.open('a', { href, target: '_top' });
   b.open('g', { 'data-sub': f.index, cursor: 'pointer' });
   b.el('title', {}, f.tooltip);
 
