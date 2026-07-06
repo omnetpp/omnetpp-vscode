@@ -6,6 +6,7 @@
  */
 
 import type { DocBlock } from './commentAst';
+import type { DocGraph } from './graphDiagram';
 
 export type PageKind = 'index' | 'packages' | 'namespaces' | 'nedtype' | 'msgtype';
 
@@ -81,6 +82,8 @@ export interface DiagramRequest {
   language: 'ned' | 'msg';
   /** Output-relative SVG path (matches the referencing section's `image`). */
   image: string;
+  /** Node/edge graph for usage/inheritance diagrams (node ids = page ids). */
+  graph?: DocGraph;
 }
 
 export interface DocModel {

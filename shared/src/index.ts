@@ -135,12 +135,18 @@ export {
   type NeddocProgress,
   type NeddocResult,
   type DiagramSvgRenderer,
+  type DiagramRenderCtx,
+  type DiagramRendererConfig,
   NeddocCancelled,
   generateNeddoc,
   collectNeddoc,
   rendererForFormat,
+  createDiagramRenderer,
 } from './neddoc/generate';
 export { type IncludeResolution } from './neddoc/commentAst';
+export { renderTypeFigureSvg, type TypeFigureOptions } from './neddoc/typeFigure';
+export { renderGraphDiagramSvg, type DocGraph, type DocGraphNode, type DocGraphEdge } from './neddoc/graphDiagram';
+export { layeredLayout, type LayeredNode, type LayeredEdge, type LayeredResult } from './neddoc/layeredLayout';
 
 // MSG
 export { msgNameNode, isMsgTypeHeaderLine } from './msg/msgAst';

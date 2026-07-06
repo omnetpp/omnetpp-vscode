@@ -81,6 +81,12 @@ try {
   const netPage = read(out, 'types', 'demo.Net.html');
   assert(/Unassigned submodule parameters/.test(netPage), 'unassigned parameters section missing');
   assert(existsSync(join(out, 'types', 'msg-demo--DemoPkt.html')), 'msg type page missing');
+  // diagrams: type figure + usage/inheritance graphs, inlined into pages
+  assert(existsSync(join(out, 'images', 'demo.Net-type.svg')), 'type figure svg missing');
+  assert(existsSync(join(out, 'images', 'demo.Node-inheritance.svg')), 'inheritance svg missing');
+  assert(netPage.includes('<div class="diagram"><svg'), 'inline diagram missing from page');
+  const inhSvg = read(out, 'images', 'demo.Node-inheritance.svg');
+  assert(inhSvg.includes('href="../types/demo.Sink.html"'), 'diagram node link missing');
   console.log('html run: OK');
 
   // 2) explicit -o, --title, --no-message-definitions

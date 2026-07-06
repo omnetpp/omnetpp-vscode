@@ -37,6 +37,7 @@ import {
   type SearchEntry,
 } from './docModel';
 import type { NeddocOptions } from './options';
+import type { DocGraph, DocGraphEdge, DocGraphNode } from './graphDiagram';
 import { collectUnassignedParameters, paramAssignmentsOf } from './unassignedParams';
 
 // ---------------------------------------------------------------------------
@@ -113,7 +114,8 @@ class Extraction {
   private typeNames = new Map<string, string[]>(); // referable name -> page ids
   private usersOf = new Map<string, NedTypeInfo[]>(); // ned fq -> user types
   private usedBy = new Map<string, NedTypeInfo[]>(); // ned fq -> local used types
-  private implementorsOf = new Map<string, NedTypeInfo[]>(); // iface fq -> implementors
+  private implementorsOf = new Map<string, NedTypeInfo[]>(); // iface fq -> all implementors
+  private directImplementorsOf = new Map<string, NedTypeInfo[]>(); // iface fq -> direct implementors
   private subtypesOf = new Map<string, NedTypeInfo[]>(); // ned fq -> direct subtypes
   private msgSubtypesOf = new Map<string, MsgTypeInfo[]>();
   private msgUsersOf = new Map<string, MsgTypeInfo[]>();
@@ -224,6 +226,10 @@ class Extraction {
 
       if (t.kind !== 'moduleinterface' && t.kind !== 'channelinterface') {
         for (const iface of t.allInterfaces()) Extraction.addTo(this.implementorsOf, iface.fqName, t);
+        for (const sup of t.directSupertypes()) {
+          if (sup.kind === 'moduleinterface' || sup.kind === 'channelinterface')
+            Extraction.addTo(this.directImplementorsOf, sup.fqName, t);
+        }
         const sup = t.superType();
         if (sup) Extraction.addTo(this.subtypesOf, sup.fqName, t);
       } else {
@@ -331,6 +337,120 @@ class Extraction {
     return trailingDocCommentRaw(node) ?? anyLeadingDocCommentRaw(node);
   }
 
+  // ---- diagram graphs (node ids = page ids, as graphDiagram links them) ----
+
+  private nedGraphNode(t: NedTypeInfo, focus: boolean): DocGraphNode {
+    return {
+      id: this.nedPageId.get(t.fqName) ?? pageIdForType(t.fqName, 'ned'),
+      label: t.simpleName,
+      kind: t.kind === 'compound' && t.isNetworkType() ? 'network' : t.kind,
+      focus: focus || undefined,
+      tooltip: `${nedKindLabel(t)} ${t.simpleName}`,
+    };
+  }
+
+  private msgGraphNode(t: MsgTypeInfo, focus: boolean): DocGraphNode {
+    return {
+      id: this.msgPageId.get(t.fqName) ?? pageIdForType(t.fqName, 'msg'),
+      label: t.simpleName,
+      kind: t.kind,
+      focus: focus || undefined,
+      tooltip: `${MSG_KIND_LABELS[t.kind] ?? t.kind} ${t.simpleName}`,
+    };
+  }
+
+  /** Focus + direct supertypes/interfaces (unresolved names in red) + direct
+   *  subtypes/implementors — the per-type inheritance diagram (Eclipse). */
+  private nedInheritanceGraph(t: NedTypeInfo): DocGraph {
+    const focus = this.nedGraphNode(t, true);
+    const nodes = new Map<string, DocGraphNode>([[focus.id, focus]]);
+    const edges: DocGraphEdge[] = [];
+    const isInterface = (x: NedTypeInfo) => x.kind === 'moduleinterface' || x.kind === 'channelinterface';
+    const tIsInterface = isInterface(t);
+    const add = (node: DocGraphNode): DocGraphNode => {
+      if (!nodes.has(node.id)) nodes.set(node.id, node);
+      return nodes.get(node.id)!;
+    };
+    const resolvedSupers = new Set<string>();
+    for (const sup of t.directSupertypes()) {
+      const node = add(this.nedGraphNode(sup, false));
+      resolvedSupers.add(sup.simpleName);
+      resolvedSupers.add(sup.fqName);
+      edges.push({ src: node.id, dest: focus.id, kind: !tIsInterface && isInterface(sup) ? 'interface' : 'inheritance' });
+    }
+    for (const name of [...t.extendsNames(), ...t.interfaceNames()]) {
+      if (resolvedSupers.has(name)) continue;
+      const node = add({ id: `unresolved:${name}`, label: name, kind: 'unresolved', tooltip: `unresolved type ${name}` });
+      edges.push({ src: node.id, dest: focus.id, kind: 'inheritance' });
+    }
+    for (const sub of this.subtypesOf.get(t.fqName) ?? []) {
+      const node = add(this.nedGraphNode(sub, false));
+      edges.push({ src: focus.id, dest: node.id, kind: 'inheritance' });
+    }
+    for (const impl of this.directImplementorsOf.get(t.fqName) ?? []) {
+      const node = add(this.nedGraphNode(impl, false));
+      edges.push({ src: focus.id, dest: node.id, kind: 'interface' });
+    }
+    return { nodes: [...nodes.values()], edges };
+  }
+
+  /** Focus + local used types + users — the per-type usage diagram. */
+  private nedUsageGraph(t: NedTypeInfo): DocGraph {
+    const focus = this.nedGraphNode(t, true);
+    const nodes = new Map<string, DocGraphNode>([[focus.id, focus]]);
+    const edges: DocGraphEdge[] = [];
+    for (const used of this.usedBy.get(t.fqName) ?? []) {
+      const node = this.nedGraphNode(used, false);
+      if (!nodes.has(node.id)) nodes.set(node.id, node);
+      edges.push({ src: focus.id, dest: node.id, kind: 'usage' });
+    }
+    for (const user of this.usersOf.get(t.fqName) ?? []) {
+      const node = this.nedGraphNode(user, false);
+      if (!nodes.has(node.id)) nodes.set(node.id, node);
+      edges.push({ src: node.id, dest: focus.id, kind: 'usage' });
+    }
+    return { nodes: [...nodes.values()], edges };
+  }
+
+  private msgInheritanceGraph(t: MsgTypeInfo): DocGraph {
+    const focus = this.msgGraphNode(t, true);
+    const nodes = new Map<string, DocGraphNode>([[focus.id, focus]]);
+    const edges: DocGraphEdge[] = [];
+    const sup = t.superType();
+    if (sup) {
+      const node = this.msgGraphNode(sup, false);
+      if (!nodes.has(node.id)) nodes.set(node.id, node);
+      edges.push({ src: node.id, dest: focus.id, kind: 'inheritance' });
+    } else if (t.extendsName()) {
+      const name = t.extendsName()!;
+      nodes.set(`unresolved:${name}`, { id: `unresolved:${name}`, label: name, kind: 'unresolved' });
+      edges.push({ src: `unresolved:${name}`, dest: focus.id, kind: 'inheritance' });
+    }
+    for (const sub of this.msgSubtypesOf.get(t.fqName) ?? []) {
+      const node = this.msgGraphNode(sub, false);
+      if (!nodes.has(node.id)) nodes.set(node.id, node);
+      edges.push({ src: focus.id, dest: node.id, kind: 'inheritance' });
+    }
+    return { nodes: [...nodes.values()], edges };
+  }
+
+  private msgUsageGraph(t: MsgTypeInfo): DocGraph {
+    const focus = this.msgGraphNode(t, true);
+    const nodes = new Map<string, DocGraphNode>([[focus.id, focus]]);
+    const edges: DocGraphEdge[] = [];
+    for (const used of this.msgUsedBy.get(t.fqName) ?? []) {
+      const node = this.msgGraphNode(used, false);
+      if (!nodes.has(node.id)) nodes.set(node.id, node);
+      edges.push({ src: focus.id, dest: node.id, kind: 'usage' });
+    }
+    for (const user of this.msgUsersOf.get(t.fqName) ?? []) {
+      const node = this.msgGraphNode(user, false);
+      if (!nodes.has(node.id)) nodes.set(node.id, node);
+      edges.push({ src: node.id, dest: focus.id, kind: 'usage' });
+    }
+    return { nodes: [...nodes.values()], edges };
+  }
+
   // ---- NED type page ----
 
   private nedTypePage(t: NedTypeInfo): DocPage {
@@ -369,7 +489,7 @@ class Extraction {
       const image = `images/${pageId}-usage.svg`;
       sections.push({ kind: 'subheading', text: 'Usage diagram', anchor: 'usage-diagram' });
       sections.push({ kind: 'diagram', diagram: 'usage', image, title: `Usage diagram of ${t.simpleName}` });
-      this.diagrams.push({ diagram: 'usage', typeFqName: t.fqName, language: 'ned', image });
+      this.diagrams.push({ diagram: 'usage', typeFqName: t.fqName, language: 'ned', image, graph: this.nedUsageGraph(t) });
     }
     const hasInheritance =
       t.directSupertypes().length > 0 || subtypes.length > 0 || implementors.length > 0 || t.extendsNames().length > 0;
@@ -377,7 +497,13 @@ class Extraction {
       const image = `images/${pageId}-inheritance.svg`;
       sections.push({ kind: 'subheading', text: 'Inheritance diagram', anchor: 'inheritance-diagram' });
       sections.push({ kind: 'diagram', diagram: 'inheritance', image, title: `Inheritance diagram of ${t.simpleName}` });
-      this.diagrams.push({ diagram: 'inheritance', typeFqName: t.fqName, language: 'ned', image });
+      this.diagrams.push({
+        diagram: 'inheritance',
+        typeFqName: t.fqName,
+        language: 'ned',
+        image,
+        graph: this.nedInheritanceGraph(t),
+      });
     }
 
     // implemented by (interfaces only)
@@ -683,13 +809,19 @@ class Extraction {
       const image = `images/${pageId}-usage.svg`;
       sections.push({ kind: 'subheading', text: 'Usage diagram', anchor: 'usage-diagram' });
       sections.push({ kind: 'diagram', diagram: 'usage', image, title: `Usage diagram of ${t.simpleName}` });
-      this.diagrams.push({ diagram: 'usage', typeFqName: t.fqName, language: 'msg', image });
+      this.diagrams.push({ diagram: 'usage', typeFqName: t.fqName, language: 'msg', image, graph: this.msgUsageGraph(t) });
     }
     if (this.options.inheritanceDiagrams && (t.extendsName() || subtypes.length > 0)) {
       const image = `images/${pageId}-inheritance.svg`;
       sections.push({ kind: 'subheading', text: 'Inheritance diagram', anchor: 'inheritance-diagram' });
       sections.push({ kind: 'diagram', diagram: 'inheritance', image, title: `Inheritance diagram of ${t.simpleName}` });
-      this.diagrams.push({ diagram: 'inheritance', typeFqName: t.fqName, language: 'msg', image });
+      this.diagrams.push({
+        diagram: 'inheritance',
+        typeFqName: t.fqName,
+        language: 'msg',
+        image,
+        graph: this.msgInheritanceGraph(t),
+      });
     }
 
     // extends / subclasses

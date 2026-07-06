@@ -6,22 +6,64 @@
  */
 
 import { extractDocModel, type NeddocInput } from './extract';
-import type { DiagramRequest, DocModel } from './docModel';
+import { pageIdForType, type DiagramRequest, type DocModel } from './docModel';
 import { defaultNeddocOptions, type NeddocOptions } from './options';
-import type { GeneratedFile, NeddocRenderer, RenderCtx } from './renderer';
+import { dirOf, pageById, relativeRef, type GeneratedFile, type NeddocRenderer, type RenderCtx } from './renderer';
 import { HtmlRenderer } from './renderHtml';
 import { LegacyHtmlRenderer } from './renderLegacyHtml';
 import { MarkdownRenderer } from './renderMarkdown';
 import { RstRenderer } from './renderRst';
+import { renderGraphDiagramSvg } from './graphDiagram';
+import { renderTypeFigureSvg } from './typeFigure';
+import type { NedResourceCache } from '../ned/nedResourceCache';
+import type { IconProvider, TextMeasurer } from '../graphics/diagramLayout';
 
 export interface NeddocProgress {
   report?(step: string, done: number, total: number): void;
   cancelled?(): boolean;
 }
 
+/** What the generator hands a diagram renderer per request. */
+export interface DiagramRenderCtx {
+  model: DocModel;
+  /** href from the diagram's SVG output location to a documented page. */
+  hrefForPage: (pageId: string) => string | undefined;
+}
+
 /** Renders the SVG for a diagram request; wired up by the host (the diagram
  *  subsystem needs icon access, which shared/ cannot do on its own). */
-export type DiagramSvgRenderer = (req: DiagramRequest, model: DocModel) => Promise<string | undefined> | string | undefined;
+export type DiagramSvgRenderer = (
+  req: DiagramRequest,
+  ctx: DiagramRenderCtx,
+) => Promise<string | undefined> | string | undefined;
+
+export interface DiagramRendererConfig {
+  nedCache: NedResourceCache;
+  icons: IconProvider;
+  measureText?: TextMeasurer;
+  seed?: number;
+}
+
+/** The standard diagram renderer: module figures via the shared preview
+ *  pipeline, usage/inheritance graphs via the built-in layered layout. */
+export function createDiagramRenderer(cfg: DiagramRendererConfig): DiagramSvgRenderer {
+  return async (req, ctx) => {
+    if (req.diagram === 'type') {
+      if (req.language !== 'ned') return undefined;
+      const type = cfg.nedCache.getType(req.typeFqName);
+      if (!type) return undefined;
+      const figure = await renderTypeFigureSvg(cfg.nedCache, type, {
+        icons: cfg.icons,
+        measureText: cfg.measureText,
+        seed: cfg.seed,
+        linkHrefFor: (fq) => ctx.hrefForPage(pageIdForType(fq, 'ned')),
+      });
+      return figure?.svg;
+    }
+    if (!req.graph || req.graph.nodes.length < 2) return undefined;
+    return renderGraphDiagramSvg(req.graph, { hrefFor: (id) => ctx.hrefForPage(id) }).svg;
+  };
+}
 
 export interface NeddocResult {
   pages: number;
@@ -77,11 +119,19 @@ export async function generateNeddoc(
     for (const req of model.diagrams) {
       checkCancelled();
       progress?.report?.(`Rendering diagrams`, done++, model.diagrams.length);
+      const imageOut = renderer.imagePath?.(req.image) ?? req.image;
+      const diagramCtx: DiagramRenderCtx = {
+        model,
+        hrefForPage: (pageId) => {
+          const ref = pageById(model, pageId);
+          return ref ? relativeRef(dirOf(imageOut), renderer.pagePath(ref)) : undefined;
+        },
+      };
       try {
-        const svg = await renderDiagram(req, model);
+        const svg = await renderDiagram(req, diagramCtx);
         if (svg) {
           images.set(req.image, svg);
-          await emit({ relativePath: renderer.imagePath?.(req.image) ?? req.image, content: svg });
+          await emit({ relativePath: imageOut, content: svg });
         }
       } catch (err) {
         model.warnings.push(`diagram ${req.image}: ${err instanceof Error ? err.message : String(err)}`);
