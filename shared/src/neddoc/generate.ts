@@ -11,7 +11,7 @@ import { cooperativeYielder, defaultNeddocOptions, type NeddocOptions } from './
 import { dirOf, pageById, relativeRef, type GeneratedFile, type NeddocRenderer, type RenderCtx } from './renderer';
 import { HtmlRenderer } from './renderHtml';
 import { RtdHtmlRenderer } from './renderRtdHtml';
-import { LegacyHtmlRenderer } from './renderLegacyHtml';
+import { MaterialHtmlRenderer } from './renderMaterialHtml';
 import { MarkdownRenderer } from './renderMarkdown';
 import { RstRenderer } from './renderRst';
 import { renderGraphDiagramSvg } from './graphDiagram';
@@ -88,10 +88,10 @@ export function rendererForFormat(options: NeddocOptions): NeddocRenderer {
       return new HtmlRenderer();
     case 'html-readthedocs':
       return new RtdHtmlRenderer();
-    case 'legacy-html':
-      if (!options.legacyAssets)
-        throw new Error('legacy-html format needs the vendored template assets (options.legacyAssets)');
-      return new LegacyHtmlRenderer(options.legacyAssets);
+    case 'html-material':
+      if (!options.materialAssets)
+        throw new Error('html-material format needs the vendored template assets (options.materialAssets)');
+      return new MaterialHtmlRenderer(options.materialAssets);
     case 'markdown':
       return new MarkdownRenderer();
     case 'rst':

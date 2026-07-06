@@ -142,18 +142,18 @@ try {
   assert(rstNode.includes('.. list-table::'), 'rst list-table missing');
   console.log('rst run: OK');
 
-  // 6) legacy-html format (Eclipse-compatible output)
-  const outLegacy = join(proj, 'docs-legacy');
-  const rLegacy = run(['-o', outLegacy, '--format=legacy-html', proj]);
-  assert(rLegacy.code === 0, `legacy-html run failed: ${rLegacy.err}`);
-  assert(existsSync(join(outLegacy, 'demo.Node.html')), 'legacy flat type page missing');
-  assert(existsSync(join(outLegacy, 'demo-DemoPkt.html')), 'legacy msg page naming wrong');
-  assert(existsSync(join(outLegacy, 'navtreedata.js')), 'navtreedata.js missing');
-  assert(existsSync(join(outLegacy, 'jquery.js')), 'legacy template assets missing');
-  const legacyNode = read(outLegacy, 'demo.Node.html');
-  assert(legacyNode.includes('mdl-layout'), 'material template chrome missing');
-  assert(legacyNode.includes('<h3 class="subtitle">Parameters</h3>'), 'legacy table heading missing');
-  console.log('legacy-html run: OK');
+  // 6) html-material format (Eclipse-compatible output)
+  const outMaterial = join(proj, 'docs-material');
+  const rMaterial = run(['-o', outMaterial, '--format=html-material', proj]);
+  assert(rMaterial.code === 0, `html-material run failed: ${rMaterial.err}`);
+  assert(existsSync(join(outMaterial, 'demo.Node.html')), 'material flat type page missing');
+  assert(existsSync(join(outMaterial, 'demo-DemoPkt.html')), 'material msg page naming wrong');
+  assert(existsSync(join(outMaterial, 'navtreedata.js')), 'navtreedata.js missing');
+  assert(existsSync(join(outMaterial, 'jquery.js')), 'material template assets missing');
+  const materialNode = read(outMaterial, 'demo.Node.html');
+  assert(materialNode.includes('mdl-layout'), 'material template chrome missing');
+  assert(materialNode.includes('<h3 class="subtitle">Parameters</h3>'), 'material table heading missing');
+  console.log('html-material run: OK');
 
   // 7) usage/runtime errors exit 2
   assert(run(['--format=bogus', proj]).code === 2, 'invalid --format should exit 2');

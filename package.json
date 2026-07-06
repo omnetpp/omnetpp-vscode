@@ -483,7 +483,7 @@
         },
         "omnetpp.neddoc.format": {
           "type": "string",
-          "enum": ["html", "html-readthedocs", "legacy-html", "markdown", "rst"],
+          "enum": ["html", "html-readthedocs", "html-material", "markdown", "rst"],
           "enumDescriptions": [
             "Browsable static site with a navigation sidebar and client-side search.",
             "Same static site, styled like the popular Read the Docs (Sphinx RTD) theme.",
@@ -572,7 +572,7 @@
           "type": "string",
           "default": "",
           "order": 20,
-          "markdownDescription": "Path to a stylesheet that replaces the generated `style.css` (the html, html-readthedocs and legacy-html formats); relative paths are resolved against the workspace folder."
+          "markdownDescription": "Path to a stylesheet that replaces the generated `style.css` (the html, html-readthedocs and html-material formats); relative paths are resolved against the workspace folder."
         },
         "omnetpp.neddoc.doxytagsFile": {
           "type": "string",

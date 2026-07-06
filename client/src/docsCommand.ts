@@ -20,7 +20,7 @@ interface FormatItem extends vscode.QuickPickItem {
 const FORMATS: { format: DocFormat; label: string; description: string }[] = [
   { format: 'html', label: 'HTML', description: 'browsable static site with navigation and search' },
   { format: 'html-readthedocs', label: 'HTML (Read the Docs)', description: 'the same static site, styled like the Read the Docs theme' },
-  { format: 'legacy-html', label: 'HTML (legacy)', description: "the Eclipse IDE's neddoc look & feel" },
+  { format: 'html-material', label: 'HTML (Material)', description: "the Eclipse IDE's neddoc look & feel (Material Design template)" },
   { format: 'markdown', label: 'Markdown', description: '.md files with SUMMARY.md navigation' },
   { format: 'rst', label: 'reStructuredText', description: 'Sphinx-ready .rst files' },
 ];

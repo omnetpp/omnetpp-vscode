@@ -4,8 +4,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { getParsers } from './helpers';
 
-function resolveLegacyDir(): string {
-  return resolve(__dirname, '..', '..', '..', 'resources', 'neddoc-legacy');
+function resolveMaterialDir(): string {
+  return resolve(__dirname, '..', '..', '..', 'resources', 'neddoc-material');
 }
 import { BUILTIN_NED_TEXT, BUILTIN_URI, NedResourceCache } from '../ned/nedResourceCache';
 import { MsgResourceCache } from '../msg/msgResourceCache';
@@ -255,32 +255,32 @@ test('neddoc tag files: filenames follow the active format', async () => {
   const mdTags = md.files.find((f) => f.relativePath === 'nedtags.xml')!.content as string;
   assert.ok(mdTags.includes('<filename>types/lib.Node.md</filename>'), mdTags);
 
-  // legacy layout: flat Eclipse naming, exactly what the Eclipse tag files carry
-  const legacyDir = resolveLegacyDir();
-  const legacyAssets: Record<string, string | Uint8Array> = {};
-  for (const f of readdirSync(legacyDir)) legacyAssets[f] = readFileSync(join(legacyDir, f));
-  const legacy = await collectNeddoc(input, { format: 'legacy-html', legacyAssets });
-  const legacyNed = legacy.files.find((f) => f.relativePath === 'nedtags.xml')!.content as string;
-  assert.ok(legacyNed.includes('<filename>lib.Node.html</filename>'), legacyNed);
-  const legacyMsg = legacy.files.find((f) => f.relativePath === 'msgtags.xml')!.content as string;
-  assert.ok(legacyMsg.includes('<filename>lib-FooPkt.html</filename>'), legacyMsg);
+  // material layout: flat Eclipse naming, exactly what the Eclipse tag files carry
+  const materialDir = resolveMaterialDir();
+  const materialAssets: Record<string, string | Uint8Array> = {};
+  for (const f of readdirSync(materialDir)) materialAssets[f] = readFileSync(join(materialDir, f));
+  const material = await collectNeddoc(input, { format: 'html-material', materialAssets });
+  const materialNed = material.files.find((f) => f.relativePath === 'nedtags.xml')!.content as string;
+  assert.ok(materialNed.includes('<filename>lib.Node.html</filename>'), materialNed);
+  const materialMsg = material.files.find((f) => f.relativePath === 'msgtags.xml')!.content as string;
+  assert.ok(materialMsg.includes('<filename>lib-FooPkt.html</filename>'), materialMsg);
 });
 
 // ---- custom CSS -------------------------------------------------------------------
 
-test('neddoc custom css: replaces the generated stylesheet in html and legacy-html', async () => {
+test('neddoc custom css: replaces the generated stylesheet in html and html-material', async () => {
   const input = await buildInput({ 'file:///lib.ned': LIB });
   const CUSTOM = 'body { background: hotpink; }';
   const html = await collectNeddoc(input, { format: 'html', customCss: CUSTOM });
   assert.equal(html.files.find((f) => f.relativePath === 'assets/style.css')!.content, CUSTOM);
 
-  const legacyDir = resolveLegacyDir();
-  const legacyAssets: Record<string, string | Uint8Array> = {};
-  for (const f of readdirSync(legacyDir)) legacyAssets[f] = readFileSync(join(legacyDir, f));
-  const legacy = await collectNeddoc(input, { format: 'legacy-html', legacyAssets, customCss: CUSTOM });
-  assert.equal(legacy.files.find((f) => f.relativePath === 'style.css')!.content, CUSTOM);
+  const materialDir = resolveMaterialDir();
+  const materialAssets: Record<string, string | Uint8Array> = {};
+  for (const f of readdirSync(materialDir)) materialAssets[f] = readFileSync(join(materialDir, f));
+  const material = await collectNeddoc(input, { format: 'html-material', materialAssets, customCss: CUSTOM });
+  assert.equal(material.files.find((f) => f.relativePath === 'style.css')!.content, CUSTOM);
   // other template assets still ship untouched
-  assert.ok(legacy.files.some((f) => f.relativePath === 'jquery.js'));
+  assert.ok(material.files.some((f) => f.relativePath === 'jquery.js'));
 });
 
 test('neddoc custom css: default stylesheets used when unset', async () => {

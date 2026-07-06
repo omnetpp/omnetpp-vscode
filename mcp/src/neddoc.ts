@@ -38,7 +38,7 @@ interface CliOptions {
   toggles: Partial<NeddocOptions>;
 }
 
-const FORMATS: DocFormat[] = ['html', 'html-readthedocs', 'legacy-html', 'markdown', 'rst'];
+const FORMATS: DocFormat[] = ['html', 'html-readthedocs', 'html-material', 'markdown', 'rst'];
 
 const USAGE = `opp_neddoc — generate documentation for OMNeT++ NED/MSG files
 
@@ -55,7 +55,7 @@ Options:
                       Existing files are overwritten but the directory is not
                       cleaned first.
   --format=<fmt>      Output format: html (default) | html-readthedocs |
-                      legacy-html | markdown | rst.
+                      html-material | markdown | rst.
   --ned-path=<dirs>   Extra NED source roots for cross-file resolution
                       (libraries), ';'- or ':'-separated. Indexed, not documented.
   --title=<text>      Documentation title (default: the project dir name).
@@ -72,7 +72,7 @@ Options:
                                  off, only ~tilde references (default: on).
   --include-builtins             Document the built-in NED types too.
   --custom-css=<file>            Stylesheet replacing the generated style.css
-                                 (html and legacy-html formats).
+                                 (the html* formats).
   --doxytags=<file>              Doxygen tag file for "C++ definition" links.
   --doxy-url-prefix=<url>        URL prefix for doxygen links.
   --verbose                      Print progress.
@@ -223,14 +223,14 @@ async function main(): Promise<void> {
       fail(`cannot read custom CSS file: ${opts.customCssPath}`);
     }
   }
-  if (opts.format === 'legacy-html') {
+  if (opts.format === 'html-material') {
     // the vendored Eclipse template snapshot ships next to the bundle
-    const assetDir = process.env.OMNETPP_NEDDOC_LEGACY_DIR || join(__dirname, 'neddoc-legacy');
+    const assetDir = process.env.OMNETPP_NEDDOC_MATERIAL_DIR || join(__dirname, 'neddoc-material');
     if (!existsSync(join(assetDir, 'page.tmpl')))
-      fail(`legacy template assets not found in ${assetDir} (run "bun run dev:build" or set OMNETPP_NEDDOC_LEGACY_DIR)`);
-    const legacyAssets: Record<string, string | Uint8Array> = {};
-    for (const f of readdirSync(assetDir)) legacyAssets[f] = readFileSync(join(assetDir, f));
-    optionOverrides.legacyAssets = legacyAssets;
+      fail(`material template assets not found in ${assetDir} (run "bun run dev:build" or set OMNETPP_NEDDOC_MATERIAL_DIR)`);
+    const materialAssets: Record<string, string | Uint8Array> = {};
+    for (const f of readdirSync(assetDir)) materialAssets[f] = readFileSync(join(assetDir, f));
+    optionOverrides.materialAssets = materialAssets;
   }
 
   let files = 0;
@@ -244,7 +244,7 @@ async function main(): Promise<void> {
   // icon search roots: project images/ dirs, OMNETPP_ROOT/images, the bundled
   // snapshot next to the CLI bundle (Eclipse order). Referenced icons are
   // copied once into <out>/icons/ and SVGs point at them relatively (SVG
-  // files live in images/, or at the root in the legacy layout).
+  // files live in images/, or at the root in the material layout).
   const iconDirs = [
     ...opts.projectDirs.map((d) => join(d, 'images')).filter(existsSync),
     ...(process.env.OMNETPP_ROOT ? [join(process.env.OMNETPP_ROOT, 'images')] : []),
@@ -258,7 +258,7 @@ async function main(): Promise<void> {
   } catch {
     /* no bundled index: sizes come from image headers */
   }
-  const iconHrefPrefix = opts.format === 'legacy-html' ? 'icons/' : '../icons/';
+  const iconHrefPrefix = opts.format === 'html-material' ? 'icons/' : '../icons/';
   const icons = createNodeIconProvider({
     iconDirs,
     bundledIndex,

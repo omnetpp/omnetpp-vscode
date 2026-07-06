@@ -86,12 +86,12 @@ export function registerDocsRequests(connection: Connection, state: ServerState)
         warnings.push(`cannot read doxygen tag file: ${params.doxytagsPath} (skipping C++ definition links)`);
       }
     }
-    if (params.format === 'legacy-html') {
-      const assetDir = join(__dirname, 'neddoc-legacy');
-      if (!existsSync(join(assetDir, 'page.tmpl'))) throw new Error(`legacy template assets not found in ${assetDir}`);
-      const legacyAssets: Record<string, string | Uint8Array> = {};
-      for (const f of readdirSync(assetDir)) legacyAssets[f] = readFileSync(join(assetDir, f));
-      optionOverrides.legacyAssets = legacyAssets;
+    if (params.format === 'html-material') {
+      const assetDir = join(__dirname, 'neddoc-material');
+      if (!existsSync(join(assetDir, 'page.tmpl'))) throw new Error(`material template assets not found in ${assetDir}`);
+      const materialAssets: Record<string, string | Uint8Array> = {};
+      for (const f of readdirSync(assetDir)) materialAssets[f] = readFileSync(join(assetDir, f));
+      optionOverrides.materialAssets = materialAssets;
     }
 
     let files = 0;
@@ -116,7 +116,7 @@ export function registerDocsRequests(connection: Connection, state: ServerState)
     } catch {
       /* sizes come from image headers */
     }
-    const iconHrefPrefix = params.format === 'legacy-html' ? 'icons/' : '../icons/';
+    const iconHrefPrefix = params.format === 'html-material' ? 'icons/' : '../icons/';
     const emittedIcons = new Map<string, string>();
     const icons = createNodeIconProvider({
       iconDirs,

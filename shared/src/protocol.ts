@@ -82,7 +82,7 @@ export interface GenerateDocsParams {
   /** Absolute filesystem path of the output directory. */
   outputDir: string;
   /** Output format (see the neddoc DocFormat). */
-  format: 'html' | 'html-readthedocs' | 'legacy-html' | 'markdown' | 'rst';
+  format: 'html' | 'html-readthedocs' | 'html-material' | 'markdown' | 'rst';
   /** Documentation title (defaults to the workspace folder name). */
   title?: string;
   /** Directory exclusion patterns (`*`/`**` globs, project-relative). */

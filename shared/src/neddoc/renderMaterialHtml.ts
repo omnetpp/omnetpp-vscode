@@ -1,7 +1,7 @@
 /**
- * Legacy HTML renderer: reproduces the Eclipse IDE's neddoc output — the
+ * Material HTML renderer: reproduces the Eclipse IDE's neddoc output — the
  * Material-Design-Lite template (page.tmpl and its jquery/navtree assets,
- * vendored under resources/neddoc-legacy/), Eclipse's flat file naming
+ * vendored under resources/neddoc-material/), Eclipse's flat file naming
  * (every page at the output root, type pages named by fully-qualified name),
  * the HtmlRenderer.java markup shapes, and the navtreedata.js /
  * navtreeindex0.js sidebar data files. Useful for A/B comparison against a
@@ -47,13 +47,13 @@ const STATIC_ASSETS = [
   'material.min.js',
 ];
 
-export class LegacyHtmlRenderer implements NeddocRenderer {
-  readonly format = 'legacy-html' as const;
+export class MaterialHtmlRenderer implements NeddocRenderer {
+  readonly format = 'html-material' as const;
   readonly pageExtension = '.html';
 
   constructor(private assets: Record<string, string | Uint8Array>) {
     for (const required of ['page.tmpl', 'navtree.tmpl']) {
-      if (!(required in assets)) throw new Error(`legacy-html: missing template asset ${required}`);
+      if (!(required in assets)) throw new Error(`html-material: missing template asset ${required}`);
     }
   }
 
@@ -70,7 +70,7 @@ export class LegacyHtmlRenderer implements NeddocRenderer {
   }
 
   imagePath(image: string): string {
-    return legacyImageName(image);
+    return materialImageName(image);
   }
 
   renderPage(page: DocPage, ctx: RenderCtx): string {
@@ -148,8 +148,8 @@ export class LegacyHtmlRenderer implements NeddocRenderer {
       case 'diagram':
         if (!ctx.hasImage(section.image)) return '';
         // Eclipse embeds diagram SVGs via <object> so their links stay live;
-        // images live at the root in legacy layout (strip the images/ prefix)
-        return `<object type="image/svg+xml" data="${escapeHtmlAll(legacyImageName(section.image))}"></object>`;
+        // images live at the root in material layout (strip the images/ prefix)
+        return `<object type="image/svg+xml" data="${escapeHtmlAll(materialImageName(section.image))}"></object>`;
       case 'source':
         return `<pre class="src">${escapeHtmlAll(section.code)}</pre>`;
     }
@@ -187,7 +187,7 @@ export class LegacyHtmlRenderer implements NeddocRenderer {
     return `var NEDDOC_SEARCH = ${JSON.stringify(entries)};\n`;
   }
 
-  /** Flat root-relative href to a type page (all legacy pages sit at the root,
+  /** Flat root-relative href to a type page (all material pages sit at the root,
    *  so it is valid from any page). */
   private searchHref(model: DocModel, pageId: string): string {
     const ref = pageById(model, pageId);
@@ -294,7 +294,7 @@ const SEARCH_BOX = `        <div id="nd-search">
 /** neddoc-search.js: substring type search with the same ranking as the modern
  *  HtmlRenderer (exact > prefix > name-substring > fq-substring), plus keyboard
  *  navigation. Reads the NEDDOC_SEARCH global from search-data.js. */
-const NEDDOC_SEARCH_JS = `// neddoc legacy template — client-side type search (vanilla JS)
+const NEDDOC_SEARCH_JS = `// neddoc material template — client-side type search (vanilla JS)
 (function () {
   'use strict';
   function ready(fn) {
@@ -369,8 +369,8 @@ const NEDDOC_SEARCH_JS = `// neddoc legacy template — client-side type search 
 })();
 `;
 
-/** Legacy layout keeps images at the output root (Eclipse naming). */
-export function legacyImageName(image: string): string {
+/** Material layout keeps images at the output root (Eclipse naming). */
+export function materialImageName(image: string): string {
   return image.replace(/^images\//, '').replace(/^msg-/, '').replace(/--/g, '-');
 }
 

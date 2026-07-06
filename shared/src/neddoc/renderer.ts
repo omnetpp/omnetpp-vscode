@@ -1,7 +1,7 @@
 /**
  * Renderer abstraction of the NED documentation generator: one implementation
  * per output format (renderHtml.ts, renderMarkdown.ts, renderRst.ts,
- * renderLegacyHtml.ts). Shared here: the output path scheme and relative-path
+ * renderMaterialHtml.ts). Shared here: the output path scheme and relative-path
  * helpers all formats use.
  */
 
@@ -28,7 +28,7 @@ export interface NeddocRenderer {
   /** Output-relative path of a page. */
   pagePath(ref: DocPageRef): string;
   /** Output path for a diagram SVG; defaults to the model's images/ path
-   *  (the legacy layout keeps images at the root under Eclipse names). */
+   *  (the material layout keeps images at the root under Eclipse names). */
   imagePath?(image: string): string;
   renderPage(page: DocPage, ctx: RenderCtx): string;
   /** Non-page outputs: assets, nav data, SUMMARY.md, index toctrees, ... */

@@ -6,7 +6,7 @@
 
 import type { IncludeResolution } from './commentAst';
 
-export type DocFormat = 'html' | 'html-readthedocs' | 'legacy-html' | 'markdown' | 'rst';
+export type DocFormat = 'html' | 'html-readthedocs' | 'html-material' | 'markdown' | 'rst';
 
 export interface NeddocOptions {
   /** Output format (default 'html'). */
@@ -40,13 +40,13 @@ export interface NeddocOptions {
   /** Title shown on the overview page and in the navigation header. */
   projectTitle?: string;
   /** Custom stylesheet CONTENT replacing the generated style.css in the
-   *  html/legacy-html outputs (Eclipse's custom CSS option; hosts read the
+   *  html/html-material outputs (Eclipse's custom CSS option; hosts read the
    *  file). */
   customCss?: string;
   /** The vendored Eclipse "material" template files, keyed by filename
    *  (page.tmpl, navtree.tmpl, style.css, jquery.js, ...). Required for the
-   *  legacy-html format; the host reads them from dist/neddoc-legacy/. */
-  legacyAssets?: Record<string, string | Uint8Array>;
+   *  html-material format; the host reads them from dist/neddoc-material/. */
+  materialAssets?: Record<string, string | Uint8Array>;
 }
 
 /** Compile an Eclipse-style exclusion pattern (`*`, `**`) to a RegExp tested
