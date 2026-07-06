@@ -89,8 +89,16 @@ export function registerDocsCommand(context: vscode.ExtensionContext, client: La
             cancellable: true,
           },
           async (progress, token) => {
+            // the server reports an overall percentage; withProgress renders a
+            // determinate bar from the increments between reports
+            let lastPercent = 0;
             const sub = client.onNotification(OmnetppMethods.generateDocsProgress, (p: GenerateDocsProgress) => {
-              progress.report({ message: p.total ? `${p.step} (${p.done}/${p.total})` : p.step });
+              const increment = Math.max(0, Math.min(100, p.percent) - lastPercent);
+              lastPercent += increment;
+              progress.report({
+                increment,
+                message: p.total ? `${p.step} (${p.done}/${p.total})` : p.step,
+              });
             });
             try {
               return await client.sendRequest<GenerateDocsResult>(OmnetppMethods.generateDocs, params, token);

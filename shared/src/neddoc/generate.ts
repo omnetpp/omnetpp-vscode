@@ -20,7 +20,9 @@ import type { NedResourceCache } from '../ned/nedResourceCache';
 import type { IconProvider, TextMeasurer } from '../graphics/diagramLayout';
 
 export interface NeddocProgress {
-  report?(step: string, done: number, total: number): void;
+  /** `percent` is the overall 0-100 completion across all phases (the
+   *  generator computes it; hosts can drive determinate progress bars). */
+  report?(step: string, done: number, total: number, percent: number): void;
   cancelled?(): boolean;
 }
 
@@ -109,9 +111,21 @@ export async function generateNeddoc(
     if (progress?.cancelled?.()) throw new NeddocCancelled();
   };
 
-  progress?.report?.('Collecting types', 0, 1);
-  const model = extractDocModel(input, options);
+  // overall progress: extraction gets a fixed 0-15% band; the remaining 85%
+  // is split between diagrams, pages and aux files by unit count, diagrams
+  // weighted x3 (layout + SVG per diagram dominates wall-clock)
+  const EXTRACT_BAND = 15;
+  const DIAGRAM_WEIGHT = 3;
+  progress?.report?.('Extracting types', 0, 1, 0);
+  const model = extractDocModel(input, options, (done, total) => {
+    checkCancelled();
+    progress?.report?.('Extracting types', done, total, total ? (done / total) * EXTRACT_BAND : EXTRACT_BAND);
+  });
   checkCancelled();
+
+  const diagramUnits = renderDiagram ? model.diagrams.length * DIAGRAM_WEIGHT : 0;
+  const totalUnits = Math.max(1, diagramUnits + model.pages.length + 1); // +1 for aux/tag files
+  const percentAt = (unitsDone: number) => EXTRACT_BAND + (unitsDone / totalUnits) * (100 - EXTRACT_BAND);
 
   // diagrams first: pages inline/reference them
   const images = new Map<string, string>();
@@ -119,7 +133,8 @@ export async function generateNeddoc(
     let done = 0;
     for (const req of model.diagrams) {
       checkCancelled();
-      progress?.report?.(`Rendering diagrams`, done++, model.diagrams.length);
+      progress?.report?.('Rendering diagrams', done, model.diagrams.length, percentAt(done * DIAGRAM_WEIGHT));
+      done++;
       const imageOut = renderer.imagePath?.(req.image) ?? req.image;
       const diagramCtx: DiagramRenderCtx = {
         model,
@@ -150,7 +165,8 @@ export async function generateNeddoc(
   let done = 0;
   for (const page of model.pages) {
     checkCancelled();
-    progress?.report?.(`Writing pages`, done++, model.pages.length);
+    progress?.report?.('Writing pages', done, model.pages.length, percentAt(diagramUnits + done));
+    done++;
     await emit({ relativePath: renderer.pagePath(page.ref), content: renderer.renderPage(page, ctx) });
   }
   for (const file of renderer.auxFiles(ctx)) {
@@ -161,7 +177,7 @@ export async function generateNeddoc(
   // nedtags.xml always, msgtags.xml when MSG types are documented)
   await emit({ relativePath: 'nedtags.xml', content: nedTagFile(model, renderer) });
   if (options.messageDefinitions) await emit({ relativePath: 'msgtags.xml', content: msgTagFile(model, renderer) });
-  progress?.report?.('Done', model.pages.length, model.pages.length);
+  progress?.report?.('Done', model.pages.length, model.pages.length, 100);
   return { pages: model.pages.length, diagrams: images.size, warnings: model.warnings };
 }
 

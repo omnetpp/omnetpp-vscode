@@ -135,11 +135,11 @@ export function registerDocsRequests(connection: Connection, state: ServerState)
     // throttled progress notifications
     let lastReport = 0;
     const progress = {
-      report: (step: string, done: number, total: number) => {
+      report: (step: string, done: number, total: number, percent: number) => {
         const now = Date.now();
         if (now - lastReport < 100 && done !== total) return;
         lastReport = now;
-        const payload: GenerateDocsProgress = { step, done, total };
+        const payload: GenerateDocsProgress = { step, done, total, percent };
         void connection.sendNotification(OmnetppMethods.generateDocsProgress, payload);
       },
       cancelled: () => token.isCancellationRequested,

@@ -104,7 +104,12 @@ try {
 
   const progressed = notifications.filter((n) => n.method === 'omnetpp/generateDocsProgress');
   if (progressed.length === 0) throw new Error('no progress notifications received');
-  console.log(`progress notifications: OK (${progressed.length})`);
+  const percents = progressed.map((n) => n.params.percent);
+  if (percents.some((p) => typeof p !== 'number' || p < 0 || p > 100)) throw new Error(`bad percent values: ${percents}`);
+  for (let i = 1; i < percents.length; i++)
+    if (percents[i] < percents[i - 1]) throw new Error(`percent regression: ${percents.join(',')}`);
+  if (percents[percents.length - 1] !== 100) throw new Error(`final percent should be 100, got ${percents[percents.length - 1]}`);
+  console.log(`progress notifications: OK (${progressed.length}, ${Math.round(percents[0])}%..100%)`);
 
   // options from the settings-backed params: title, custom css, full diagram
   const cssFile = join(projectDir, 'my.css');

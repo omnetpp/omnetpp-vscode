@@ -108,6 +108,8 @@ export interface GenerateDocsProgress {
   step: string;
   done: number;
   total: number;
+  /** Overall completion across all generation phases, 0-100. */
+  percent: number;
 }
 
 export interface GenerateDocsResult {

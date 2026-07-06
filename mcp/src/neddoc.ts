@@ -269,6 +269,10 @@ async function main(): Promise<void> {
   const renderDiagram = createDiagramRenderer({ nedCache: index.nedCache, icons });
 
   let lastStep = '';
+  // live progress line when stderr is a TTY (verbose mode keeps plain lines)
+  const statusLine = process.stderr.isTTY === true && !opts.verbose;
+  let lastStatus = '';
+  let statusWidth = 0;
   const result = await generateNeddoc(
     {
       nedCache: index.nedCache,
@@ -279,8 +283,16 @@ async function main(): Promise<void> {
     optionOverrides,
     emit,
     {
-      report: (step) => {
-        if (opts.verbose && step !== lastStep) {
+      report: (step, done, total, percent) => {
+        if (statusLine) {
+          // self-updating status line on a TTY (throttled to visible changes)
+          const line = `[${String(Math.floor(percent)).padStart(3)}%] ${step} (${done}/${total})`;
+          if (line !== lastStatus) {
+            lastStatus = line;
+            process.stderr.write(`\r${line.padEnd(statusWidth)}`);
+            statusWidth = Math.max(statusWidth, line.length);
+          }
+        } else if (opts.verbose && step !== lastStep) {
           lastStep = step;
           log(step.toLowerCase());
         }
@@ -288,6 +300,7 @@ async function main(): Promise<void> {
     },
     renderDiagram,
   );
+  if (statusLine) process.stderr.write(`\r${' '.repeat(statusWidth)}\r`);
 
   for (const w of result.warnings) process.stderr.write(`opp_neddoc: warning: ${w}\n`);
   const entry = opts.format === 'markdown' ? 'index.md' : opts.format === 'rst' ? 'index.rst' : 'index.html';

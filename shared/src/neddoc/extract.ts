@@ -88,7 +88,13 @@ function defaultDisplayPath(uri: string): string {
 // Extraction
 // ---------------------------------------------------------------------------
 
-export function extractDocModel(input: NeddocInput, options: NeddocOptions): DocModel {
+export function extractDocModel(
+  input: NeddocInput,
+  options: NeddocOptions,
+  /** Per-type extraction progress (page building parses every doc comment —
+   *  a significant phase on large projects). */
+  onType?: (done: number, total: number) => void,
+): DocModel {
   const warnings: string[] = [];
   const nedCache = input.nedCache;
   const isTarget = (uri: string) =>
@@ -108,7 +114,7 @@ export function extractDocModel(input: NeddocInput, options: NeddocOptions): Doc
       : [];
 
   const model = new Extraction(nedCache, input.msgCache, nedTypes, msgTypes, options, warnings, displayPath);
-  return model.run();
+  return model.run(onType);
 }
 
 class Extraction {
@@ -156,9 +162,18 @@ class Extraction {
     };
   }
 
-  run(): DocModel {
-    for (const t of this.nedTypes) this.pages.push(this.nedTypePage(t));
-    for (const t of this.msgTypes) this.pages.push(this.msgTypePage(t));
+  run(onType?: (done: number, total: number) => void): DocModel {
+    const total = this.nedTypes.length + this.msgTypes.length;
+    let done = 0;
+    for (const t of this.nedTypes) {
+      onType?.(done++, total);
+      this.pages.push(this.nedTypePage(t));
+    }
+    for (const t of this.msgTypes) {
+      onType?.(done++, total);
+      this.pages.push(this.msgTypePage(t));
+    }
+    onType?.(total, total);
     this.pages.push(...this.fullDiagramPages());
     this.pages.unshift(this.indexPage(), ...this.packagesPage(), ...this.namespacesPage());
     return {
