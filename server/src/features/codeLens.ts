@@ -86,7 +86,7 @@ export function computeCodeLenses(
       const impl = ctx.db.findImplClass(fq);
       if (impl) {
         const shortName = impl.qualifiedName.split('::').pop() ?? impl.qualifiedName;
-        lens(range, `implemented by ${shortName}`, [impl.decl]);
+        lens(range, `C++ implementation by ${shortName}`, [impl.decl]);
       }
 
       // per-member "N C++ access(es)" — only for members this type declares, and
