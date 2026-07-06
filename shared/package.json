@@ -10,8 +10,8 @@
       "default": "./out/index.js"
     },
     "./node": {
-      "types": "./out/node/nodeFileSystem.d.ts",
-      "default": "./out/node/nodeFileSystem.js"
+      "types": "./out/node/index.d.ts",
+      "default": "./out/node/index.js"
     },
     "./protocol": {
       "types": "./out/protocol.d.ts",
