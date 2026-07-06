@@ -22,3 +22,5 @@ export {
 export { NAMED_COLORS, parseColor, colorNames } from './graphics/colors';
 export { LcgRandom, BasicSpringEmbedderLayout, type SpringEmbedderOptions } from './graphics/springEmbedder';
 export { arrowcoords, type Pt, type Rect, type RoutingConstraint, type RoutingDir } from './graphics/arrowcoords';
+export { SvgBuilder, escapeXml, fmt, type Attrs } from './graphics/svgBuilder';
+export { approxTextWidth } from './graphics/textMetrics';
