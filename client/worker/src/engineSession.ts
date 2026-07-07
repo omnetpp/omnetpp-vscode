@@ -27,6 +27,7 @@
  */
 
 import {
+  BeginSendEntry,
   BigDecimal,
   buildModuleTree,
   EventLog,
@@ -39,6 +40,7 @@ import {
   FileReader,
   FilteredEventLog,
   FilteredMessageDependency,
+  FilteredMessageDependencyKind,
   type IEvent,
   type IEventLog,
   type IMessageDependency,
@@ -513,7 +515,7 @@ export class EngineSession {
     const causeEvent = dep.getCauseEvent();
     const consequenceEvent = dep.getConsequenceEvent();
     const beginMessage = dep.getBeginMessageDescriptionEntry();
-    return {
+    const result: RenderDependency = {
       kind,
       causeEventNumber: dep.getCauseEventNumber(),
       causeModuleId: causeEvent?.getModuleId() ?? null,
@@ -525,7 +527,50 @@ export class EngineSession {
       consequenceSimulationTime: dep.getConsequenceSimulationTime().toString(),
       messageName: beginMessage?.messageName ?? null,
       messageClassName: beginMessage?.messageClassName ?? null,
+      messageId: beginMessage?.messageId ?? null,
     };
+    if (dep instanceof FilteredMessageDependency) {
+      switch (dep.getKind()) {
+        case FilteredMessageDependencyKind.SENDS:
+          result.filteredKind = 'sends';
+          break;
+        case FilteredMessageDependencyKind.REUSES:
+          result.filteredKind = 'reuses';
+          break;
+        case FilteredMessageDependencyKind.MIXED:
+          result.filteredKind = 'mixed';
+          break;
+      }
+    } else if (kind === 'send') {
+      this.fillTransmissionDuration(result, dep, causeEvent, beginMessage);
+    }
+    return result;
+  }
+
+  /**
+   * Populates `transmissionDurationFraction`/`isReceptionStart` for a plain (non-reuse,
+   * non-filtered) send dependency -- see `RenderDependency`'s own doc for the
+   * fraction-of-arrow-span simplification. `getEndSendEntry`/`getTransmissionDelay`/
+   * `getRemainingDuration` live only on the concrete `Event`/`FilteredEvent` classes
+   * (not the `IEvent` interface, matching Java's `Event`-only placement) -- accessed via
+   * a narrow duck-typed check so a hypothetical future `IEvent` implementor lacking them
+   * just yields "no transmission-duration decoration" instead of a crash.
+   */
+  private fillTransmissionDuration(result: RenderDependency, dep: IMessageDependency, causeEvent: IEvent | null, beginMessage: ReturnType<IMessageDependency['getBeginMessageDescriptionEntry']>): void {
+    if (causeEvent === null || !(beginMessage instanceof BeginSendEntry)) return;
+    const withSend = causeEvent as unknown as { getEndSendEntry?(b: BeginSendEntry): { getIsDeliveredImmediately(): boolean } | null; getTransmissionDelay?(b: BeginSendEntry): BigDecimal; getRemainingDuration?(b: BeginSendEntry): BigDecimal };
+    if (typeof withSend.getEndSendEntry !== 'function' || typeof withSend.getTransmissionDelay !== 'function' || typeof withSend.getRemainingDuration !== 'function') return;
+    const endSendEntry = withSend.getEndSendEntry(beginMessage);
+    if (endSendEntry === null) return;
+    const remainingDuration = withSend.getRemainingDuration(beginMessage);
+    if (remainingDuration.equals(BigDecimal.ZERO)) return;
+    const transmissionDelay = withSend.getTransmissionDelay(beginMessage);
+    const span = dep.getConsequenceSimulationTime().subtract(dep.getCauseSimulationTime());
+    if (span.lessOrEqual(BigDecimal.ZERO)) return;
+    const fraction = Number(transmissionDelay.toString()) / Number(span.toString());
+    if (!Number.isFinite(fraction)) return;
+    result.transmissionDurationFraction = Math.min(1, Math.max(0, fraction));
+    result.isReceptionStart = endSendEntry.getIsDeliveredImmediately();
   }
 
   /**

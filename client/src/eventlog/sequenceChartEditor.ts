@@ -8,6 +8,17 @@ import { buildEventLogWebviewHtml } from './webviewHtml';
 const VIEW_TYPE = 'omnetpp.sequenceChart';
 
 /**
+ * Phase U5: `workspaceState` key for the chart's persisted UI state (currently:
+ * timeline mode + the ~25 Show/Hide toggles, `client/webview/src/eventlog/chart/
+ * displayFlags.ts`), keyed by file URI string -- a plain `Record<string, unknown>` blob
+ * per uri, mirroring `eventLogTableView.ts`'s `TABLE_STATE_KEY` pattern exactly (that
+ * file's own header previously noted the chart editor "has no comparable per-uri state
+ * yet" -- this phase adds it, since the Show/Hide toggles are meant to survive a full
+ * window reload, not just a webview hide/show).
+ */
+const CHART_STATE_KEY = 'omnetpp.eventlog.chartState';
+
+/**
  * The `CustomDocument` VS Code hands back from `openCustomDocument()`. It has
  * (deliberately) no state of its own beyond the uri -- the session registry in
  * `EventLogController` is the durable owner (port plan: "session host-side is
@@ -48,14 +59,26 @@ export class SequenceChartEditorProvider implements vscode.CustomReadonlyEditorP
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly controller: EventLogController,
+    private readonly workspaceState: vscode.Memento,
   ) {}
 
   static register(context: vscode.ExtensionContext, controller: EventLogController): vscode.Disposable {
     return vscode.window.registerCustomEditorProvider(
       VIEW_TYPE,
-      new SequenceChartEditorProvider(context.extensionUri, controller),
+      new SequenceChartEditorProvider(context.extensionUri, controller, context.workspaceState),
       { webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: false },
     );
+  }
+
+  // ---- persisted chart UI state (phase U5) -------------------------------------------
+
+  private getPersistedState(uriString: string): unknown {
+    return this.workspaceState.get<Record<string, unknown>>(CHART_STATE_KEY, {})[uriString];
+  }
+
+  private async setPersistedState(uriString: string, state: unknown): Promise<void> {
+    const all = this.workspaceState.get<Record<string, unknown>>(CHART_STATE_KEY, {});
+    await this.workspaceState.update(CHART_STATE_KEY, { ...all, [uriString]: state });
   }
 
   async openCustomDocument(uri: vscode.Uri): Promise<SequenceChartDocument> {
@@ -96,6 +119,20 @@ export class SequenceChartEditorProvider implements vscode.CustomReadonlyEditorP
     });
 
     webviewPanel.webview.onDidReceiveMessage((message: WebviewToHostMessage) => {
+      const uriString = document.uri.toString();
+      // Phase U5: intercept 'ready'/'stateChanged' before the chart/table-shared
+      // handleWebviewMessage() (whose generic 'ready' always sends `persistedState:
+      // undefined` and whose 'stateChanged' is a no-op stub) -- same pattern
+      // eventLogTableView.ts already uses for its own per-uri table state.
+      if (message.type === 'ready') {
+        const settings = readEventLogUiSettings();
+        sink.postMessage({ type: 'init', fileUri: uriString, persistedState: this.getPersistedState(uriString), settings, summary: session.summary });
+        return;
+      }
+      if (message.type === 'stateChanged') {
+        void this.setPersistedState(uriString, message.state);
+        return;
+      }
       void handleWebviewMessage(session, sink, document.uri, message);
     });
   }

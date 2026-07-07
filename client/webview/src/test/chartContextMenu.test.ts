@@ -2,6 +2,7 @@ import { test } from 'bun:test';
 import assert from 'node:assert';
 import { TimelineMode } from '@omnetpp/shared/elog-protocol';
 import { buildChartContextMenu, type ChartMenuActions } from '../eventlog/chart/chartContextMenu';
+import { DEFAULT_DISPLAY_FLAGS } from '../eventlog/chart/displayFlags';
 import type { MenuEntry } from '../eventlog/common/contextMenu';
 import type { HitObject } from '../eventlog/chart/hitTest';
 
@@ -30,6 +31,7 @@ function fakeActions(): ChartMenuActions & Record<string, unknown> {
     openFindTextDialog: record('openFindTextDialog'),
     findNext: record('findNext'),
     refresh: record('refresh'),
+    toggleDisplayFlag: record('toggleDisplayFlag'),
   } as unknown as ChartMenuActions & Record<string, unknown>;
 }
 
@@ -45,7 +47,7 @@ function submenuOf(entries: MenuEntry[], id: string): MenuEntry[] {
 
 test('buildChartContextMenu: no hits -- only the static tail appears', () => {
   const actions = fakeActions();
-  const entries = buildChartContextMenu({ hits: [], resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.SIMULATION_TIME, actions });
+  const entries = buildChartContextMenu({ hits: [], resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.SIMULATION_TIME, actions, displayFlags: DEFAULT_DISPLAY_FLAGS });
   assert.ok(!findEntry(entries, 'event-1'));
   assert.ok(findEntry(entries, 'timelineMode'));
   assert.ok(findEntry(entries, 'zoom'));
@@ -56,7 +58,7 @@ test('buildChartContextMenu: no hits -- only the static tail appears', () => {
 test('buildChartContextMenu: an event hit gets its own submenu with Select/Center wired + Filter disabled', () => {
   const actions = fakeActions();
   const hits: HitObject[] = [{ kind: 'event', eventNumber: 42, moduleId: 3 }];
-  const entries = buildChartContextMenu({ hits, resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.SIMULATION_TIME, actions });
+  const entries = buildChartContextMenu({ hits, resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.SIMULATION_TIME, actions, displayFlags: DEFAULT_DISPLAY_FLAGS });
   const sub = submenuOf(entries, 'event-42');
   const select = findEntry(sub, 'select')!;
   assert.ok('onSelect' in select);
@@ -77,7 +79,7 @@ test('buildChartContextMenu: two overlapping events each get their own section',
     { kind: 'event', eventNumber: 5, moduleId: 1 },
     { kind: 'event', eventNumber: 6, moduleId: 2 },
   ];
-  const entries = buildChartContextMenu({ hits, resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.SIMULATION_TIME, actions });
+  const entries = buildChartContextMenu({ hits, resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.SIMULATION_TIME, actions, displayFlags: DEFAULT_DISPLAY_FLAGS });
   assert.ok(findEntry(entries, 'event-5'));
   assert.ok(findEntry(entries, 'event-6'));
 });
@@ -85,7 +87,7 @@ test('buildChartContextMenu: two overlapping events each get their own section',
 test('buildChartContextMenu: dependency hit -- Go to Cause/Consequence + Zoom to Message wired, Filter Message disabled, title from resolveDependencyLabel', () => {
   const actions = fakeActions();
   const hits: HitObject[] = [{ kind: 'dependency', dependencyKind: 'send', causeEventNumber: 1, consequenceEventNumber: 2, causeTc: 10, consequenceTc: 20 }];
-  const entries = buildChartContextMenu({ hits, resolveDependencyLabel: () => 'msgA', currentTimelineMode: TimelineMode.SIMULATION_TIME, actions });
+  const entries = buildChartContextMenu({ hits, resolveDependencyLabel: () => 'msgA', currentTimelineMode: TimelineMode.SIMULATION_TIME, actions, displayFlags: DEFAULT_DISPLAY_FLAGS });
   const depEntry = findEntry(entries, 'dep-1-2')!;
   assert.equal((depEntry as { label: string }).label, 'msgA');
   const sub = submenuOf(entries, 'dep-1-2');
@@ -102,7 +104,7 @@ test('buildChartContextMenu: dependency hit -- Go to Cause/Consequence + Zoom to
 test('buildChartContextMenu: unresolvable dependency label falls back to a generic placeholder', () => {
   const actions = fakeActions();
   const hits: HitObject[] = [{ kind: 'dependency', dependencyKind: 'send', causeEventNumber: 1, consequenceEventNumber: 2, causeTc: 0, consequenceTc: 1 }];
-  const entries = buildChartContextMenu({ hits, resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.SIMULATION_TIME, actions });
+  const entries = buildChartContextMenu({ hits, resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.SIMULATION_TIME, actions, displayFlags: DEFAULT_DISPLAY_FLAGS });
   const depEntry = findEntry(entries, 'dep-1-2')! as { label: string };
   assert.equal(depEntry.label, '(message)');
 });
@@ -110,7 +112,7 @@ test('buildChartContextMenu: unresolvable dependency label falls back to a gener
 test('buildChartContextMenu: axis hit -- Center wired, Open Module + more-actions disabled (U8)', () => {
   const actions = fakeActions();
   const hits: HitObject[] = [{ kind: 'axis', moduleId: 7 }];
-  const entries = buildChartContextMenu({ hits, resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.SIMULATION_TIME, actions });
+  const entries = buildChartContextMenu({ hits, resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.SIMULATION_TIME, actions, displayFlags: DEFAULT_DISPLAY_FLAGS });
   const sub = submenuOf(entries, 'axis-7');
   (findEntry(sub, 'center') as { onSelect: () => void }).onSelect();
   assert.deepEqual(actions.calls.centerOnAxis, [7]);
@@ -120,13 +122,13 @@ test('buildChartContextMenu: axis hit -- Center wired, Open Module + more-action
 test('buildChartContextMenu: methodCall hits do not get a dedicated section (matches Java -- verified no such submenu in SequenceChartContributor)', () => {
   const actions = fakeActions();
   const hits: HitObject[] = [{ kind: 'methodCall', eventNumber: 1, sourceModuleId: 1, targetModuleId: 2, tc: 5 }];
-  const entries = buildChartContextMenu({ hits, resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.SIMULATION_TIME, actions });
+  const entries = buildChartContextMenu({ hits, resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.SIMULATION_TIME, actions, displayFlags: DEFAULT_DISPLAY_FLAGS });
   assert.ok(!entries.some((e) => 'id' in e && e.id.startsWith('call-')));
 });
 
 test('buildChartContextMenu: Timeline Mode submenu has a checked radio matching currentTimelineMode', () => {
   const actions = fakeActions();
-  const entries = buildChartContextMenu({ hits: [], resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.EVENT_NUMBER, actions });
+  const entries = buildChartContextMenu({ hits: [], resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.EVENT_NUMBER, actions, displayFlags: DEFAULT_DISPLAY_FLAGS });
   const sub = submenuOf(entries, 'timelineMode');
   const checked = sub.filter((e) => 'checked' in e && e.checked);
   assert.equal(checked.length, 1);
@@ -139,7 +141,7 @@ test('buildChartContextMenu: Timeline Mode submenu has a checked radio matching 
 
 test('buildChartContextMenu: Zoom submenu wires all four actions', () => {
   const actions = fakeActions();
-  const entries = buildChartContextMenu({ hits: [], resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.SIMULATION_TIME, actions });
+  const entries = buildChartContextMenu({ hits: [], resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.SIMULATION_TIME, actions, displayFlags: DEFAULT_DISPLAY_FLAGS });
   const sub = submenuOf(entries, 'zoom');
   for (const [id, name] of [
     ['defaultZoom', 'defaultZoom'],
@@ -154,7 +156,7 @@ test('buildChartContextMenu: Zoom submenu wires all four actions', () => {
 
 test('buildChartContextMenu: Go to submenu wires Event/SimTime dialogs + Begin/End', () => {
   const actions = fakeActions();
-  const entries = buildChartContextMenu({ hits: [], resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.SIMULATION_TIME, actions });
+  const entries = buildChartContextMenu({ hits: [], resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.SIMULATION_TIME, actions, displayFlags: DEFAULT_DISPLAY_FLAGS });
   const sub = submenuOf(entries, 'gotoMenu');
   (findEntry(sub, 'gotoEvent') as { onSelect: () => void }).onSelect();
   assert.ok(actions.calls.openGotoEventDialog);
@@ -168,7 +170,7 @@ test('buildChartContextMenu: Go to submenu wires Event/SimTime dialogs + Begin/E
 
 test('buildChartContextMenu: Find Text/Find Next/Refresh wired at the top level', () => {
   const actions = fakeActions();
-  const entries = buildChartContextMenu({ hits: [], resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.SIMULATION_TIME, actions });
+  const entries = buildChartContextMenu({ hits: [], resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.SIMULATION_TIME, actions, displayFlags: DEFAULT_DISPLAY_FLAGS });
   (findEntry(entries, 'findText') as { onSelect: () => void }).onSelect();
   assert.ok(actions.calls.openFindTextDialog);
   (findEntry(entries, 'findNext') as { onSelect: () => void }).onSelect();
@@ -177,11 +179,31 @@ test('buildChartContextMenu: Find Text/Find Next/Refresh wired at the top level'
   assert.ok(actions.calls.refresh);
 });
 
-test('buildChartContextMenu: deferred static items (Select Modules, Filter dropdown, Show/Hide, etc.) are not present at all', () => {
+test('buildChartContextMenu: deferred static items (Select Modules, Filter dropdown, etc.) are not present at all', () => {
   const actions = fakeActions();
-  const entries = buildChartContextMenu({ hits: [], resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.SIMULATION_TIME, actions });
+  const entries = buildChartContextMenu({ hits: [], resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.SIMULATION_TIME, actions, displayFlags: DEFAULT_DISPLAY_FLAGS });
   const ids = entries.filter((e): e is Extract<MenuEntry, { id: string }> => 'id' in e).map((e) => e.id);
-  for (const deferred of ['selectModules', 'presetConfiguration', 'axisOrderingMode', 'filter', 'configureStyle', 'spacing', 'showHide', 'changeFont', 'bookmark', 'pin', 'releaseMemory', 'selfTest', 'copyToClipboard', 'exportToSvg', 'showIn']) {
+  for (const deferred of ['selectModules', 'presetConfiguration', 'axisOrderingMode', 'filter', 'configureStyle', 'spacing', 'changeFont', 'bookmark', 'pin', 'releaseMemory', 'selfTest', 'copyToClipboard', 'exportToSvg', 'showIn']) {
     assert.ok(!ids.includes(deferred), `"${deferred}" must not appear (deferred to a later phase)`);
   }
+});
+
+// ---------------------------------------------------------------------------------
+// Show/Hide submenu (phase U5)
+// ---------------------------------------------------------------------------------
+
+test('buildChartContextMenu: Show/Hide submenu lists every toggle, checked state mirrors displayFlags, and toggling one calls toggleDisplayFlag with that key', () => {
+  const actions = fakeActions();
+  const flags = { ...DEFAULT_DISPLAY_FLAGS, showEventNumbers: false };
+  const entries = buildChartContextMenu({ hits: [], resolveDependencyLabel: () => null, currentTimelineMode: TimelineMode.SIMULATION_TIME, actions, displayFlags: flags });
+  const sub = submenuOf(entries, 'showHide');
+  assert.ok(sub.length >= 24, 'expected ~25 Show/Hide toggles');
+
+  const eventNumbersEntry = findEntry(sub, 'flag-showEventNumbers')! as { checked: boolean; onSelect: () => void };
+  assert.equal(eventNumbersEntry.checked, false);
+  eventNumbersEntry.onSelect();
+  assert.deepEqual(actions.calls.toggleDisplayFlag, ['showEventNumbers']);
+
+  const arrowHeadsEntry = findEntry(sub, 'flag-showArrowHeads')! as { checked: boolean };
+  assert.equal(arrowHeadsEntry.checked, true);
 });

@@ -56,6 +56,19 @@ test('AUTO spacing spreads axes evenly across the viewport height, never tighter
   assert.ok(few.spacing > 15, `plenty of room -> spacing spreads out: ${few.spacing}`);
 });
 
+test('includeEmptyAxes=true (Show Empty Axes toggle) adds every module-tree id, even ones never seen in fetched data; default (false) does not', () => {
+  const tree = module_(1, 'Net', true, [module_(2, 'Net.node[0]', false), module_(3, 'Net.node[1]', false)]);
+  const withoutEmpty = deriveAxes(new Set([1]), tree, 600);
+  assert.strictEqual(withoutEmpty.axes.length, 1);
+
+  const withEmpty = deriveAxes(new Set([1]), tree, 600, true);
+  assert.strictEqual(withEmpty.axes.length, 3);
+  assert.deepStrictEqual(
+    withEmpty.axes.map((a) => a.moduleId),
+    [1, 2, 3],
+  );
+});
+
 test('an empty known-module set produces an empty axis list with zero total height', () => {
   const layout = deriveAxes(new Set(), null, 600);
   assert.deepStrictEqual(layout.axes, []);

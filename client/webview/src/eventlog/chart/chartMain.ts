@@ -25,12 +25,14 @@ import { renderSummaryStrip } from '../common/summary';
 import { readPalette, watchThemeChange, type EventLogPalette } from '../common/theme';
 import { showContextMenu } from '../common/contextMenu';
 import { DEFAULT_FIND_TEXT_STATE, openFindTextDialog, openGotoEventDialog, openGotoSimTimeDialog, type FindTextState } from '../common/dialogs';
-import { deriveAxes, maxVerticalScroll, type AxesLayout } from './axes';
+import { deriveAxes, findModuleNode, maxVerticalScroll, type AxesLayout } from './axes';
+import { calculateAxisHeaders } from './axisHeaders';
 import { buildChartContextMenu, type ChartMenuActions } from './chartContextMenu';
 import { buildSampleTable, pixelToTc, tcToSimTimeApprox, type TcSimSample } from './coords';
-import { buildDrawList, type DrawPrimitive } from './drawList';
+import { mergeDisplayFlags, toggleFlag, type ChartDisplayFlags } from './displayFlags';
+import { buildDrawList, type DrawPrimitive, type InfoPanelText } from './drawList';
 import { calculateTicks, formatTickLabel } from './ticks';
-import { createCanvasStack, type CanvasStackHandle } from './canvasStack';
+import { ANTIALIAS_TURN_OFF_AT_MSEC, ANTIALIAS_TURN_ON_AT_MSEC, createCanvasStack, type CanvasStackHandle } from './canvasStack';
 import { hitTest, pickDoubleClickTarget, pickPrimary, pickPrimaryGroup, type HitObject } from './hitTest';
 import { attachInteractions } from './interactions';
 import { buildDependencyLabel, buildTooltipHtml, findNeighborEvents, type LabelProviderContext, type ResolvedHit } from './labelProvider';
@@ -74,6 +76,8 @@ declare function acquireVsCodeApi(): VsCodeApi;
 
 interface PersistedChartState {
   timelineMode?: string;
+  /** Phase U5 -- the ~25 Show/Hide toggles (`displayFlags.ts`), persisted both locally (`vscode.setState`, survives a webview reload) AND host-side (`stateChanged`/`persistedState`, survives a full window reload -- see `sequenceChartEditor.ts`'s per-uri `workspaceState` blob). Partial (not all 25 keys) so an older/newer persisted blob still round-trips via `mergeDisplayFlags()`. */
+  displayFlags?: Partial<ChartDisplayFlags>;
 }
 
 const vscode = acquireVsCodeApi();
@@ -97,8 +101,16 @@ let hasInitializedViewport = false;
 let lastPrimitives: DrawPrimitive[] = [];
 /** Phase U4 selection state (events/dependencies/methodCalls/axes/timelineCoords + focus) -- see `selection.ts`. */
 let selection: ChartSelectionState = EMPTY_CHART_SELECTION;
-/** Tab toggle (port of `SequenceChart.java`'s `setShowTimeDifferences`) -- state only; the rendering it would affect is phase U5's transmission-duration/time-difference decorations. */
-let showTimeDifferences = false;
+/** Phase U5 -- the ~25 Show/Hide toggles (`displayFlags.ts`), including `showTimeDifferences` (Tab toggle, port of `SequenceChart.java`'s `setShowTimeDifferences`). */
+let displayFlags: ChartDisplayFlags = mergeDisplayFlags(state.displayFlags);
+/**
+ * Antialias auto-toggle state (port of `SequenceChart.java`'s `drawWithAntialias`
+ * hysteresis, `SequenceChart.java:3466-3470`) -- see `canvasStack.ts`'s
+ * `CanvasStackHandle.render()` doc for the honest mapping onto what this canvas can
+ * actually cheapen (`skipLabelsForPerf` is the real lever; `antialiasEnabled` is still
+ * threaded through + surfaced in the status strip).
+ */
+let antialiasEnabled = true;
 /** Last "Find Text" params, for "Find Next" (F3-equivalent, wired to the `omnetpp.eventlog.findNext` command + the context menu's "Find Next" item) to repeat without re-prompting. */
 let findTextState: FindTextState = DEFAULT_FIND_TEXT_STATE;
 /** Anchor row of the last successful find, so "Find Next" continues from there instead of restarting at the beginning/end. `null` before any search (or after the file changes underneath it). */
@@ -109,6 +121,25 @@ const labelProviderCtx: LabelProviderContext = {
     return moduleTree;
   },
 };
+
+/**
+ * Persists `state` both locally (`vscode.setState` -- survives a webview reload/hide,
+ * e.g. tab switch) and host-side (`stateChanged` -- survives a full window reload; see
+ * `sequenceChartEditor.ts`'s per-uri `workspaceState` blob, mirroring `eventLogTableView.
+ * ts`'s `TABLE_STATE_KEY` pattern). Call after any mutation to `state`.
+ */
+function persistState(): void {
+  vscode.setState(state);
+  vscode.postMessage({ type: 'stateChanged', state });
+}
+
+/** Phase U5 -- flips one Show/Hide toggle (Show/Hide submenu item, or the Tab key for `showTimeDifferences`), persists, and re-renders. */
+function setDisplayFlags(next: ChartDisplayFlags): void {
+  displayFlags = next;
+  state = { ...state, displayFlags };
+  persistState();
+  scheduleRender();
+}
 
 const TIMELINE_MODE_OPTIONS = [
   { value: TimelineMode.SIMULATION_TIME, label: 'Simulation Time' },
@@ -195,9 +226,17 @@ function renderFrame(): void {
   );
   if (model) applyModel(model);
 
-  const axesLayout: AxesLayout = deriveAxes(knownModuleIds, moduleTree, contentHeight(viewport));
+  const axesLayout: AxesLayout = deriveAxes(knownModuleIds, moduleTree, contentHeight(viewport), displayFlags.showEmptyAxes);
   const lastSimTime = summary.lastSimulationTime !== null ? Number(summary.lastSimulationTime) : 0;
   const tickResult = calculateTicks(currentTimelineMode, viewport.leftTc, range.rightTc, viewport.pixelsPerTc, lastSimTime, simTimeAt);
+  const axisHeaderRoot = displayFlags.showAxisHeaders
+    ? calculateAxisHeaders(
+        axesLayout.axes.map((a) => a.moduleId),
+        (moduleId) => findModuleNode(moduleId, moduleTree)?.fullName ?? `Module #${moduleId}`,
+      )
+    : null;
+
+  const t0 = performance.now();
   const primitives = buildDrawList({
     timelineMode: currentTimelineMode,
     viewport,
@@ -208,11 +247,37 @@ function renderFrame(): void {
     ticks: tickResult.ticks,
     theme: palette,
     selectedEventNumbers: selection.events,
+    displayFlags,
+    axisHeaderRoot,
+    infoPanelText: computeInfoPanelText(),
+    skipLabelsForPerf: !antialiasEnabled,
   });
   lastPrimitives = primitives;
-  canvasStack.render(primitives, true);
+  canvasStack.render(primitives, antialiasEnabled);
+  const elapsedMs = performance.now() - t0;
+  // Antialias auto-toggle hysteresis -- port of SequenceChart.java's drawWithAntialias
+  // state machine (see canvasStack.ts's ANTIALIAS_* constants + CanvasStackHandle.render()'s doc).
+  if (antialiasEnabled && elapsedMs > ANTIALIAS_TURN_OFF_AT_MSEC) antialiasEnabled = false;
+  else if (!antialiasEnabled && elapsedMs < ANTIALIAS_TURN_ON_AT_MSEC) antialiasEnabled = true;
   renderStatus();
   updateHScrollbar();
+}
+
+/** Phase U5 -- `showPositionAndRange`/`showEventLogInfo` panel text (`drawList.ts`'s `InfoPanelText`). Port of `drawPositionAndRange()`/`drawEventLogInfo()` (`SequenceChart.java:3338-3403`), approximated from `LogSummary` + the currently-loaded viewport model rather than the live parse-progress counters Java's second `eventLogInfo` line reads (`getNumParsedEvents()`/`FileReader.getNumReadLines/Bytes()` have no protocol exposure yet) -- documented simplification. */
+function computeInfoPanelText(): InfoPanelText | undefined {
+  if (!summary || summary.isEmpty) return undefined;
+  const range = visibleTcRange(viewport);
+  const visible = (lastModel?.events ?? []).filter((e) => e.tcBegin >= viewport.leftTc && e.tcBegin <= range.rightTc);
+  const startEventNumber = visible.length > 0 ? Math.min(...visible.map((e) => e.eventNumber)) : summary.firstEventNumber;
+  const endEventNumber = visible.length > 0 ? Math.max(...visible.map((e) => e.eventNumber)) : startEventNumber;
+  const leftSim = simTimeAt(viewport.leftTc);
+  const rightSim = simTimeAt(range.rightTc);
+  const positionAndRange: [string, string] = [`Position: #${startEventNumber}, ${leftSim !== null ? formatTickLabel(leftSim) : '?'}`, `Range: #${endEventNumber - startEventNumber + 1}, ${leftSim !== null && rightSim !== null ? formatTickLabel(rightSim - leftSim) : '?'}`];
+  const eventLogInfo: [string, string] = [
+    `File: ${summary.fileSize} bytes, ~${summary.approximateNumberOfEvents} events (#${summary.firstEventNumber} .. #${summary.lastEventNumber}), ${summary.lastSimulationTime ?? '0'} s`,
+    `Coordinate system version: ${summary.coordinateSystemVersion}${summary.filtered ? ' (filtered)' : ''}`,
+  ];
+  return { positionAndRange, eventLogInfo };
 }
 
 function renderStatus(): void {
@@ -225,7 +290,7 @@ function renderStatus(): void {
     const span = document.createElement('span');
     const leftLabel = leftSim !== null ? formatTickLabel(leftSim) : '?';
     const rightLabel = rightSim !== null ? formatTickLabel(rightSim) : '?';
-    span.textContent = `View: ${leftLabel} – ${rightLabel}  (${viewport.pixelsPerTc.toPrecision(3)} px/tc)${viewport.followEnd ? '  •  following end' : ''}`;
+    span.textContent = `View: ${leftLabel} – ${rightLabel}  (${viewport.pixelsPerTc.toPrecision(3)} px/tc)${viewport.followEnd ? '  •  following end' : ''}${antialiasEnabled ? '' : '  •  perf: reduced detail'}`;
     statusEl.appendChild(span);
   }
 }
@@ -328,7 +393,7 @@ async function relocateAndCenter(eventNumber: number, center = true): Promise<vo
 
 async function applyTimelineMode(mode: string, isInitial: boolean): Promise<void> {
   state = { ...state, timelineMode: mode };
-  vscode.setState(state);
+  persistState();
   toolbar.setButtonState('refresh', { disabled: true });
   try {
     let anchorEventNumber: number | null = null;
@@ -507,7 +572,7 @@ function repeatFind(): void {
 
 /** Vertically scrolls (only) so `moduleId`'s axis is centered in the content area -- "Center" on an axis, and the vertical half of "Center"/"Select Modules" navigation on an event (see `centerOnEvent` below). No-op if the module has no axis yet. */
 function centerOnAxis(moduleId: number): void {
-  const axesLayout = deriveAxes(knownModuleIds, moduleTree, contentHeight(viewport));
+  const axesLayout = deriveAxes(knownModuleIds, moduleTree, contentHeight(viewport), displayFlags.showEmptyAxes);
   const axis = axesLayout.axes.find((a) => a.moduleId === moduleId);
   if (!axis) return;
   viewport = scrollVerticalTo(viewport, axis.y - contentHeight(viewport) / 2, maxVerticalScroll(axesLayout, contentHeight(viewport)));
@@ -629,6 +694,7 @@ function openChartContextMenu(clientX: number, clientY: number, hits: HitObject[
     openFindTextDialog: showFindTextDialog,
     findNext: repeatFind,
     refresh,
+    toggleDisplayFlag: (key) => setDisplayFlags(toggleFlag(displayFlags, key)),
   };
   const entries = buildChartContextMenu({
     hits,
@@ -638,6 +704,7 @@ function openChartContextMenu(clientX: number, clientY: number, hits: HitObject[
     },
     currentTimelineMode,
     actions,
+    displayFlags,
   });
   showContextMenu(clientX, clientY, entries);
 }
@@ -728,7 +795,7 @@ attachInteractions(canvasContainer, {
     viewport = v;
     toolbar.setButtonState('followEnd', { toggled: v.followEnd });
   },
-  getAxesLayout: () => deriveAxes(knownModuleIds, moduleTree, contentHeight(viewport)),
+  getAxesLayout: () => deriveAxes(knownModuleIds, moduleTree, contentHeight(viewport), displayFlags.showEmptyAxes),
   getBeginTc: () => beginTc,
   getEndTc: () => endTc,
   onChanged: () => scheduleRender(),
@@ -744,9 +811,7 @@ attachInteractions(canvasContainer, {
     scheduleRender();
   },
   onRefresh: refresh,
-  onToggleTimeDifferences: () => {
-    showTimeDifferences = !showTimeDifferences; // state only -- see this flag's own declaration comment
-  },
+  onToggleTimeDifferences: () => setDisplayFlags(toggleFlag(displayFlags, 'showTimeDifferences')),
   onDeleteExclude: () => {
     // STUB (phase U7 owns the Filter UI this needs -- "Del-exclude shortcut" is
     // explicitly one of U7's own listed deliverables, not this phase's).
@@ -790,6 +855,7 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
       if (message.persistedState && typeof message.persistedState === 'object') {
         state = { ...state, ...(message.persistedState as PersistedChartState) };
         toolbar.setDropdownValue('timelineMode', state.timelineMode ?? TimelineMode.SIMULATION_TIME);
+        displayFlags = mergeDisplayFlags(state.displayFlags);
       }
       renderFrame();
       if (fileUri) {

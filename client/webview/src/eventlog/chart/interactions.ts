@@ -21,7 +21,8 @@
  *    ArrowUp/ArrowDown -> vertical scroll by one axis-spacing step; `+`/`-`/`*` ->
  *    zoomIn/zoomOut/defaultZoom (viewport-center-anchored, matching Java exactly);
  *    Esc -> clear selection; F5 -> refresh; Tab -> toggle "show time differences"
- *    (state only — rendering is U5); Delete -> exclude selected events (STUB, U7 owns
+ *    (phase U5: renders a dashed polyline + simtime-delta labels between selected
+ *    events, `drawList.ts`'s `showTimeDifferences` gate); Delete -> exclude selected events (STUB, U7 owns
  *    the Filter UI this needs); plain ArrowLeft/ArrowRight -> move focus to the
  *    previous/next event; Ctrl/Cmd+ArrowLeft/ArrowRight -> go to cause/consequence
  *    event; Shift+ArrowLeft/ArrowRight -> go to the previous/next event on the SAME

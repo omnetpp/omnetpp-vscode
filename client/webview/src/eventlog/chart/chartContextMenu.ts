@@ -26,16 +26,21 @@
  *  - Static tail: Timeline Mode (4 real radios + a disabled "Custom nonlinear..."),
  *    Zoom (Default Zoom/Zoom to Fit/Zoom In/Zoom Out — all wired), Find Text.../Find
  *    Next, Go to (Event.../Simulation Time.../Begin/End), Refresh.
+ *  - Phase U5 ADDS: a "Show/Hide" submenu with all ~25 `displayFlags.ts` toggles
+ *    (`TOGGLE_ORDER`, each a checkable item — no disabled placeholders here, every one
+ *    is fully wired into `drawList.ts`).
  *  - EXPLICITLY OMITTED (not even as disabled placeholders — genuinely later-phase
  *    ownership per the port plan's phase table, listed in the phase report rather
  *    than cluttering the menu): Select Modules..., Preset Configuration, Axis
- *    Ordering Mode, Filter (dropdown), Configure Style, Spacing, Show/Hide (~25
- *    toggles), Change Font..., Toggle bookmark, Pin, Release Memory, Self Test, Copy
- *    to Clipboard, Export to SVG..., Show In.
+ *    Ordering Mode, Filter (dropdown), Configure Style, Spacing, Change Font..., Toggle
+ *    bookmark, Pin, Release Memory, Self Test, Copy to Clipboard, Export to SVG...,
+ *    Show In.
  */
 
 import { TimelineMode } from '@omnetpp/shared/elog-protocol';
 import type { MenuEntry } from '../common/contextMenu';
+import type { ChartDisplayFlags } from './displayFlags';
+import { TOGGLE_ORDER } from './displayFlags';
 import { formatEventLabel } from './labelProvider';
 import type { HitObject } from './hitTest';
 
@@ -58,6 +63,8 @@ export interface ChartMenuActions {
   openFindTextDialog(): void;
   findNext(): void;
   refresh(): void;
+  /** Phase U5 — flips one `ChartDisplayFlags` key (`displayFlags.ts`'s `toggleFlag()`); the caller re-renders and persists. */
+  toggleDisplayFlag(key: keyof ChartDisplayFlags): void;
 }
 
 export interface ChartMenuBuildParams {
@@ -67,6 +74,8 @@ export interface ChartMenuBuildParams {
   resolveDependencyLabel(hit: Extract<HitObject, { kind: 'dependency' }>): string | null;
   currentTimelineMode: TimelineMode;
   actions: ChartMenuActions;
+  /** Phase U5 — current toggle state, for the Show/Hide submenu's checkmarks. */
+  displayFlags: ChartDisplayFlags;
 }
 
 const TIMELINE_MODE_LABELS: [TimelineMode, string][] = [
@@ -113,8 +122,17 @@ function axisSection(hit: Extract<HitObject, { kind: 'axis' }>, actions: ChartMe
   };
 }
 
+/** Phase U5 — the Show/Hide submenu, one checkable item per `TOGGLE_ORDER` entry. */
+function showHideSection(displayFlags: ChartDisplayFlags, actions: ChartMenuActions): MenuEntry {
+  return {
+    id: 'showHide',
+    label: 'Show/Hide',
+    submenu: TOGGLE_ORDER.map(([key, label]): MenuEntry => ({ id: `flag-${key}`, label, checked: displayFlags[key], onSelect: () => actions.toggleDisplayFlag(key) })),
+  };
+}
+
 export function buildChartContextMenu(params: ChartMenuBuildParams): MenuEntry[] {
-  const { hits, resolveDependencyLabel, currentTimelineMode, actions } = params;
+  const { hits, resolveDependencyLabel, currentTimelineMode, actions, displayFlags } = params;
   const entries: MenuEntry[] = [];
 
   const events = hits.filter((h): h is Extract<HitObject, { kind: 'event' }> => h.kind === 'event');
@@ -138,6 +156,8 @@ export function buildChartContextMenu(params: ChartMenuBuildParams): MenuEntry[]
       { id: 'tm-custom', label: 'Custom nonlinear...', disabled: true },
     ],
   });
+
+  entries.push(showHideSection(displayFlags, actions));
 
   entries.push({
     id: 'zoom',

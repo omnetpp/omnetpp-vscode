@@ -301,6 +301,17 @@ export interface TimelineEvent {
   isSelfMessageProcessingEvent: boolean;
 }
 
+/**
+ * Port of `FilteredMessageDependency.Kind` (`SENDS`/`REUSES`/`MIXED`), carried on the
+ * wire as lowercase strings rather than reusing `FilteredMessageDependencyKind`'s
+ * numeric consts (JSON-pure per this file's header) -- only meaningful when
+ * `RenderDependency.kind === 'filtered'`. Drives the filtered-arrow's line style/color
+ * per `SequenceChartStyleProvider.getMessageDependencyLine{Style,Dash}`/
+ * `getMessageDependencyColor` (verified by reading the source): `sends` = solid,
+ * `reuses` = dotted, `mixed` = dashed.
+ */
+export type FilteredDependencyKind = 'sends' | 'reuses' | 'mixed';
+
 /** A message-send/reuse/filtered-gap dependency arrow. */
 export interface RenderDependency {
   kind: 'send' | 'reuse' | 'filtered';
@@ -316,6 +327,43 @@ export interface RenderDependency {
   consequenceSimulationTime: string | null;
   messageName: string | null;
   messageClassName: string | null;
+  /** Only present when `kind === 'filtered'` -- see `FilteredDependencyKind`'s own doc. */
+  filteredKind?: FilteredDependencyKind;
+  /**
+   * `MessageDescriptionEntry.messageId` (or `null` if unavailable) -- ADDITIVE (phase
+   * U5): Java's self-message half-ellipse height formula folds this in
+   * (`eventNumberDelta = messageId + consequenceEventNumber - causeEventNumber`,
+   * `SequenceChart.java:4603`) so that repeated same-event-pair self-messages (a common
+   * pattern: a periodic self-timer rescheduling itself) don't all draw at the identical
+   * ellipse height. `arrowGeometry.ts` falls back to `messageId = 0` when absent.
+   */
+  messageId?: number | null;
+  /**
+   * ADDITIVE (phase U5), populated only for `kind === 'send'` when `getEndSendEntry()`
+   * reports a nonzero `getRemainingDuration()` (Java's `remainingDuration != null`
+   * gate for `showTransmissionDurations`, `SequenceChart.java:4464-4469`): the
+   * transmission's remaining/total duration expressed as a **fraction of this
+   * dependency's own cause-to-consequence simulation-time span**
+   * (`transmissionDuration / (consequenceSimulationTime - causeSimulationTime)`,
+   * clamped to `[0, 1]`). DOCUMENTED SIMPLIFICATION vs Java: Java re-maps the absolute
+   * transmission/remaining-duration `BigDecimal`s through
+   * `getTimelineCoordinateForSimulationTimeAndEventInModule()` (a per-module,
+   * non-affine tc mapping) to get exact parallelogram corners; this port instead scales
+   * the arrow's own already-computed pixel span by this fraction (arrowGeometry.ts's
+   * `computeTransmissionParallelogram()`), which is exact for `TimelineMode.
+   * SIMULATION_TIME`/`STEP` (tc is affine in simtime within one dependency's short
+   * span) and a close visual approximation for `EVENT_NUMBER`/`NONLINEAR` modes.
+   * `null`/absent = no transmission-duration decoration for this dependency (filtered
+   * dependencies never get one, matching Java's `!isFilteredMessageDependency` gate).
+   */
+  transmissionDurationFraction?: number | null;
+  /**
+   * Port of `EndSendEntry.getIsDeliveredImmediately()` -- Java's `isReceptionStart`
+   * flag (`SequenceChart.java:4471`), which flips which end of the parallelogram is the
+   * "instantaneous" (zero-width) side. Only meaningful alongside
+   * `transmissionDurationFraction`.
+   */
+  isReceptionStart?: boolean;
 }
 
 /** A `ComponentMethodBeginEntry`-derived method-call arrow. */

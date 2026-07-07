@@ -127,26 +127,49 @@ test('hitTest: method-call arrow hit reports a methodCall hit', () => {
   assert.deepEqual(hits, [{ kind: 'methodCall', eventNumber: 9, sourceModuleId: 1, targetModuleId: 2, tc: 42 }]);
 });
 
-test('hitTest: hairpin hit on the left vertical segment', () => {
+// ---------------------------------------------------------------------------------
+// ellipseArc (phase U5 -- self-message half/quarter ellipse, replaces the pre-U5
+// "hairpin" placeholder) -- real halfEllipseContainsPoint hits.
+// ---------------------------------------------------------------------------------
+
+test('hitTest: ellipseArc hit on the ring (full half ellipse, quarter=-1)', () => {
   const ref = depRef({ causeEventNumber: 5, consequenceEventNumber: 5 });
-  const primitives: DrawPrimitive[] = [{ kind: 'hairpin', x1: 20, x2: 40, y: 100, height: 10, color: '#000', ref }];
-  const hits = hitTest({ primitives, px: 20, py: 95, pointerTc: null });
+  const primitives: DrawPrimitive[] = [{ kind: 'ellipseArc', x1: 0, x2: 100, y: 100, height: 20, quarter: -1, color: '#000', ref }];
+  // top-center of the ellipse ring
+  const hits = hitTest({ primitives, px: 50, py: 80, pointerTc: null });
   assert.equal(hits.length, 1);
   assert.equal(hits[0].kind, 'dependency');
 });
 
-test('hitTest: hairpin hit on the right vertical segment', () => {
+test('hitTest: ellipseArc miss at the ellipse center (ring test, not filled)', () => {
   const ref = depRef();
-  const primitives: DrawPrimitive[] = [{ kind: 'hairpin', x1: 20, x2: 40, y: 100, height: 10, color: '#000', ref }];
-  const hits = hitTest({ primitives, px: 40, py: 95, pointerTc: null });
-  assert.equal(hits.length, 1);
+  const primitives: DrawPrimitive[] = [{ kind: 'ellipseArc', x1: 0, x2: 100, y: 100, height: 20, quarter: -1, color: '#000', ref }];
+  const hits = hitTest({ primitives, px: 50, py: 100, pointerTc: null });
+  assert.equal(hits.length, 0);
 });
 
-test('hitTest: hairpin miss on the horizontal top segment (per design: only the two vertical segments are clickable)', () => {
-  const ref = depRef();
-  const primitives: DrawPrimitive[] = [{ kind: 'hairpin', x1: 20, x2: 40, y: 100, height: 10, color: '#000', ref }];
-  const hits = hitTest({ primitives, px: 30, py: 90, pointerTc: null });
+test('hitTest: ellipseArc with no ref is never hit-testable (defensive)', () => {
+  const primitives: DrawPrimitive[] = [{ kind: 'ellipseArc', x1: 0, x2: 100, y: 100, height: 20, quarter: -1, color: '#000' }];
+  const hits = hitTest({ primitives, px: 50, py: 80, pointerTc: null });
   assert.equal(hits.length, 0);
+});
+
+// ---------------------------------------------------------------------------------
+// Split (offscreen-endpoint) arrows -- rendered as ordinary 'arrow' primitives sharing
+// the same ref, so hit-testing needs no separate code path (see hitTest.ts's header).
+// ---------------------------------------------------------------------------------
+
+test('hitTest: split arrow -- a hit on EITHER segment (dashed offscreen tail or solid real portion) resolves to the same dependency, collapsed to one hit', () => {
+  const ref = depRef({ causeEventNumber: 4, consequenceEventNumber: 5 });
+  const primitives: DrawPrimitive[] = [
+    { kind: 'arrow', arrowKind: 'send', x1: 0, y1: 0, x2: 50, y2: 0, color: '#000', dash: [1, 2], ref },
+    { kind: 'arrow', arrowKind: 'send', x1: 50, y1: 0, x2: 100, y2: 0, color: '#000', ref },
+  ];
+  const onDashed = hitTest({ primitives, px: 20, py: 0, pointerTc: null });
+  const onSolid = hitTest({ primitives, px: 80, py: 0, pointerTc: null });
+  assert.equal(onDashed.length, 1);
+  assert.equal(onSolid.length, 1);
+  assert.deepEqual(onDashed[0], onSolid[0]);
 });
 
 test('hitTest: axis line hit within its band', () => {

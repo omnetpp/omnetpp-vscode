@@ -42,7 +42,7 @@ export {
 export { EventBase, Event } from './event';
 export { Index, Snapshot } from './chunks';
 export { EventLogEntryCache } from './eventLogEntryCache';
-export { MessageDependencyBase, MessageSendDependency, MessageReuseDependency, FilteredMessageDependency } from './messageDependency';
+export { MessageDependencyBase, MessageSendDependency, MessageReuseDependency, FilteredMessageDependency, FilteredMessageDependencyKind } from './messageDependency';
 
 export { EventLogBase, EventLogIndex } from './eventLogIndex';
 export { EventLog, type EventLogOptions } from './eventLog';

@@ -22,13 +22,15 @@
  * that level never applies and is omitted. The remaining cascade, exactly as ported:
  * event > message dependency > component method call > axis > timestamp.
  *
- * Hairpin (self-message placeholder) hit-testing: per this phase's own design note,
- * NOT the ported `halfEllipseContainsPoint` (the placeholder isn't an ellipse — it's a
- * 3-segment vertical/horizontal staple, `drawList.ts`'s `'hairpin'` primitive) — hit
- * tested as its two VERTICAL segments only (the horizontal top is not clickable),
- * exactly as this phase's brief specifies. `halfEllipseContainsPoint` is still ported
- * below (faithfully, unused for now) so U5 can wire it in directly once hairpins become
- * real half-ellipses, without re-deriving the formula from Java a second time.
+ * Phase U5: self-message arrows are now real half/quarter ellipses (`arrowGeometry.ts`'s
+ * `computeSelfArrowGeometry()`, `drawList.ts`'s `'ellipseArc'` primitive) instead of the
+ * pre-U5 vertical/horizontal "hairpin" placeholder — `halfEllipseContainsPoint` below
+ * (previously ported but unused) is now live, reused as-is (no reason to re-derive it;
+ * `arrowGeometry.ts` computes ellipse parameters in EXACTLY the `(quarter, x1, x2, y,
+ * height)` shape this function already expected). Split/offscreen arrows (both the
+ * self-ellipse quarter-arc case and the regular cross-module case) hit-test via their
+ * `LineSegment`s, which `drawList.ts` emits as ordinary `'arrow'` primitives sharing the
+ * dependency's ref — no separate hit-test code path needed for "split" at all.
  */
 
 import type { ArrowRef, DrawPrimitive } from './drawList';
@@ -183,9 +185,10 @@ export function hitTest(params: HitTestParams): HitObject[] {
       case 'arrow':
         if (p.ref && lineContainsPoint(p.x1, p.y1, p.x2, p.y2, px, py)) push(arrowRefToHit(p.ref));
         break;
-      case 'hairpin':
-        // per this file's header: two vertical segments only, not the ellipse formula.
-        if (p.ref && (lineContainsPoint(p.x1, p.y, p.x1, p.y - p.height, px, py) || lineContainsPoint(p.x2, p.y, p.x2, p.y - p.height, px, py))) push(arrowRefToHit(p.ref));
+      case 'ellipseArc':
+        // Phase U5: self-message half/quarter ellipse -- the real `halfEllipseContainsPoint()` port
+        // (this file's header used to note it was ported-but-unused; it is now live).
+        if (p.ref && halfEllipseContainsPoint(p.quarter, p.x1, p.x2, p.y, p.height, px, py)) push(arrowRefToHit(p.ref));
         break;
       case 'axisLine':
         if (py >= p.y - HIT_TOLERANCE && py <= p.y + p.lineHeight + HIT_TOLERANCE) push({ kind: 'axis', moduleId: p.moduleId });

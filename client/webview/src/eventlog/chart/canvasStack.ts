@@ -5,13 +5,15 @@
  *
  * Two `<canvas>` elements, stacked via CSS (`position:absolute`, same rect), each
  * scaled for `devicePixelRatio` so strokes stay crisp on HiDPI displays:
- *  - `content`: axis lines, event/self-event marks, arrows+arrowheads, hairpins,
- *    method-call arrows/labels, dense-column indicator lines (Java's "cachable
- *    layer" — the bulk of the drawing, redrawn least often in Java's design).
- *  - `overlay`: gutter backgrounds, ruler ticks + tick labels, axis labels (pinned to
- *    the left gutter) — everything Java's "noncachable layer" redraws every frame
- *    regardless of scroll (selection/highlight/tooltip decorations are U4, not drawn
- *    here yet).
+ *  - `content`: axis lines, event/self-event marks, arrows+arrowheads, self-message
+ *    ellipse arcs, transmission-duration parallelograms, filtered zigzag signs,
+ *    zero-simtime region bands, method-call arrows/labels, dense-column indicator
+ *    lines (Java's "cachable layer" — the bulk of the drawing, redrawn least often in
+ *    Java's design).
+ *  - `overlay`: gutter backgrounds, ruler ticks + tick labels, axis labels/headers
+ *    (pinned to the left gutter), info panels, selection/time-difference decorations
+ *    — everything Java's "noncachable layer" redraws every frame regardless of
+ *    scroll.
  *
  * SCOPE NOTE (documented simplification, flagged in this phase's report): `TileCache`
  * below implements the bookkeeping half of Java's `CachingCanvas` tiling scheme
@@ -32,6 +34,12 @@ import type { DrawPrimitive } from './drawList';
 
 export const TILE_WIDTH_PX = 1024;
 export const MAX_TILES = 32;
+/** Left-gutter axis-header box width per level (mirrors `drawList.ts`'s `HEADER_LEVEL_WIDTH`, minus a small margin). */
+export const HEADER_BOX_WIDTH = 9;
+
+/** Port of `SequenceChart.java`'s `ANTIALIAS_TURN_ON_AT_MSEC`/`ANTIALIAS_TURN_OFF_AT_MSEC` (`SequenceChart.java:160-161`) — `chartMain.ts` runs the same hysteresis state machine over its own measured frame time (see `CanvasStackHandle.render()`'s doc for the honest mapping onto what this canvas can actually cheapen). */
+export const ANTIALIAS_TURN_ON_AT_MSEC = 100;
+export const ANTIALIAS_TURN_OFF_AT_MSEC = 300;
 
 // ---------------------------------------------------------------------------------
 // TileCache -- pure bookkeeping (no canvas/DOM dependency), unit-testable
@@ -121,12 +129,34 @@ export function viewportGeneration(parts: { pixelsPerTc: number; vscroll: number
 
 export interface CanvasStackHandle {
   resize(cssWidth: number, cssHeight: number): void;
-  /** Draws `primitives` (from `drawList.ts`) onto the two canvases, clearing first. `antialiasing` toggles `imageSmoothingEnabled` (best-effort -- Canvas2D has no direct vector-stroke AA switch; the "auto" 100/300ms perf-triggered toggle itself is U5, this is just the plumbing). */
+  /**
+   * Draws `primitives` (from `drawList.ts`) onto the two canvases, clearing first.
+   * `antialiasing` toggles `imageSmoothingEnabled`.
+   *
+   * ANTIALIAS AUTO-TOGGLE MAPPING (phase U5, port of `SequenceChart.java`'s
+   * `ANTIALIAS_TURN_ON_AT_MSEC=100`/`ANTIALIAS_TURN_OFF_AT_MSEC=300` auto-toggle,
+   * `SequenceChart.java:3466-3470`) -- HONEST NOTE on what this actually buys, since
+   * Canvas2D has no per-shape vector-stroke AA switch the way SWT's `Graphics` does:
+   * `imageSmoothingEnabled` only affects `drawImage()` (bitmap resampling); it has
+   * **no effect** on `stroke()`/`fill()` path rendering, which browsers always
+   * antialias. So flipping this flag alone would be a no-op for a canvas frame made
+   * entirely of vector primitives (this one). The actual perf lever `chartMain.ts`
+   * pulls when a frame's `buildDrawList()`+`render()` time crosses the threshold is
+   * `drawList.ts`'s `skipLabelsForPerf` (drop the highest-count/cheapest-to-cut
+   * primitives -- text labels -- first, exactly mirroring Java's OWN intent of "when
+   * drawing is slow, draw less detail", just via a different lever since the literal
+   * one Java used doesn't exist on this canvas). `antialiasing` is still threaded
+   * through and toggled by the same measured-frame-time state machine (so a future
+   * bitmap-based decoration, e.g. a cached tile blit once `TileCache` above is wired
+   * into `render()`, has a real switch to flip), and its live state is surfaced in the
+   * status strip for transparency, but on today's all-vector primitive set it is
+   * mostly inert -- documented rather than silently pretended-real.
+   */
   render(primitives: DrawPrimitive[], antialiasing: boolean): void;
   dispose(): void;
 }
 
-const NONCACHEABLE_KINDS = new Set<DrawPrimitive['kind']>(['gutter', 'tick', 'axisLabel', 'label', 'selectionMark']);
+const NONCACHEABLE_KINDS = new Set<DrawPrimitive['kind']>(['gutter', 'tick', 'axisLabel', 'label', 'selectionMark', 'infoPanel', 'timeDifferenceLabel']);
 
 export function createCanvasStack(container: HTMLElement): CanvasStackHandle {
   const content = document.createElement('canvas');
@@ -176,11 +206,105 @@ export function createCanvasStack(container: HTMLElement): CanvasStackHandle {
         break;
       case 'label':
         ctx.fillStyle = p.color;
-        ctx.textAlign = p.align ?? 'left';
-        ctx.textBaseline = 'middle';
         ctx.font = '12px var(--vscode-font-family, sans-serif)';
+        if (p.rotateDeg) {
+          // Method-call names (Java: drawn rotated -90 along the call's left edge, SequenceChart.java:3775-3781).
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate((p.rotateDeg * Math.PI) / 180);
+          ctx.textAlign = p.align ?? 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(p.text, 0, 0);
+          ctx.restore();
+        } else {
+          ctx.textAlign = p.align ?? 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(p.text, p.x, p.y);
+        }
+        break;
+      case 'timeDifferenceLabel':
+        ctx.fillStyle = p.color;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = '11px var(--vscode-font-family, sans-serif)';
         ctx.fillText(p.text, p.x, p.y);
         break;
+      case 'regionBand':
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        break;
+      case 'axisHeaderBox': {
+        ctx.fillStyle = p.color;
+        const w = HEADER_BOX_WIDTH;
+        ctx.fillRect(p.x, p.y0, w, Math.max(1, p.y1 - p.y0));
+        ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(p.x, p.y0, w, Math.max(1, p.y1 - p.y0));
+        if (p.y1 - p.y0 > 20) {
+          ctx.save();
+          ctx.fillStyle = '#000000';
+          ctx.font = '10px var(--vscode-font-family, sans-serif)';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.translate(p.x + w / 2, (p.y0 + p.y1) / 2);
+          ctx.rotate(-Math.PI / 2);
+          ctx.fillText(p.label, 0, 0);
+          ctx.restore();
+        }
+        break;
+      }
+      case 'ellipseArc': {
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([]);
+        const cx = (p.x1 + p.x2) / 2;
+        const rx = Math.abs(p.x2 - p.x1) / 2;
+        const ry = p.height;
+        // Java always draws the TOP half of the ellipse (the "hump" above the axis line, SequenceChart.java:4682); the
+        // quarter param only narrows WHICH portion of that top half is actually stroked (see arrowGeometry.ts's header).
+        const [startAngle, endAngle] = p.quarter === 0 ? [Math.PI, 1.5 * Math.PI] : p.quarter === 1 ? [1.5 * Math.PI, 2 * Math.PI] : [Math.PI, 2 * Math.PI];
+        ctx.beginPath();
+        if (rx > 0) ctx.ellipse(cx, p.y, rx, ry, 0, startAngle, endAngle);
+        else ctx.moveTo(cx, p.y - ry), ctx.lineTo(cx, p.y);
+        ctx.stroke();
+        break;
+      }
+      case 'parallelogram': {
+        ctx.save();
+        ctx.globalAlpha = 0.25;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.moveTo(p.points[0][0], p.points[0][1]);
+        for (let i = 1; i < p.points.length; i++) ctx.lineTo(p.points[i][0], p.points[i][1]);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+        break;
+      }
+      case 'zigzag':
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([]);
+        for (const seg of p.segments) {
+          ctx.beginPath();
+          ctx.moveTo(seg.x1, seg.y1);
+          ctx.lineTo(seg.x2, seg.y2);
+          ctx.stroke();
+        }
+        break;
+      case 'infoPanel': {
+        ctx.fillStyle = p.background;
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = p.color;
+        ctx.font = '11px var(--vscode-font-family, sans-serif)';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'top';
+        for (let i = 0; i < p.lines.length; i++) ctx.fillText(p.lines[i], p.x + p.w - 4, p.y + 3 + i * 15);
+        break;
+      }
       case 'tick':
       case 'eventDensityLine':
         ctx.strokeStyle = p.color;
@@ -222,18 +346,6 @@ export function createCanvasStack(container: HTMLElement): CanvasStackHandle {
         ctx.lineTo(backX - perpX, backY - perpY);
         ctx.closePath();
         ctx.fill();
-        break;
-      }
-      case 'hairpin': {
-        ctx.strokeStyle = p.color;
-        ctx.lineWidth = 1;
-        ctx.setLineDash([]);
-        ctx.beginPath();
-        ctx.moveTo(p.x1, p.y);
-        ctx.lineTo(p.x1, p.y - p.height);
-        ctx.lineTo(p.x2, p.y - p.height);
-        ctx.lineTo(p.x2, p.y);
-        ctx.stroke();
         break;
       }
       case 'selectionMark':

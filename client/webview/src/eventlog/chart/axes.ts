@@ -7,10 +7,13 @@
  * SIMPLIFICATION (documented, matches the plan's own "U8 adds algorithms" note):
  * ordering is plain ascending `moduleId` for now — Java's 3 real ordering algorithms
  * (declaration order / minimize-crossings via the adjacency matrix / manual) are
- * phase U8. An "only show modules with events" filter (Java's empty-axes toggle) is
- * always-on here (there is no "show empty axes" toggle yet) since every axis in this
- * module's output already comes from `knownModuleIds` (ids actually seen in fetched
- * data), never from the full module tree.
+ * phase U8.
+ *
+ * `includeEmptyAxes` (phase U5, port of `showEmptyAxes`, default `false` matching
+ * Java): when `false` (the default), only modules actually seen in fetched viewport
+ * data (`knownModuleIds`) get an axis — a module the log never produced an event for
+ * has no row. When `true`, every module in `moduleTree` (not just ones with events)
+ * additionally gets an axis, exactly like Java's "show empty axes" toggle.
  *
  * Axis vertical layout: port of `SequenceChart.java`'s `AUTO` axis-spacing mode
  * (`calculateAxisSpacing()`/the axis-layout loop, `SequenceChart.java:2334-2337,
@@ -57,15 +60,30 @@ function findModuleName(moduleId: number, tree: ElogModule | null): { label: str
   return node ? { label: node.fullName, compound: node.compound } : null;
 }
 
+/** Flattens every module id in `tree` (all descendants, compound and simple alike) -- used by `deriveAxes()`'s `includeEmptyAxes` option. */
+function allModuleIds(tree: ElogModule | null): number[] {
+  if (tree === null) return [];
+  const ids: number[] = [];
+  const stack: ElogModule[] = [tree];
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    ids.push(node.moduleId);
+    stack.push(...node.children);
+  }
+  return ids;
+}
+
 /**
  * Builds the ordered axis list + vertical layout for `knownModuleIds` (accumulated
  * across fetched viewports -- see renderModelCache.ts). `moduleTree` (may be `null`
  * before `elog/getModuleTree` resolves) supplies names/compound-ness; a module id not
  * yet found in the tree falls back to a synthetic `"Module #<id>"` label so an axis
- * still renders (just unnamed) rather than being dropped.
+ * still renders (just unnamed) rather than being dropped. `includeEmptyAxes` -- see
+ * this file's header.
  */
-export function deriveAxes(knownModuleIds: ReadonlySet<number>, moduleTree: ElogModule | null, contentHeightPx: number): AxesLayout {
-  const ids = [...knownModuleIds].sort((a, b) => a - b);
+export function deriveAxes(knownModuleIds: ReadonlySet<number>, moduleTree: ElogModule | null, contentHeightPx: number, includeEmptyAxes = false): AxesLayout {
+  const idSet = includeEmptyAxes ? new Set([...knownModuleIds, ...allModuleIds(moduleTree)]) : knownModuleIds;
+  const ids = [...idSet].sort((a, b) => a - b);
   const resolved = ids.map((moduleId) => {
     const found = findModuleName(moduleId, moduleTree);
     return {
