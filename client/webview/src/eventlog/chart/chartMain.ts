@@ -99,6 +99,8 @@ import {
   GUTTER_TOP_HEIGHT,
   gotoBeginAt,
   gotoEndAt,
+  MAX_PIXELS_PER_TC,
+  MIN_PIXELS_PER_TC,
   panTo,
   resize as resizeViewport,
   revealAt,
@@ -203,6 +205,8 @@ let sampleTable: TcSimSample[] = [];
 let beginTc: number | null = null;
 let endTc: number | null = null;
 let hasInitializedViewport = false;
+/** The engine's current timeline-coordinate-system origin event (last value reported by `relocateOrigin`/`setTimelineMode`). Anchors the data-driven default zoom (`computeDefaultPixelsPerTc()`), matching Java's `setDefaultPixelPerTimelineUnit()`, which measures the tc span starting at the origin event. */
+let coordinateSystemOriginEventNumber = 0;
 /**
  * Phase U10 -- `omnetpp.eventlog.followEndOnAppend`'s "or first append arrives" clause:
  * set (in the 'init' handler) when this is a genuinely fresh file (no persisted
@@ -217,6 +221,9 @@ let followEndOnOpenPending = false;
 let lastPrimitives: DrawPrimitive[] = [];
 /** Phase U4 selection state (events/dependencies/methodCalls/axes/timelineCoords + focus) -- see `selection.ts`. */
 let selection: ChartSelectionState = EMPTY_CHART_SELECTION;
+/** Phase U11 -- the object(s) currently under the cursor, highlighted "bold red" on hover (Java `highlightedObjects`). `hoverSignature` guards re-renders so a hover that doesn't change the target is a no-op. */
+let hovered: { events: Set<number>; dependencyKeys: Set<string>; axisModuleIds: Set<number> } = { events: new Set(), dependencyKeys: new Set(), axisModuleIds: new Set() };
+let hoverSignature = '';
 /** Phase U5 -- the ~25 Show/Hide toggles (`displayFlags.ts`), including `showTimeDifferences` (Tab toggle, port of `SequenceChart.java`'s `setShowTimeDifferences`). */
 let displayFlags: ChartDisplayFlags = mergeDisplayFlags(state.displayFlags);
 /**
@@ -417,10 +424,37 @@ function persistState(): void {
 
 /** Phase U5 -- flips one Show/Hide toggle (Show/Hide submenu item, or the Tab key for `showTimeDifferences`), persists, and re-renders. */
 function setDisplayFlags(next: ChartDisplayFlags): void {
+  // Toggling "Method Call Arrows" also flips the engine's `separateEventLogEntries` (Java
+  // ties them in `setShowComponentMethodCalls()`), which changes every event's timeline
+  // WIDTH -- so it needs an engine round trip, not just a client repaint.
+  const separateChanged = next.showComponentMethodCalls !== displayFlags.showComponentMethodCalls;
   displayFlags = next;
   state = { ...state, displayFlags };
   persistState();
+  if (separateChanged) void resyncSeparateEntries();
   scheduleRender();
+}
+
+/**
+ * Re-applies the current timeline mode with the current `showComponentMethodCalls` as the
+ * engine's `separateEventLogEntries`, then invalidates the render cache so events refetch
+ * with their new widths. Keeps the SAME origin (so the view neither jumps nor rescales --
+ * only the pill/dot shape of each mark changes); best-effort like the other engine round
+ * trips here.
+ */
+async function resyncSeparateEntries(): Promise<void> {
+  if (!summary || summary.isEmpty) return;
+  try {
+    const scState = await rpc.request<ScState>(ElogMethods.scSetTimelineMode, { timelineMode: currentTimelineMode, separateEventLogEntries: displayFlags.showComponentMethodCalls });
+    coordinateSystemOriginEventNumber = scState.originEventNumber ?? coordinateSystemOriginEventNumber;
+    renderModelCache.bumpGeneration();
+    renderModelCache.invalidateAll();
+    lastModel = null;
+    viewport = { ...viewport, coordinateSystemVersion: scState.coordinateSystemVersion };
+    scheduleRender();
+  } catch {
+    // ignore -- a failed re-sync just leaves the previous (correct-for-old-flag) widths
+  }
 }
 
 const TIMELINE_MODE_OPTIONS = [
@@ -613,6 +647,10 @@ function renderFrame(): void {
     ticks: tickResult.ticks,
     theme: palette,
     selectedEventNumbers: selection.events,
+    selectedDependencyKeys: selection.dependencies,
+    selectedAxisModuleIds: selection.axes,
+    selectedTimelineCoords: [...selection.timelineCoords].map((tc) => ({ tc, simulationTime: String(simTimeAt(tc) ?? 0) })),
+    hovered,
     bookmarkedEventNumbers,
     bookmarkedModuleIds,
     bookmarkedDependencyKeys,
@@ -770,11 +808,66 @@ async function goToBegin(): Promise<void> {
  */
 async function relocateAndCenter(eventNumber: number, center = true): Promise<void> {
   const scState = await rpc.request<ScState>(ElogMethods.scRelocateOrigin, { eventNumber });
+  coordinateSystemOriginEventNumber = scState.originEventNumber ?? eventNumber;
   renderModelCache.bumpGeneration();
   renderModelCache.invalidateAll();
   lastModel = null;
   viewport = { ...viewport, coordinateSystemVersion: scState.coordinateSystemVersion };
   viewport = center ? revealAt(viewport, 0) : gotoBeginAt(viewport, 0);
+}
+
+/**
+ * Port of Java's `setDefaultPixelPerTimelineUnit()` (SequenceChart.java:2997-3033): pick a
+ * horizontal zoom so the origin event plus up to ~10 following events fill the content
+ * width, instead of the fixed `DEFAULT_PIXELS_PER_TC` -- which collapses a whole
+ * small-tc-range log (e.g. simulation-time mode over a sub-millisecond run) onto a single
+ * pixel column that renders as one vertical line, and conversely spreads a huge-range log
+ * far too thin. Measures the tc span from an actual small viewport fetch (so it reflects
+ * the current `separateEventLogEntries`/mode), clamped to the scale limits; falls back to
+ * `DEFAULT_PIXELS_PER_TC` when the span is degenerate (all sampled events share one tc) or
+ * the round trip fails.
+ */
+async function computeDefaultPixelsPerTc(): Promise<number> {
+  if (!summary || summary.isEmpty) return DEFAULT_PIXELS_PER_TC;
+  const cw = contentWidth(viewport);
+  if (cw <= 0) return DEFAULT_PIXELS_PER_TC;
+  const startEventNumber = coordinateSystemOriginEventNumber;
+  const endEventNumber = Math.min(summary.lastEventNumber, startEventNumber + 10);
+  try {
+    const vp = await rpc.request<ViewportModel>(ElogMethods.scGetViewport, {
+      range: { kind: 'event', startEventNumber, endEventNumber },
+      includeDependencies: false,
+      includeMethodCalls: false,
+    });
+    if (vp.events.length < 2) return DEFAULT_PIXELS_PER_TC;
+    let minTc = Infinity;
+    let maxTc = -Infinity;
+    for (const e of vp.events) {
+      if (e.tcBegin < minTc) minTc = e.tcBegin;
+      if (e.tcEnd > maxTc) maxTc = e.tcEnd;
+    }
+    const delta = maxTc - minTc;
+    if (!(delta > 0)) return DEFAULT_PIXELS_PER_TC;
+    return Math.min(MAX_PIXELS_PER_TC, Math.max(MIN_PIXELS_PER_TC, cw / delta));
+  } catch {
+    return DEFAULT_PIXELS_PER_TC;
+  }
+}
+
+/**
+ * Applies `computeDefaultPixelsPerTc()` to the live viewport, then repaints. `reAnchor`
+ * re-centers the origin (tc=0) under the viewport center -- used after a live timeline-mode
+ * switch, whose `relocateAndCenter()` centered the origin at the OLD scale so it must be
+ * re-centered at the new one. Without it, the current left edge is kept and only the scale
+ * changes (the toolbar/context-menu "Default Zoom", and the initial open where the origin
+ * already sits at the left edge) -- matching Java's `defaultZoom()`, which rescales in
+ * place rather than jumping the view.
+ */
+async function applyDefaultZoom(reAnchor: boolean): Promise<void> {
+  const px = await computeDefaultPixelsPerTc();
+  viewport = { ...viewport, pixelsPerTc: px };
+  if (reAnchor) viewport = revealAt(viewport, 0);
+  scheduleRender();
 }
 
 /**
@@ -805,7 +898,12 @@ async function applyTimelineMode(mode: string, isInitial: boolean, restoreViewpo
       }
     }
 
-    const params: ScSetTimelineModeParams = { timelineMode: mode as TimelineMode };
+    // `separateEventLogEntries` follows `showComponentMethodCalls` (Java wires the two
+    // together in `setShowComponentMethodCalls()`): it makes the engine give each event a
+    // nonzero timeline WIDTH in STEP/NONLINEAR modes (one unit per method-call/send log
+    // entry), which is what turns event marks from dots into "pill" shapes -- without it
+    // the engine always returns `tcEnd === tcBegin` and every event draws as a dot.
+    const params: ScSetTimelineModeParams = { timelineMode: mode as TimelineMode, separateEventLogEntries: displayFlags.showComponentMethodCalls };
     const scState = await rpc.request<ScState>(ElogMethods.scSetTimelineMode, params);
     currentTimelineMode = scState.timelineMode;
     toolbar.setDropdownValue('timelineMode', scState.timelineMode);
@@ -821,6 +919,12 @@ async function applyTimelineMode(mode: string, isInitial: boolean, restoreViewpo
       await relocateAndCenter(target, center);
       if (isInitial && restoreViewport && anchorEventNumber === null) {
         viewport = { ...viewport, pixelsPerTc: restoreViewport.pixelsPerTc, vscroll: restoreViewport.vscroll };
+      } else {
+        // No persisted zoom to honor -> pick a data-driven default so events span the
+        // content width instead of collapsing onto one column (Java's
+        // `setDefaultPixelPerTimelineUnit()`). Re-anchor only when the origin was centered
+        // at the old scale (a live mode switch); the initial open already sits at tc=0.
+        await applyDefaultZoom(center);
       }
     } else {
       viewport = { ...viewport, coordinateSystemVersion: scState.coordinateSystemVersion };
@@ -1250,6 +1354,31 @@ function hitTestAt(px: number, py: number): HitObject[] {
   return hitTest({ primitives: lastPrimitives, px, py, pointerTc: fullCanvasPxToTc(px, viewport) });
 }
 
+/** Phase U11 -- hover highlight: the top-priority hit group at the pointer becomes the highlighted object set (event/dependency/axis only). Guarded by a signature so an unchanged target never triggers a repaint. */
+function updateHover(px: number, py: number): void {
+  const group = pickPrimaryGroup(hitTestAt(px, py));
+  const events = new Set<number>();
+  const dependencyKeys = new Set<string>();
+  const axisModuleIds = new Set<number>();
+  for (const hit of group) {
+    if (hit.kind === 'event') events.add(hit.eventNumber);
+    else if (hit.kind === 'dependency') dependencyKeys.add(dependencyKey(hit));
+    else if (hit.kind === 'axis') axisModuleIds.add(hit.moduleId);
+  }
+  const sig = `e:${[...events].sort((a, b) => a - b).join(',')}|d:${[...dependencyKeys].sort().join(',')}|a:${[...axisModuleIds].sort((a, b) => a - b).join(',')}`;
+  if (sig === hoverSignature) return;
+  hoverSignature = sig;
+  hovered = { events, dependencyKeys, axisModuleIds };
+  scheduleRender();
+}
+
+function clearHover(): void {
+  if (hoverSignature === '') return;
+  hoverSignature = '';
+  hovered = { events: new Set(), dependencyKeys: new Set(), axisModuleIds: new Set() };
+  scheduleRender();
+}
+
 async function resolveHitForTooltip(px: number, py: number): Promise<ResolvedHit | null> {
   const hits = hitTest({ primitives: lastPrimitives, px, py, pointerTc: fullCanvasPxToTc(px, viewport) });
   const primary = pickPrimary(hits);
@@ -1581,10 +1710,7 @@ function openChartContextMenu(clientX: number, clientY: number, hits: HitObject[
       viewport = zoomAtCenter(viewport, 1 / 1.5);
       scheduleRender();
     },
-    defaultZoom: () => {
-      viewport = { ...viewport, pixelsPerTc: DEFAULT_PIXELS_PER_TC };
-      scheduleRender();
-    },
+    defaultZoom: () => void applyDefaultZoom(false),
     zoomToFitAll: () => {
       if (beginTc !== null && endTc !== null) {
         viewport = zoomToFit(viewport, beginTc, endTc, 0.02);
@@ -1781,6 +1907,8 @@ attachInteractions(canvasContainer, {
   hitTestAt,
   // pointer cursor over an axis-management glyph (phase U8; Eclipse shows the hand cursor over ModuleActions)
   getCursorAt: (px, py) => (hitTestAt(px, py).some((h) => h.kind === 'moduleAction') ? 'pointer' : null),
+  onHover: updateHover,
+  onHoverEnd: clearHover,
   onClick: handleClick,
   onDoubleClick: handleDoubleClick,
   onContextMenu: openChartContextMenu,
@@ -1806,10 +1934,7 @@ attachInteractions(canvasContainer, {
   onGotoCause: () => void onGotoCause(),
   onGotoConsequence: () => void onGotoConsequence(),
   onSameModuleNeighbor,
-  onDefaultZoom: () => {
-    viewport = { ...viewport, pixelsPerTc: DEFAULT_PIXELS_PER_TC };
-    scheduleRender();
-  },
+  onDefaultZoom: () => void applyDefaultZoom(false),
   onToggleBookmark: toggleBookmarkForSelection,
 });
 
@@ -1902,7 +2027,7 @@ async function applyFilterParamsAndReanchor(params: FilterParams | null): Promis
     if (!newSummary.isEmpty) {
       if (anchorEventNumber !== null) await relocateAndCenter(anchorEventNumber, true);
       else await relocateAndCenter(newSummary.firstEventNumber, false);
-      viewport = { ...viewport, pixelsPerTc: DEFAULT_PIXELS_PER_TC }; // Java's defaultZoom(), after scrollToSimulationTime(center)
+      await applyDefaultZoom(anchorEventNumber !== null); // Java's defaultZoom(), after scrollToSimulationTime(center)
     } else {
       viewport = { ...viewport, coordinateSystemVersion: newSummary.coordinateSystemVersion };
     }

@@ -146,6 +146,32 @@ export function computeArrowhead(x: number, y: number, dx: number, dy: number, l
   return { x, y, angle: Math.atan2(dy, dx), long, length, width };
 }
 
+/**
+ * Port of `SequenceChart.java:4691-4712`: the arrowhead at a self-message half-ellipse's
+ * (consequence) endpoint must follow the ELLIPSE TANGENT there, not point straight down.
+ * The tangent chord is found by intersecting the ellipse with a circle of the arrowhead
+ * length centered at the endpoint (the endpoint is at `(+a, 0)` in center-relative
+ * coords; the intersection lands on the top-right quarter). Falls back to straight-down
+ * `(0, 1)` when the ellipse is too flat for a valid top-quarter solution (Java's `x < 0`
+ * guard), which is exactly the old behavior for those degenerate cases.
+ */
+export function computeSelfEllipseArrowhead(x1: number, x2: number, y: number, halfEllipseHeight: number, length = ARROWHEAD_LENGTH, width = ARROWHEAD_WIDTH): ArrowHeadGeom {
+  const a = Math.abs(x2 - x1) / 2;
+  const b = halfEllipseHeight;
+  const a2 = a * a;
+  const b2 = b * b;
+  const r2 = length * length;
+  // mupad: solve([x^2/a^2 + (r^2-(x-a)^2)/b^2 = 1], x)
+  const xs = a === b ? (2 * a2 - r2) / 2 / a : (a * (-Math.sqrt(a2 * r2 + b2 * b2 - b2 * r2) + a2)) / (a2 - b2);
+  const ys = -Math.sqrt(r2 - (xs - a) * (xs - a));
+  if (!(xs >= 0) || Number.isNaN(ys)) return computeArrowhead(x2, y, 0, 1, false, length, width);
+  const cx = (x1 + x2) / 2;
+  const dir = x2 >= x1 ? 1 : -1; // which side the endpoint (x2) is on
+  const px = cx + dir * xs;
+  const py = y + ys;
+  return computeArrowhead(x2, y, x2 - px, y - py, false, length, width);
+}
+
 // ---------------------------------------------------------------------------------
 // Cross-module ("regular") arrow — SequenceChart.java:4719-4805
 // ---------------------------------------------------------------------------------
@@ -310,7 +336,7 @@ export function computeSelfArrowGeometry(params: SelfArrowParams): SelfArrowGeom
   return {
     segments: [],
     ellipse: { x1, x2, y, height: halfEllipseHeight, quarter: -1 },
-    arrowhead: showArrowHeads ? computeArrowhead(x2, y, 0, 1, false, arrowheadLength, arrowheadWidth) : null,
+    arrowhead: showArrowHeads ? computeSelfEllipseArrowhead(x1, x2, y, halfEllipseHeight, arrowheadLength, arrowheadWidth) : null,
     labelAnchor: { x: (x1 + x2) / 2, y: ym - fontHeight },
     signAnchor: isFiltered ? { x: (x1 + x2) / 2, y: ym, angle: 0 } : null,
   };

@@ -98,6 +98,21 @@ test('normal events become eventMark, the self-message event becomes selfEventMa
   assert.strictEqual((selfMarks[0] as { eventNumber: number }).eventNumber, 3);
 });
 
+test('an event with a nonzero timeline width (tcEnd > tcBegin) becomes a "pill" mark (xEnd > x), a zero-width one stays a dot (xEnd == x)', () => {
+  // STEP/NONLINEAR + separateEventLogEntries makes the engine hand back tcEnd > tcBegin;
+  // buildDrawList must carry that span through as xEnd so canvasStack draws a stadium
+  // (two half-discs + a connecting rect) instead of a plain circle -- Java `drawEvent()`.
+  const widthEvents: TimelineEvent[] = [event_(1, 1, 0, { tcEnd: 4 }), event_(2, 2, 10)];
+  const primitives = draw(baseViewport(), widthEvents, []);
+  const marks = primitives.filter((p): p is Extract<typeof p, { kind: 'eventMark' }> => p.kind === 'eventMark');
+  const pill = marks.find((m) => m.eventNumber === 1)!;
+  const dot = marks.find((m) => m.eventNumber === 2)!;
+  assert.ok(pill.xEnd > pill.x, `pill event should span (x=${pill.x}, xEnd=${pill.xEnd})`);
+  // tcBegin=0, tcEnd=4 at 10 px/tc -> 40 px of width between the cap centers
+  assert.strictEqual(pill.xEnd - pill.x, 40);
+  assert.strictEqual(dot.xEnd, dot.x, 'zero-width event stays a dot (xEnd == x)');
+});
+
 test('a dependency with a null tc on one side is drawn as a SPLIT arrow (dashed offscreen segment + solid segment), not skipped (phase U5)', () => {
   const primitives = draw();
   // 4 deps total: dep0 (send, both known) -> 1 arrow segment; dep1 (reuse, both known) -> 1 arrow segment;
@@ -194,6 +209,56 @@ test('selectedEventNumbers: an event number not present in the viewport is simpl
   const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
   const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: events3, dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, selectedEventNumbers: new Set([999]) });
   assert.strictEqual(primitives.filter((p) => p.kind === 'selectionMark').length, 0);
+});
+
+// ---------------------------------------------------------------------------------
+// selection / hover emphasis -- phase U11 (arrows + axes selectable, hover highlight)
+// ---------------------------------------------------------------------------------
+
+test('selectedDependencyKeys: a selected dependency is redrawn as a thicker arrow in the selection color', () => {
+  // deps4[0] is a send #1 -> #2 -> dependencyKey 'send:1:2'.
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport: baseViewport(), events: events3, dependencies: deps4, methodCalls: [], axesLayout: deriveAxes(new Set([1, 2, 3]), null, 600 - GUTTER_TOP_HEIGHT), ticks: [], theme, displayFlags: BASE_TEST_FLAGS, selectedDependencyKeys: new Set(['send:1:2']) });
+  const emphasized = primitives.filter((p): p is Extract<typeof p, { kind: 'arrow' }> => p.kind === 'arrow' && p.color === SELECTION_MARK_COLOR && (p.width ?? 1) > 1);
+  assert.ok(emphasized.length >= 1, 'the selected send dependency should produce a thicker selection-colored arrow');
+});
+
+test('selectedAxisModuleIds: a selected axis gets an axisSelectionMark spanning the content width', () => {
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport: baseViewport(), events: events3, dependencies: [], methodCalls: [], axesLayout: deriveAxes(new Set([1, 2, 3]), null, 600 - GUTTER_TOP_HEIGHT), ticks: [], theme, selectedAxisModuleIds: new Set([2]) });
+  const marks = primitives.filter((p) => p.kind === 'axisSelectionMark');
+  assert.strictEqual(marks.length, 1);
+});
+
+test('hovered event stays its own color but is drawn BIGGER; hovered axis label goes bold (same color)', () => {
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport: baseViewport(), events: events3, dependencies: [], methodCalls: [], axesLayout: deriveAxes(new Set([1, 2, 3]), null, 600 - GUTTER_TOP_HEIGHT), ticks: [], theme, hovered: { events: new Set([1]), axisModuleIds: new Set([3]) } });
+  // event #1 is a normal event -> its base color is theme.eventColor; the hover emphasis mark keeps that color but is bigger, and is NOT the red selection color.
+  const bigger = primitives.filter((p): p is Extract<typeof p, { kind: 'eventMark' }> => p.kind === 'eventMark' && p.eventNumber === 1 && p.radius > 3);
+  assert.ok(bigger.length >= 1, 'hovered event should get a bigger mark');
+  assert.ok(!bigger.some((p) => p.color === SELECTION_MARK_COLOR), 'hovered (unselected) event must keep its own color, not turn red');
+  const boldLabel = primitives.filter((p) => p.kind === 'axisLabel' && p.bold) as { color: string }[];
+  assert.strictEqual(boldLabel.length, 1, 'hovered axis label should be bold');
+  assert.notStrictEqual(boldLabel[0].color, SELECTION_MARK_COLOR, 'hovered axis label stays its own color');
+});
+
+test('selected event/axis turn RED; selected timeline coordinate draws a vertical timelineMark', () => {
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport: baseViewport(), events: events3, dependencies: [], methodCalls: [], axesLayout: deriveAxes(new Set([1, 2, 3]), null, 600 - GUTTER_TOP_HEIGHT), ticks: [], theme, selectedEventNumbers: new Set([1]), selectedAxisModuleIds: new Set([2]), selectedTimelineCoords: [{ tc: 25, simulationTime: '2.5' }] });
+  assert.ok(primitives.some((p) => p.kind === 'eventMark' && p.eventNumber === 1 && p.color === SELECTION_MARK_COLOR), 'selected event mark should be recolored red');
+  assert.ok(primitives.some((p) => p.kind === 'axisLabel' && p.color === SELECTION_MARK_COLOR), 'selected axis label should be red');
+  assert.strictEqual(primitives.filter((p) => p.kind === 'timelineMark').length, 1, 'selected timeline coordinate draws one vertical mark');
+});
+
+test('time differences: selected events + timeline coords produce a dashed polyline with delta labels', () => {
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport: baseViewport(), events: events3, dependencies: [], methodCalls: [], axesLayout: deriveAxes(new Set([1, 2, 3]), null, 600 - GUTTER_TOP_HEIGHT), ticks: [], theme, displayFlags: { ...DEFAULT_DISPLAY_FLAGS, showTimeDifferences: true }, selectedEventNumbers: new Set([1, 2]), selectedTimelineCoords: [{ tc: 45, simulationTime: '4.5' }] });
+  // 3 points (2 events + 1 coord) -> 2 connecting dashed segments + 2 delta labels.
+  const dashed = primitives.filter((p) => p.kind === 'arrow' && p.dash && p.dash[0] === 3 && p.dash[1] === 2);
+  assert.strictEqual(dashed.length, 2, 'two dashed time-difference segments through the three selected points');
+  assert.strictEqual(primitives.filter((p) => p.kind === 'timeDifferenceLabel').length, 2);
+});
+
+test('no selection/hover params: no emphasis primitives (axisSelectionMark, bold label, thick arrow)', () => {
+  const primitives = draw();
+  assert.strictEqual(primitives.filter((p) => p.kind === 'axisSelectionMark').length, 0);
+  assert.strictEqual(primitives.filter((p) => p.kind === 'axisLabel' && p.bold).length, 0);
+  assert.strictEqual(primitives.filter((p) => p.kind === 'arrow' && (p.width ?? 1) > 1).length, 0);
 });
 
 // ---------------------------------------------------------------------------------

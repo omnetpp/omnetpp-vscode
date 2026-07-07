@@ -31,6 +31,7 @@
  */
 
 import type { DrawPrimitive } from './drawList';
+import { GUTTER_TOP_HEIGHT } from './viewportState';
 
 export const TILE_WIDTH_PX = 1024;
 export const MAX_TILES = 32;
@@ -160,6 +161,32 @@ export interface CanvasStackHandle {
 const NONCACHEABLE_KINDS = new Set<DrawPrimitive['kind']>(['gutter', 'tick', 'axisLabel', 'label', 'selectionMark', 'bookmarkMark', 'infoPanel', 'timeDifferenceLabel', 'moduleAction']);
 
 /**
+ * "Gutter chrome": overlay primitives that live in (or must stay on top of) the left/top
+ * gutter bands -- the opaque gutter backgrounds plus everything drawn inside them (axis
+ * labels, ruler ticks/tick-labels, module-action glyphs, axis bookmark flags, info
+ * panels). These are drawn in a SECOND overlay pass, ON TOP of the content-area overlay
+ * decorations (event-number/message labels, selection rings, time-difference labels), so
+ * a content label that scrolls under the left "module name" band is covered by the band
+ * instead of bleeding across it. A `'label'` in the top ruler (y < GUTTER_TOP_HEIGHT) is a
+ * tick label and belongs to this top layer too; content labels sit below it.
+ */
+function isGutterChrome(p: DrawPrimitive): boolean {
+  switch (p.kind) {
+    case 'gutter':
+    case 'tick':
+    case 'axisLabel':
+    case 'moduleAction':
+    case 'infoPanel':
+    case 'bookmarkMark':
+      return true;
+    case 'label':
+      return p.y < GUTTER_TOP_HEIGHT;
+    default:
+      return false;
+  }
+}
+
+/**
  * Phase U10 (cheap-gap closure) -- the base chart label font size in CSS px, driving
  * every hardcoded font string below. `12` is this file's own long-standing default
  * (every call site before this phase), so it doubles as the "0 = keep current
@@ -197,8 +224,20 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       ctx.fillStyle = p.color;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.font = mainFont;
+      ctx.font = p.bold ? `bold ${mainFont}` : mainFont;
       ctx.fillText(p.text, p.x, p.y);
+      break;
+    case 'axisSelectionMark':
+      // Two thin colored lines hugging the axis line (above and below) -- Java `drawAxisMark()`.
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(p.x1, p.y - 1);
+      ctx.lineTo(p.x2, p.y - 1);
+      ctx.moveTo(p.x1, p.y + p.lineHeight);
+      ctx.lineTo(p.x2, p.y + p.lineHeight);
+      ctx.stroke();
       break;
     case 'label':
       ctx.fillStyle = p.color;
@@ -311,22 +350,42 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       ctx.lineTo(p.x, p.y1);
       ctx.stroke();
       break;
+    case 'timelineMark':
+      // A selected timeline coordinate -- a vertical line spanning the content height.
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y0);
+      ctx.lineTo(p.x, p.y1);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+      break;
     case 'eventMark':
-    case 'selfEventMark':
+    case 'selfEventMark': {
+      // Port of Java `drawEvent()` (SequenceChart.java:3900-3911): a plain filled disc
+      // when begin==end, a stadium/"pill" (two half-discs joined by a rectangle) when the
+      // event has a nonzero timeline width (STEP/NONLINEAR + separate log entries). A
+      // rounded rectangle with corner radius == the event radius yields exactly that
+      // stadium; the disc branch is kept explicit so the common point-event case never
+      // depends on `roundRect` and always renders as a true circle.
       ctx.fillStyle = p.color;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, p.radius, 0, 2 * Math.PI);
+      if (p.xEnd > p.x + 0.5) ctx.roundRect(p.x - p.radius, p.y - p.radius, p.xEnd - p.x + 2 * p.radius, 2 * p.radius, p.radius);
+      else ctx.arc(p.x, p.y, p.radius, 0, 2 * Math.PI);
       ctx.fill();
       break;
+    }
     case 'arrow':
       ctx.strokeStyle = p.color;
-      ctx.lineWidth = 1;
+      ctx.lineWidth = p.width ?? 1;
       ctx.setLineDash(p.dash ?? []);
       ctx.beginPath();
       ctx.moveTo(p.x1, p.y1);
       ctx.lineTo(p.x2, p.y2);
       ctx.stroke();
       ctx.setLineDash([]);
+      ctx.lineWidth = 1;
       break;
     case 'arrowHead': {
       ctx.fillStyle = p.color;
@@ -349,7 +408,11 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       ctx.lineWidth = 2;
       ctx.setLineDash([]);
       ctx.beginPath();
-      ctx.arc(p.x, p.y, p.radius, 0, 2 * Math.PI);
+      // Stadium outline around a pill event, plain ring around a dot -- mirrors the
+      // eventMark/selfEventMark begin!=end split so a selected wide event reads as a
+      // ring following its whole shape, not a circle stuck at its left cap.
+      if (p.xEnd > p.x + 0.5) ctx.roundRect(p.x - p.radius, p.y - p.radius, p.xEnd - p.x + 2 * p.radius, 2 * p.radius, p.radius);
+      else ctx.arc(p.x, p.y, p.radius, 0, 2 * Math.PI);
       ctx.stroke();
       break;
     case 'moduleAction': {
@@ -447,7 +510,12 @@ export function createCanvasStack(container: HTMLElement): CanvasStackHandle {
       ctx.imageSmoothingEnabled = antialiasing;
       ctx.clearRect(0, 0, ctx.canvas.width / dpr, ctx.canvas.height / dpr);
     }
-    for (const p of primitives) drawPrimitiveToCanvas(NONCACHEABLE_KINDS.has(p.kind) ? overlayCtx : contentCtx, p, baseFontSizePx);
+    // Content canvas: everything not in the overlay set, in list order.
+    for (const p of primitives) if (!NONCACHEABLE_KINDS.has(p.kind)) drawPrimitiveToCanvas(contentCtx, p, baseFontSizePx);
+    // Overlay canvas, two passes: content-area decorations first, then gutter chrome on
+    // top (so labels scrolled under the left band are covered by it -- see isGutterChrome).
+    for (const p of primitives) if (NONCACHEABLE_KINDS.has(p.kind) && !isGutterChrome(p)) drawPrimitiveToCanvas(overlayCtx, p, baseFontSizePx);
+    for (const p of primitives) if (NONCACHEABLE_KINDS.has(p.kind) && isGutterChrome(p)) drawPrimitiveToCanvas(overlayCtx, p, baseFontSizePx);
     for (const ctx of [contentCtx, overlayCtx]) ctx.restore();
   }
 

@@ -96,13 +96,13 @@ const depRef = (over: Partial<Extract<ArrowRef, { kind: 'dependency' }>> = {}): 
 });
 
 test('hitTest: event mark hit at its exact position', () => {
-  const primitives: DrawPrimitive[] = [{ kind: 'eventMark', eventNumber: 7, moduleId: 3, x: 100, y: 50, radius: 3, color: '#000' }];
+  const primitives: DrawPrimitive[] = [{ kind: 'eventMark', eventNumber: 7, moduleId: 3, x: 100, xEnd: 100, y: 50, radius: 3, color: '#000' }];
   const hits = hitTest({ primitives, px: 100, py: 50, pointerTc: null });
   assert.deepEqual(hits, [{ kind: 'event', eventNumber: 7, moduleId: 3 }]);
 });
 
 test('hitTest: event mark miss outside tolerance', () => {
-  const primitives: DrawPrimitive[] = [{ kind: 'eventMark', eventNumber: 7, moduleId: 3, x: 100, y: 50, radius: 3, color: '#000' }];
+  const primitives: DrawPrimitive[] = [{ kind: 'eventMark', eventNumber: 7, moduleId: 3, x: 100, xEnd: 100, y: 50, radius: 3, color: '#000' }];
   const hits = hitTest({ primitives, px: 100 + EVENT_HIT_TOLERANCE + 10, py: 50, pointerTc: null });
   assert.equal(hits.length, 0);
 });
@@ -203,7 +203,7 @@ test('hitTest: duplicate hits on the same object (e.g. an arrow drawn as two pri
 
 test('hitTest: overlapping event + axis + timestamp -- priority order picks the event', () => {
   const primitives: DrawPrimitive[] = [
-    { kind: 'eventMark', eventNumber: 1, moduleId: 1, x: 50, y: 50, radius: 3, color: '#000' },
+    { kind: 'eventMark', eventNumber: 1, moduleId: 1, x: 50, xEnd: 50, y: 50, radius: 3, color: '#000' },
     { kind: 'axisLine', moduleId: 1, x1: 0, x2: 500, y: 50, lineHeight: 1, color: '#000' },
   ];
   const hits = hitTest({ primitives, px: 50, py: 50, pointerTc: 999 });
@@ -275,7 +275,7 @@ test('hitTest: moduleAction box hit (exact bounds +1px slack)', () => {
 test('pickPrimary/pickPrimaryGroup: moduleAction outranks events, axes, everything', () => {
   const primitives: DrawPrimitive[] = [
     { kind: 'moduleAction', action: 'close', moduleId: 4, scope: 'header', x: 100, y: 50, size: 11, color: '#999' },
-    { kind: 'eventMark', eventNumber: 7, moduleId: 4, x: 104, y: 54, radius: 3, color: '#e06666' },
+    { kind: 'eventMark', eventNumber: 7, moduleId: 4, x: 104, xEnd: 104, y: 54, radius: 3, color: '#e06666' },
     { kind: 'axisLine', moduleId: 4, x1: 0, x2: 800, y: 55, lineHeight: 1, color: '#ccc' },
   ];
   const hits = hitTest({ primitives, px: 104, py: 54, pointerTc: 12 });

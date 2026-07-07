@@ -180,8 +180,12 @@ function emitPrimitive(b: SvgBuilder, p: DrawPrimitive, fontFamily: string): voi
     case 'axisLine':
       b.el('line', { x1: p.x1, y1: p.y, x2: p.x2, y2: p.y, stroke: p.color, 'stroke-width': p.lineHeight });
       return;
+    case 'axisSelectionMark':
+      b.el('line', { x1: p.x1, y1: p.y - 1, x2: p.x2, y2: p.y - 1, stroke: p.color, 'stroke-width': 1.5 });
+      b.el('line', { x1: p.x1, y1: p.y + p.lineHeight, x2: p.x2, y2: p.y + p.lineHeight, stroke: p.color, 'stroke-width': 1.5 });
+      return;
     case 'axisLabel':
-      b.el('text', { x: p.x, y: p.y, fill: p.color, 'font-size': 12, 'font-family': fontFamily, 'text-anchor': 'start', 'dominant-baseline': 'middle' }, p.text);
+      b.el('text', { x: p.x, y: p.y, fill: p.color, 'font-size': 12, 'font-weight': p.bold ? 'bold' : 'normal', 'font-family': fontFamily, 'text-anchor': 'start', 'dominant-baseline': 'middle' }, p.text);
       return;
     case 'axisHeaderBox': {
       const h = Math.max(1, p.y1 - p.y0);
@@ -201,12 +205,18 @@ function emitPrimitive(b: SvgBuilder, p: DrawPrimitive, fontFamily: string): voi
     case 'eventDensityLine':
       b.el('line', { x1: p.x, y1: p.y0, x2: p.x, y2: p.y1, stroke: p.color, 'stroke-width': 1 });
       return;
+    case 'timelineMark':
+      b.el('line', { x1: p.x, y1: p.y0, x2: p.x, y2: p.y1, stroke: p.color, 'stroke-width': 1.5 });
+      return;
     case 'eventMark':
     case 'selfEventMark':
-      b.el('circle', { cx: p.x, cy: p.y, r: p.radius, fill: p.color });
+      // A rounded rect with rx=ry=radius is a stadium when wider than tall, a circle when
+      // square -- so one element covers both the pill (begin!=end) and disc (begin==end)
+      // cases (mirrors canvasStack.ts's `roundRect`/`arc` split).
+      b.el('rect', { x: p.x - p.radius, y: p.y - p.radius, width: p.xEnd - p.x + 2 * p.radius, height: 2 * p.radius, rx: p.radius, ry: p.radius, fill: p.color });
       return;
     case 'arrow':
-      b.el('line', { x1: p.x1, y1: p.y1, x2: p.x2, y2: p.y2, stroke: p.color, 'stroke-width': 1, 'stroke-dasharray': dashArray(p.dash) });
+      b.el('line', { x1: p.x1, y1: p.y1, x2: p.x2, y2: p.y2, stroke: p.color, 'stroke-width': p.width ?? 1, 'stroke-dasharray': dashArray(p.dash) });
       return;
     case 'arrowHead': {
       const backX = p.x - p.length * Math.cos(p.angle);
@@ -258,7 +268,7 @@ function emitPrimitive(b: SvgBuilder, p: DrawPrimitive, fontFamily: string): voi
       }
       return;
     case 'selectionMark':
-      b.el('circle', { cx: p.x, cy: p.y, r: p.radius, stroke: p.color, fill: 'none', 'stroke-width': 2 });
+      b.el('rect', { x: p.x - p.radius, y: p.y - p.radius, width: p.xEnd - p.x + 2 * p.radius, height: 2 * p.radius, rx: p.radius, ry: p.radius, stroke: p.color, fill: 'none', 'stroke-width': 2 });
       return;
     case 'bookmarkMark': {
       const poleHeight = 8;

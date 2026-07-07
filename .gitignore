@@ -14,3 +14,6 @@ resources/wasm/*.wasm
 
 # packaged extension
 *.vsix
+
+# session working files (reference screenshots, test elogs, smoke scripts)
+scratchpad/

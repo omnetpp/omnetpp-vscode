@@ -58,9 +58,15 @@ export interface InteractionCallbacks {
   /**
    * Phase U8 (optional): CSS cursor override while hovering (not dragging) -- e.g.
    * `'pointer'` over a `moduleAction` glyph (Eclipse shows the hand cursor over its
-   * ModuleAction hotspots). `null`/`undefined` = the default `'grab'`.
+   * ModuleAction hotspots). `null`/`undefined` = the default `'default'` (a plain arrow;
+   * the canvas does not advertise grabbability with a hand cursor -- only an active pan
+   * shows the `'all-scroll'` 4-way panning cursor, see `onMouseDown`/`onMouseUp`).
    */
   getCursorAt?(px: number, py: number): string | null;
+  /** Phase U11 — the pointer moved to content-area `(px, py)` without dragging; chartMain hit-tests and highlights whatever is under it (Java `mouseMove` -> `highlightedObjects`). */
+  onHover?(px: number, py: number): void;
+  /** Phase U11 — the pointer left the canvas, or a drag started; clear any hover highlight. */
+  onHoverEnd?(): void;
   onContextMenu(clientX: number, clientY: number, hits: HitObject[]): void;
   onEscape(): void;
   onRefresh(): void;
@@ -110,21 +116,29 @@ export function attachInteractions(canvas: HTMLElement, cb: InteractionCallbacks
     dragMoved = false;
     lastClientX = e.clientX;
     lastClientY = e.clientY;
-    canvas.style.cursor = 'grabbing';
+    cb.onHoverEnd?.(); // no hover highlight while grabbing
+    // Cursor stays the plain arrow on button-down; the 4-way panning cursor only appears
+    // once movement actually crosses the drag threshold (see onMouseMove) -- a mousedown
+    // that turns out to be a click never flashes the pan cursor.
   };
 
   const onMouseMove = (e: MouseEvent): void => {
     if (!dragging) {
-      // hover cursor override (phase U8) -- only when the pointer is actually over the canvas
-      if (cb.getCursorAt && e.target instanceof Node && canvas.contains(e.target)) {
+      // hover cursor override (phase U8) + hover highlight (phase U11) -- only when the
+      // pointer is actually over the canvas.
+      if (e.target instanceof Node && canvas.contains(e.target)) {
         const { px, py } = contentPoint(e);
-        canvas.style.cursor = cb.getCursorAt(px, py) ?? 'grab';
+        if (cb.getCursorAt) canvas.style.cursor = cb.getCursorAt(px, py) ?? 'default';
+        cb.onHover?.(px, py);
       }
       return;
     }
     const dx = e.clientX - lastClientX;
     const dy = e.clientY - lastClientY;
-    if (Math.abs(e.clientX - lastClientX) > CLICK_DRAG_THRESHOLD_PX || Math.abs(e.clientY - lastClientY) > CLICK_DRAG_THRESHOLD_PX) dragMoved = true;
+    if (!dragMoved && (Math.abs(e.clientX - lastClientX) > CLICK_DRAG_THRESHOLD_PX || Math.abs(e.clientY - lastClientY) > CLICK_DRAG_THRESHOLD_PX)) {
+      dragMoved = true;
+      canvas.style.cursor = 'all-scroll'; // first real movement -> show the panning cursor
+    }
     lastClientX = e.clientX;
     lastClientY = e.clientY;
     mutate((v, axesLayout) => {
@@ -135,7 +149,7 @@ export function attachInteractions(canvas: HTMLElement, cb: InteractionCallbacks
 
   const onMouseUp = (): void => {
     dragging = false;
-    canvas.style.cursor = 'grab';
+    canvas.style.cursor = 'default';
   };
 
   const onClick = (e: MouseEvent): void => {
@@ -252,11 +266,14 @@ export function attachInteractions(canvas: HTMLElement, cb: InteractionCallbacks
     }
   };
 
-  canvas.style.cursor = 'grab';
+  const onMouseLeave = (): void => cb.onHoverEnd?.();
+
+  canvas.style.cursor = 'default';
   canvas.tabIndex = 0;
   canvas.addEventListener('mousedown', onMouseDown);
   window.addEventListener('mousemove', onMouseMove);
   window.addEventListener('mouseup', onMouseUp);
+  canvas.addEventListener('mouseleave', onMouseLeave);
   canvas.addEventListener('click', onClick);
   canvas.addEventListener('dblclick', onDoubleClick);
   canvas.addEventListener('contextmenu', onContextMenu);
@@ -267,6 +284,7 @@ export function attachInteractions(canvas: HTMLElement, cb: InteractionCallbacks
     canvas.removeEventListener('mousedown', onMouseDown);
     window.removeEventListener('mousemove', onMouseMove);
     window.removeEventListener('mouseup', onMouseUp);
+    canvas.removeEventListener('mouseleave', onMouseLeave);
     canvas.removeEventListener('click', onClick);
     canvas.removeEventListener('dblclick', onDoubleClick);
     canvas.removeEventListener('contextmenu', onContextMenu);

@@ -80,13 +80,15 @@ export type DrawPrimitive =
   | { kind: 'gutter'; part: 'top' | 'left'; x: number; y: number; w: number; h: number; color: string }
   | { kind: 'regionBand'; x: number; y: number; w: number; h: number; color: string }
   | { kind: 'axisLine'; moduleId: number; x1: number; x2: number; y: number; lineHeight: number; color: string }
-  | { kind: 'axisLabel'; moduleId: number; x: number; y: number; text: string; color: string }
+  | { kind: 'axisLabel'; moduleId: number; x: number; y: number; text: string; color: string; bold?: boolean }
+  /** Phase U11 — a selected/hovered axis's Eclipse selection mark: two thin colored lines just above and below the axis line, spanning the content width (`drawAxisMark()`, SequenceChart.java:3668-3680). */
+  | { kind: 'axisSelectionMark'; x1: number; x2: number; y: number; lineHeight: number; color: string }
   | { kind: 'axisHeaderBox'; x: number; y0: number; y1: number; label: string; color: string }
   | { kind: 'tick'; x: number; y0: number; y1: number; color: string }
-  | { kind: 'eventMark'; eventNumber: number; moduleId: number; x: number; y: number; radius: number; color: string }
-  | { kind: 'selfEventMark'; eventNumber: number; moduleId: number; x: number; y: number; radius: number; color: string }
+  | { kind: 'eventMark'; eventNumber: number; moduleId: number; x: number; xEnd: number; y: number; radius: number; color: string }
+  | { kind: 'selfEventMark'; eventNumber: number; moduleId: number; x: number; xEnd: number; y: number; radius: number; color: string }
   | { kind: 'eventDensityLine'; x: number; y0: number; y1: number; color: string }
-  | { kind: 'arrow'; arrowKind: ArrowKind; x1: number; y1: number; x2: number; y2: number; color: string; dash?: number[]; ref?: ArrowRef }
+  | { kind: 'arrow'; arrowKind: ArrowKind; x1: number; y1: number; x2: number; y2: number; color: string; dash?: number[]; ref?: ArrowRef; width?: number }
   | { kind: 'arrowHead'; x: number; y: number; angle: number; color: string; length: number; width: number }
   | { kind: 'ellipseArc'; x1: number; x2: number; y: number; height: number; quarter: 0 | 1 | -1; color: string; ref?: ArrowRef }
   | { kind: 'parallelogram'; points: [[number, number], [number, number], [number, number], [number, number]]; color: string }
@@ -94,8 +96,10 @@ export type DrawPrimitive =
   | { kind: 'label'; x: number; y: number; text: string; color: string; align?: 'left' | 'center' | 'right'; rotateDeg?: number }
   | { kind: 'timeDifferenceLabel'; x: number; y: number; text: string; color: string }
   | { kind: 'infoPanel'; x: number; y: number; w: number; h: number; lines: string[]; background: string; color: string; align: 'right' }
-  /** Phase U4 — a selection ring around a selected event. */
-  | { kind: 'selectionMark'; x: number; y: number; radius: number; color: string }
+  /** Phase U4 — a selection ring around a selected event; a stadium outline (not a circle) when the event has a nonzero timeline width (`xEnd > x`), matching the pill event mark and Java's `drawEventMark()`. */
+  | { kind: 'selectionMark'; x: number; xEnd: number; y: number; radius: number; color: string }
+  /** Phase U11 — a selected timeline coordinate (a background click): a vertical line spanning the content height (Java `drawTimelineMark()`). */
+  | { kind: 'timelineMark'; x: number; y0: number; y1: number; color: string }
   /**
    * Phase U6 — a bookmark mark: a small filled "flag" glyph, port of Eclipse's
    * bookmark ring/flag decoration on the event mark (`IMarker.BOOKMARK`'s default
@@ -218,6 +222,12 @@ export function bookmarkDependencyKey(eventNumber: number, consequenceEventNumbe
   return `${eventNumber}:${consequenceEventNumber ?? -1}:${messageId ?? -1}`;
 }
 
+/** Identity key for a rendered dependency, matching `selection.ts`'s `dependencyKey()` (`kind:cause:consequence`), so `buildDrawList` can test a dependency against the selected/hovered key sets the reducer produced. */
+export function dependencyEmphasisKey(dep: RenderDependency): string {
+  const arrowKind = dep.kind === 'send' ? 'send' : dep.kind === 'reuse' ? 'reuse' : 'filtered';
+  return `${arrowKind}:${dep.causeEventNumber}:${dep.consequenceEventNumber}`;
+}
+
 export interface InfoPanelText {
   positionAndRange?: [string, string];
   eventLogInfo?: [string, string];
@@ -234,6 +244,14 @@ export interface BuildDrawListParams {
   theme: EventLogPalette;
   /** Phase U4 — event numbers currently selected; each gets a `'selectionMark'` ring around its event mark, and (if `displayFlags.showTimeDifferences`) participates in the time-differences polyline. */
   selectedEventNumbers?: ReadonlySet<number>;
+  /** Phase U11 — selected message-dependency keys (`selection.ts`'s `dependencyKey()` = `kind:cause:consequence`); each selected arrow is redrawn thicker in the selection color (Java `drawMessageDependencySelectionMarks()`). */
+  selectedDependencyKeys?: ReadonlySet<string>;
+  /** Phase U11 — selected axis module ids; each gets an `'axisSelectionMark'` (Java `drawAxisSelectionMarks()`). */
+  selectedAxisModuleIds?: ReadonlySet<number>;
+  /** Phase U11 — selected timeline coordinates (background clicks): each draws a vertical `'timelineMark'` line AND participates in the time-difference measurement. The caller resolves each tc's simulation time (this pure module has no simtime<->tc table). */
+  selectedTimelineCoords?: ReadonlyArray<{ tc: number; simulationTime: string }>;
+  /** Phase U11 — the object(s) under the cursor (hover), redrawn "bold" in the highlight color (Java `drawHightlightedObjects()`, `highlightedObjects` populated on mouseMove). Usually holds the single hit group at the pointer. */
+  hovered?: { events?: ReadonlySet<number>; dependencyKeys?: ReadonlySet<string>; axisModuleIds?: ReadonlySet<number> };
   /** Phase U6 — event numbers with an `'Event'`-kind bookmark; each gets a `'bookmarkMark'` flag near its event mark. */
   bookmarkedEventNumbers?: ReadonlySet<number>;
   /** Phase U6 — module ids with an `'Axis'`-kind bookmark (already resolved from the bookmark's stored `modulePath` -- see `chartMain.ts`'s `recomputeBookmarkIndexes()`); each gets a `'bookmarkMark'` at the start of its axis line. */
@@ -263,9 +281,15 @@ export interface BuildDrawListParams {
 }
 
 export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
-  const { viewport, events, dependencies, methodCalls, axesLayout, ticks, theme, selectedEventNumbers, bookmarkedEventNumbers, bookmarkedModuleIds, bookmarkedDependencyKeys, axisHeaderRoot, infoPanelText, skipLabelsForPerf } = params;
+  const { viewport, events, dependencies, methodCalls, axesLayout, ticks, theme, selectedEventNumbers, selectedDependencyKeys, selectedAxisModuleIds, selectedTimelineCoords, hovered, bookmarkedEventNumbers, bookmarkedModuleIds, bookmarkedDependencyKeys, axisHeaderRoot, infoPanelText, skipLabelsForPerf } = params;
   const flags = params.displayFlags ?? DEFAULT_DISPLAY_FLAGS;
   const primitives: DrawPrimitive[] = [];
+  // Phase U11 — selection/hover emphasis (thicker arrows, axis brackets, bold-red hovered
+  // objects) is collected separately and appended LAST so it layers on top of the whole
+  // scene, matching Java's `drawMessageDependencySelectionMarks()`/`drawAxisSelectionMarks()`/
+  // `drawHightlightedObjects()`, which run after the base drawing pass.
+  const emphasis: DrawPrimitive[] = [];
+  const emphasisColor = selectionMarkColor(theme);
   const arrowColors = deriveArrowColors(theme);
   const axisByModuleId = new Map(axesLayout.axes.map((a) => [a.moduleId, a]));
   // Phase U8: expand the lookup so a module without its own axis resolves to its
@@ -317,7 +341,15 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       const y = axisRowY(axis.y, viewport);
       if (y < GUTTER_TOP_HEIGHT - axis.lineHeight || y > viewport.canvasHeight + axis.lineHeight) continue;
       primitives.push({ kind: 'axisLine', moduleId: axis.moduleId, x1: GUTTER_LEFT_WIDTH, x2: viewport.canvasWidth, y, lineHeight: axis.lineHeight, color: theme.foreground });
-      if (flags.showAxisLabels) primitives.push({ kind: 'axisLabel', moduleId: axis.moduleId, x: 4 + labelIndent, y, text: axis.label, color: theme.foreground });
+      const axisHovered = hovered?.axisModuleIds?.has(axis.moduleId) ?? false;
+      const axisSelected = selectedAxisModuleIds?.has(axis.moduleId) ?? false;
+      // Hover only makes the label BOLD (same color); selection turns it red -- see this
+      // phase's report: hover = bolder/wider/same-color, selection = red.
+      if (flags.showAxisLabels) primitives.push({ kind: 'axisLabel', moduleId: axis.moduleId, x: 4 + labelIndent, y, text: axis.label, color: axisSelected ? emphasisColor : theme.foreground, bold: axisHovered });
+      // Phase U11 -- selected axis: two thin red lines just above/below the axis line,
+      // spanning the content width (Java `drawAxisMark()`). Appended to `emphasis` so it
+      // draws on top of everything.
+      if (axisSelected) emphasis.push({ kind: 'axisSelectionMark', x1: GUTTER_LEFT_WIDTH, x2: viewport.canvasWidth, y, lineHeight: axis.lineHeight, color: emphasisColor });
       if (bookmarkedModuleIds?.has(axis.moduleId)) primitives.push({ kind: 'bookmarkMark', x: GUTTER_LEFT_WIDTH - 6, y, color: bookmarkMarkColor(theme) });
       // Phase U8 -- per-axis expand/collapse/close glyphs (Java `layoutAxis()`'s
       // ModuleActions). Right-aligned inside the left gutter (Java lays them out just
@@ -379,7 +411,13 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       const y = axisRowY(axis.y, viewport);
       if (y < GUTTER_TOP_HEIGHT - EVENT_RADIUS || y > viewport.canvasHeight + EVENT_RADIUS) continue;
       const x = contentX(event.tcBegin, viewport);
-      if (x < GUTTER_LEFT_WIDTH - EVENT_RADIUS || x > viewport.canvasWidth + EVENT_RADIUS) continue;
+      // Java `drawEvent()` (SequenceChart.java:3892-3913): an event spans `[xBegin, xEnd]`
+      // and is drawn as a stadium/"pill" (two half-discs + connecting rectangle) whenever
+      // xBegin != xEnd, or a plain disc when equal. The span is nonzero only in
+      // STEP/NONLINEAR modes with `separateEventLogEntries` on (the engine returns
+      // `tcEnd === tcBegin` otherwise -- see SequenceChartFacade.getTimelineCoordinateDelta).
+      const xEnd = event.tcEnd === event.tcBegin ? x : contentX(event.tcEnd, viewport);
+      if (xEnd < GUTTER_LEFT_WIDTH - EVENT_RADIUS || x > viewport.canvasWidth + EVENT_RADIUS) continue;
 
       const xKey = Math.round(x);
       let col = columnDensity.get(xKey);
@@ -392,13 +430,17 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       col.y1 = Math.max(col.y1, y);
 
       if (col.count <= MAX_EVENT_MARKS_PER_COLUMN) {
-        primitives.push(
-          event.isSelfMessageProcessingEvent
-            ? { kind: 'selfEventMark', eventNumber: event.eventNumber, moduleId: event.moduleId, x, y, radius: EVENT_RADIUS, color: theme.isDark ? '#6fcf6f' : '#00ee00' }
-            : { kind: 'eventMark', eventNumber: event.eventNumber, moduleId: event.moduleId, x, y, radius: EVENT_RADIUS, color: theme.eventColor },
-        );
+        const markKind = event.isSelfMessageProcessingEvent ? 'selfEventMark' : 'eventMark';
+        const baseMarkColor = event.isSelfMessageProcessingEvent ? (theme.isDark ? '#6fcf6f' : '#00ee00') : theme.eventColor;
+        primitives.push({ kind: markKind, eventNumber: event.eventNumber, moduleId: event.moduleId, x, xEnd, y, radius: EVENT_RADIUS, color: baseMarkColor });
         if (flags.showEventNumbers && showLabels) primitives.push({ kind: 'label', x: x + 2, y: y + 10, text: `#${event.eventNumber}`, color: theme.descriptionForeground, align: 'left' });
-        if (selectedEventNumbers?.has(event.eventNumber)) primitives.push({ kind: 'selectionMark', x, y, radius: EVENT_RADIUS + 3, color: selectionMarkColor(theme) });
+        const evSelected = selectedEventNumbers?.has(event.eventNumber) ?? false;
+        const evHovered = hovered?.events?.has(event.eventNumber) ?? false;
+        if (evSelected) primitives.push({ kind: 'selectionMark', x, xEnd, y, radius: EVENT_RADIUS + 3, color: emphasisColor });
+        // Phase U11 -- emphasis (redrawn on top): hover makes the mark BIGGER but keeps its
+        // own color; selection recolors it RED (bigger too if also hovered). Java's
+        // `drawHightlightedObjects()`/`drawEventSelectionMarks()` combined.
+        if (evSelected || evHovered) emphasis.push({ kind: markKind, eventNumber: event.eventNumber, moduleId: event.moduleId, x, xEnd, y, radius: evHovered ? EVENT_RADIUS + 2 : EVENT_RADIUS, color: evSelected ? emphasisColor : baseMarkColor });
         if (bookmarkedEventNumbers?.has(event.eventNumber)) primitives.push({ kind: 'bookmarkMark', x: x - EVENT_RADIUS - 3, y: y - EVENT_RADIUS - 3, color: bookmarkMarkColor(theme) });
       }
     }
@@ -410,8 +452,22 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
   // ---- message dependencies (arrows / self-message ellipses) ----
   const vlineBuffer = new VLineBuffer();
   const axisSpacing = Math.max(axesLayout.spacing, 1);
+  const depCtx = { axisByModuleId, viewport, theme, arrowColors, flags, axisSpacing, vlineBuffer, showLabels, bookmarkedDependencyKeys };
   for (const dep of dependencies) {
-    pushDependency(primitives, dep, { axisByModuleId, viewport, theme, arrowColors, flags, axisSpacing, vlineBuffer, showLabels, bookmarkedDependencyKeys });
+    pushDependency(primitives, dep, depCtx);
+  }
+  // Phase U11 -- selection/hover emphasis for arrows: redraw a selected/hovered dependency
+  // thicker in the highlight color, on top (Java `drawMessageDependencySelectionMarks()` /
+  // the arrow branch of `drawHightlightedObjects()`). A FRESH VLineBuffer so the shared
+  // one's earlier dedupe doesn't suppress this second, emphasized pass.
+  if (selectedDependencyKeys?.size || hovered?.dependencyKeys?.size) {
+    for (const dep of dependencies) {
+      const key = dependencyEmphasisKey(dep);
+      const isSel = selectedDependencyKeys?.has(key) ?? false;
+      const isHov = hovered?.dependencyKeys?.has(key) ?? false;
+      if (!isSel && !isHov) continue;
+      pushDependency(emphasis, dep, { ...depCtx, vlineBuffer: new VLineBuffer(), showLabels: false, override: { emphasisColor, selected: isSel, hovered: isHov } });
+    }
   }
 
   // ---- method calls ----
@@ -440,27 +496,43 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
     }
   }
 
-  // ---- time differences (Tab toggle) -- dashed polyline through selected events, sorted by tc, labeled with the pairwise simtime delta ----
-  if (flags.showTimeDifferences && selectedEventNumbers && selectedEventNumbers.size >= 2) {
-    const selected = events
-      .filter((e) => selectedEventNumbers.has(e.eventNumber))
-      .map((e) => ({ tc: (e.tcBegin + e.tcEnd) / 2, simulationTime: e.simulationTime, moduleId: e.moduleId }))
-      .sort((a, b) => a.tc - b.tc);
-    for (let i = 1; i < selected.length; i++) {
-      const prev = selected[i - 1];
-      const cur = selected[i];
-      const prevAxis = axisByModuleId.get(prev.moduleId);
-      const curAxis = axisByModuleId.get(cur.moduleId);
-      if (!prevAxis || !curAxis) continue;
-      const x1 = contentX(prev.tc, viewport);
-      const y1 = axisRowY(prevAxis.y, viewport);
-      const x2 = contentX(cur.tc, viewport);
-      const y2 = axisRowY(curAxis.y, viewport);
-      primitives.push({ kind: 'arrow', arrowKind: 'send', x1, y1, x2, y2, color: selectionMarkColor(theme), dash: [3, 2] });
+  // ---- selected timeline coordinates (background clicks) -- a vertical red line per
+  // selected time (Java `drawTimelineSelectionMarks()`), on top of the scene. ----
+  for (const coord of selectedTimelineCoords ?? []) {
+    const cx = contentX(coord.tc, viewport);
+    if (cx < GUTTER_LEFT_WIDTH || cx > viewport.canvasWidth) continue;
+    emphasis.push({ kind: 'timelineMark', x: cx, y0: GUTTER_TOP_HEIGHT, y1: viewport.canvasHeight, color: emphasisColor });
+  }
+
+  // ---- time differences (Java `drawTimeDifferences()`, gated by `showTimeDifferences`,
+  // default on) -- a dashed red polyline through EVERY selected event AND selected
+  // timeline coordinate, ordered by timeline coordinate, each segment labeled with the
+  // pairwise simulation-time delta. This is the Eclipse "measure the time between things
+  // you click / ctrl-click" mechanic. ----
+  if (flags.showTimeDifferences) {
+    const contentMidY = (GUTTER_TOP_HEIGHT + viewport.canvasHeight) / 2;
+    const diffPoints: { tc: number; simulationTime: string; x: number; y: number }[] = [];
+    if (selectedEventNumbers) {
+      for (const e of events) {
+        if (!selectedEventNumbers.has(e.eventNumber)) continue;
+        const axis = axisByModuleId.get(e.moduleId);
+        if (!axis) continue;
+        const tc = (e.tcBegin + e.tcEnd) / 2;
+        diffPoints.push({ tc, simulationTime: e.simulationTime, x: contentX(tc, viewport), y: axisRowY(axis.y, viewport) });
+      }
+    }
+    for (const coord of selectedTimelineCoords ?? []) {
+      diffPoints.push({ tc: coord.tc, simulationTime: coord.simulationTime, x: contentX(coord.tc, viewport), y: contentMidY });
+    }
+    diffPoints.sort((a, b) => a.tc - b.tc);
+    for (let i = 1; i < diffPoints.length; i++) {
+      const prev = diffPoints[i - 1];
+      const cur = diffPoints[i];
+      primitives.push({ kind: 'arrow', arrowKind: 'send', x1: prev.x, y1: prev.y, x2: cur.x, y2: cur.y, color: emphasisColor, dash: [3, 2] });
       if (showLabels) {
         const delta = subtractDecimalStrings(cur.simulationTime, prev.simulationTime);
         const text = (isNegativeDecimal(delta) ? '-' : '') + formatSimulationTime(delta.replace(/^-/, ''));
-        primitives.push({ kind: 'timeDifferenceLabel', x: (x1 + x2) / 2, y: (y1 + y2) / 2 - 12, text, color: selectionMarkColor(theme) });
+        primitives.push({ kind: 'timeDifferenceLabel', x: (prev.x + cur.x) / 2, y: (prev.y + cur.y) / 2 - 12, text, color: emphasisColor });
       }
     }
   }
@@ -473,6 +545,8 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
     pushInfoPanel(primitives, theme, infoPanelText.eventLogInfo, viewport.canvasWidth, viewport.canvasHeight, 'bottom');
   }
 
+  // Phase U11 -- selection/hover emphasis last, so it layers on top of the base scene.
+  for (const p of emphasis) primitives.push(p);
   return primitives;
 }
 
@@ -496,10 +570,12 @@ interface DependencyDrawContext {
   showLabels: boolean;
   /** Phase U6 -- see `bookmarkDependencyKey()`'s doc. */
   bookmarkedDependencyKeys?: ReadonlySet<string>;
+  /** Phase U11 -- the selection/hover emphasis pass. Hover keeps the dependency's own color but draws it WIDER; selection recolors it to `emphasisColor` (red). Either way it's solid (no message dash) and drawn on top of the base scene. */
+  override?: { emphasisColor: string; selected: boolean; hovered: boolean };
 }
 
 function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx: DependencyDrawContext): void {
-  const { axisByModuleId, viewport, theme, arrowColors, flags, axisSpacing, vlineBuffer, showLabels, bookmarkedDependencyKeys } = ctx;
+  const { axisByModuleId, viewport, theme, arrowColors, flags, axisSpacing, vlineBuffer, showLabels, bookmarkedDependencyKeys, override } = ctx;
   const isBookmarked = bookmarkedDependencyKeys?.has(bookmarkDependencyKey(dep.causeEventNumber, dep.consequenceEventNumber, dep.messageId)) ?? false;
   if (dep.causeModuleId === null && dep.consequenceModuleId === null) return;
   // Both sides need a resolvable axis to be placed at all -- an event whose module was
@@ -522,7 +598,13 @@ function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx:
   }
 
   const arrowKind: ArrowKind = dep.kind === 'send' ? 'send' : dep.kind === 'reuse' ? 'reuse' : 'filtered';
-  const { color, dash } = isFiltered ? filteredColorAndDash(arrowColors, dep.filteredKind) : { color: arrowColors[arrowKind], dash: arrowKind === 'reuse' ? [2, 2] : undefined };
+  let { color, dash } = isFiltered ? filteredColorAndDash(arrowColors, dep.filteredKind) : { color: arrowColors[arrowKind], dash: arrowKind === 'reuse' ? [2, 2] : undefined };
+  // Hover = same color, wider (3px); selection = red, Eclipse's 1.5px selection width.
+  const arrowWidth = override ? (override.hovered ? 3 : 1.5) : undefined;
+  if (override) {
+    if (override.selected) color = override.emphasisColor;
+    dash = undefined; // emphasis is solid
+  }
   // A split arrow's offscreen side has no real tc -- fall back to the KNOWN side so a
   // double-click "zoom to message" (which does `Math.min(causeTc, consequenceTc)`/`max`)
   // still zooms somewhere sensible instead of producing a `NaN` range.
@@ -548,7 +630,7 @@ function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx:
     if (!geom) return;
     for (const seg of geom.segments) {
       if (Math.abs(seg.x2 - seg.x1) < 1 && !vlineBuffer.addAndCheck((seg.x1 + seg.x2) / 2, seg.y1, seg.y2)) continue;
-      primitives.push({ kind: 'arrow', arrowKind, x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2, color, dash: seg.dashed ? OFFSCREEN_DASH : dash, ref: depRef });
+      primitives.push({ kind: 'arrow', arrowKind, x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2, color, dash: seg.dashed ? OFFSCREEN_DASH : dash, ref: depRef, width: arrowWidth });
     }
     if (geom.ellipse) primitives.push({ kind: 'ellipseArc', ...geom.ellipse, color, ref: depRef });
     if (geom.arrowhead) primitives.push({ kind: 'arrowHead', x: geom.arrowhead.x, y: geom.arrowhead.y, angle: geom.arrowhead.angle, color: geom.arrowhead.long ? LONG_ARROWHEAD_COLOR : color, length: geom.arrowhead.length, width: geom.arrowhead.width });
@@ -575,7 +657,7 @@ function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx:
   if (geom.parallelogram) primitives.push({ kind: 'parallelogram', points: geom.parallelogram.points, color: theme.isDark ? '#888888' : '#333333' });
   for (const seg of geom.segments) {
     if (Math.abs(seg.x2 - seg.x1) < 1 && !vlineBuffer.addAndCheck((seg.x1 + seg.x2) / 2, seg.y1, seg.y2)) continue;
-    primitives.push({ kind: 'arrow', arrowKind, x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2, color, dash: seg.dashed ? OFFSCREEN_DASH : dash, ref: depRef });
+    primitives.push({ kind: 'arrow', arrowKind, x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2, color, dash: seg.dashed ? OFFSCREEN_DASH : dash, ref: depRef, width: arrowWidth });
   }
   if (geom.arrowhead) primitives.push({ kind: 'arrowHead', x: geom.arrowhead.x, y: geom.arrowhead.y, angle: geom.arrowhead.angle, color: geom.arrowhead.long ? LONG_ARROWHEAD_COLOR : color, length: geom.arrowhead.length, width: geom.arrowhead.width });
   if (isFiltered && geom.signAnchor) primitives.push({ kind: 'zigzag', segments: buildFilteredSignSegments(geom.signAnchor), color });

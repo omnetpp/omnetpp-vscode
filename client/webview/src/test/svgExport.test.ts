@@ -101,17 +101,17 @@ test('buildChartSvg: root <svg> carries the requested width/height/viewBox and a
   assert.ok(svg.endsWith('</svg>'));
 });
 
-test('buildChartSvg: one <line>/<circle>/<text> per matching primitive, colors and dash arrays preserved', () => {
+test('buildChartSvg: one <line>/<rect>/<text> per matching primitive, colors and dash arrays preserved', () => {
   const primitives: DrawPrimitive[] = [
     { kind: 'axisLine', moduleId: 1, x1: 0, x2: 100, y: 10, lineHeight: 2, color: '#ffffff' },
-    { kind: 'eventMark', eventNumber: 1, moduleId: 1, x: 10, y: 10, radius: 3, color: '#cc0000' },
+    { kind: 'eventMark', eventNumber: 1, moduleId: 1, x: 10, xEnd: 10, y: 10, radius: 3, color: '#cc0000' },
     { kind: 'arrow', arrowKind: 'send', x1: 0, y1: 10, x2: 50, y2: 20, color: '#0000cc', dash: [2, 2] },
     { kind: 'label', x: 5, y: 5, text: 'hello & <world>', color: '#cccccc', align: 'left' },
   ];
   const svg = buildChartSvg({ primitives, widthPx: 200, heightPx: 50, backgroundColor: '#000000', fontFamily: 'sans-serif' });
 
   assert.strictEqual((svg.match(/<line /g) ?? []).length, 2, 'axisLine + arrow both serialize as <line>');
-  assert.strictEqual((svg.match(/<circle /g) ?? []).length, 1);
+  assert.strictEqual((svg.match(/rx="/g) ?? []).length, 1, "eventMark serializes as a rounded <rect> (stadium/circle)");
   assert.strictEqual((svg.match(/<text /g) ?? []).length, 1);
   assert.ok(svg.includes('stroke="#0000cc"'));
   assert.ok(svg.includes('stroke-dasharray="2,2"'));
@@ -181,10 +181,10 @@ test('buildChartSvg: parallelogram/zigzag draw as a filled polygon / a multi-sub
 test('buildChartSvg: moduleAction (interactive axis-management glyphs) is silently skipped -- not exported', () => {
   const primitives: DrawPrimitive[] = [
     { kind: 'moduleAction', action: 'expand', moduleId: 1, scope: 'axis', x: 0, y: 0, size: 11, color: '#888888' },
-    { kind: 'eventMark', eventNumber: 1, moduleId: 1, x: 5, y: 5, radius: 3, color: '#cc0000' },
+    { kind: 'eventMark', eventNumber: 1, moduleId: 1, x: 5, xEnd: 5, y: 5, radius: 3, color: '#cc0000' },
   ];
   const svg = buildChartSvg({ primitives, widthPx: 50, heightPx: 50, backgroundColor: '#fff', fontFamily: 'sans-serif' });
-  assert.strictEqual((svg.match(/<circle /g) ?? []).length, 1, 'only the eventMark should have drawn anything');
+  assert.strictEqual((svg.match(/rx="/g) ?? []).length, 1, "only the eventMark should have drawn anything");
   assert.ok(!svg.includes('#888888'));
 });
 
@@ -232,5 +232,5 @@ test('export range clipping: an export viewport built from resolveExportRange() 
   );
 
   const svg = buildChartSvg({ primitives, widthPx: GUTTER_LEFT_WIDTH + widthPx, heightPx: GUTTER_TOP_HEIGHT + 200, backgroundColor: theme.background, fontFamily: 'sans-serif' });
-  assert.strictEqual((svg.match(/<circle /g) ?? []).length, 1);
+  assert.strictEqual((svg.match(/rx="/g) ?? []).length, 1, "eventMark serializes as a rounded <rect> (stadium/circle)");
 });

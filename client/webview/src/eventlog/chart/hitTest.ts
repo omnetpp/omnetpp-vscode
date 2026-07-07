@@ -188,7 +188,7 @@ export function hitTest(params: HitTestParams): HitObject[] {
         break;
       case 'eventMark':
       case 'selfEventMark':
-        if (eventSymbolContainsPoint(px, py, p.x, p.x, p.y)) push({ kind: 'event', eventNumber: p.eventNumber, moduleId: p.moduleId });
+        if (eventSymbolContainsPoint(px, py, p.x, p.xEnd, p.y)) push({ kind: 'event', eventNumber: p.eventNumber, moduleId: p.moduleId });
         break;
       case 'arrow':
         if (p.ref && lineContainsPoint(p.x1, p.y1, p.x2, p.y2, px, py)) push(arrowRefToHit(p.ref));

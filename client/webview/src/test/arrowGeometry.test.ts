@@ -184,6 +184,19 @@ test('computeSelfArrowGeometry: both endpoints known and distinct -> a full half
   assert.strictEqual(geom.ellipse!.y, 200);
   const expectedHeight = selfMessageEllipseHeight(0, 100, 14, 15);
   assert.strictEqual(geom.ellipse!.height, expectedHeight);
+  // arrowhead follows the ellipse tangent at the (right) consequence endpoint, NOT straight
+  // down: it should point down-AND-to-the-right (angle strictly between 0 and PI/2), not PI/2.
+  assert.ok(geom.arrowhead);
+  const angle = geom.arrowhead!.angle;
+  assert.ok(angle > 0 && angle < Math.PI / 2, `self-arc arrowhead should be diagonal (0 < ${angle} < PI/2), not straight down`);
+});
+
+test('computeSelfArrowGeometry: the arrowhead angle tracks the ellipse shape -- a taller ellipse arrives steeper (nearer PI/2) than a flat wide one', () => {
+  const tall = computeSelfArrowGeometry({ cause: { x: 60 }, consequence: { x: 140 }, y: 200, eventNumberDelta: 5, axisSpacing: 100, showArrowHeads: true, isFiltered: false, minHalfEllipseHeight: 60 })!;
+  const flat = computeSelfArrowGeometry({ cause: { x: 0 }, consequence: { x: 400 }, y: 200, eventNumberDelta: 0, axisSpacing: 100, showArrowHeads: true, isFiltered: false, minHalfEllipseHeight: 2 })!;
+  assert.ok(Number.isFinite(tall.arrowhead!.angle) && Number.isFinite(flat.arrowhead!.angle));
+  assert.ok(tall.arrowhead!.angle > flat.arrowhead!.angle, `taller ellipse should arrive steeper (${tall.arrowhead!.angle} > ${flat.arrowhead!.angle})`);
+  assert.ok(tall.arrowhead!.angle <= Math.PI / 2 + 1e-9 && flat.arrowhead!.angle >= -1e-9);
 });
 
 test('computeSelfArrowGeometry: cause offscreen -> quarter=1 (right quarter, near the real consequence) + a dashed tail', () => {
