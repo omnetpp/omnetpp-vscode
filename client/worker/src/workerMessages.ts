@@ -24,12 +24,7 @@ export interface CancelMessage {
   id: number | string;
 }
 
-/** Drives `EngineSession.checkForChanges()` -- see watcher.ts's header for why this exists already in E8 even though the real fs.watch push side is E9. */
-export interface CheckChangesMessage {
-  kind: 'checkChanges';
-}
-
-export type MainToEngineMessage = JobMessage | CancelMessage | CheckChangesMessage;
+export type MainToEngineMessage = JobMessage | CancelMessage;
 
 export interface ResponseMessage {
   kind: 'response';

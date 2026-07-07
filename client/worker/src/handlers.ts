@@ -55,6 +55,8 @@ function dispatch(session: EngineSession, method: string, params: unknown): unkn
       return session.findText(params as Parameters<EngineSession['findText']>[0]);
     case ElogMethods.getEventDetail:
       return session.getEventDetail(params as Parameters<EngineSession['getEventDetail']>[0]);
+    case ElogMethods.checkChanges:
+      return session.checkChanges();
     case ElogMethods.close:
       session.close();
       return null;

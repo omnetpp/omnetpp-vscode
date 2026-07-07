@@ -20,13 +20,34 @@
  * exactly one engine thread per process, never a recursive re-spawn (the worker
  * thread's own `isMainThread` is `false`, so its copy of this file's top-level code
  * takes the "do nothing" branch instead of spawning yet another worker).
+ *
+ * LIVE FOLLOW (phase E9): change detection (`watcher.ts`'s fs.watch + poll-timer
+ * hybrid) only ever *requests* a check -- `requestCheckFileChange()` below turns any
+ * number of such requests into at most one outstanding `elog/checkChanges` job,
+ * posted through the exact same `JobMessage` queue as every other `elog/*` request
+ * (`engineThread.ts`'s `queue` is a plain FIFO array). That gives both properties the
+ * phase's task list asks for, "for free", from the queue's own ordering semantics:
+ *   - "must not preempt in-flight jobs": it's appended to the end of the queue like
+ *     any other job, so it only runs once every already-queued/running request has
+ *     been serviced -- never jumps ahead of them.
+ *   - "dedupe if one is already queued": `checkFileChangeRequestId` tracks whether a
+ *     check is currently outstanding (queued or running); `requestCheckFileChange()`
+ *     is a no-op while one is, so fs.watch firing spuriously and/or a poll tick
+ *     landing before the previous check's response comes back never queues more than
+ *     one.
+ * The corresponding `elog/checkChanges` JSON-RPC method (for a UI "refresh" button)
+ * needs none of this bookkeeping: it's just another entry in `ElogMethods`, handled
+ * by the generic per-method loop below like any other request -- routed through
+ * `callEngine()`, which always allocates a fresh id and never dedupes (a user asking
+ * to refresh should always get a real round trip, even if a background check happens
+ * to be outstanding at the same moment).
  */
 
 import { isMainThread, Worker } from 'node:worker_threads';
 import { createMessageConnection, ResponseError, StreamMessageReader, StreamMessageWriter, type CancellationToken } from 'vscode-jsonrpc/node';
-import { ElogMethods, ElogNotifications, type ElogChangedParams, type ElogProgressParams } from '@omnetpp/shared/elog-protocol';
+import { ElogMethods, ElogNotifications, type ElogChangedParams, type ElogProgressParams, type OpenParams } from '@omnetpp/shared/elog-protocol';
 import { maybeStartEngineThread } from './engineThread';
-import type { CancelMessage, CheckChangesMessage, EngineToMainMessage, JobMessage } from './workerMessages';
+import type { CancelMessage, EngineToMainMessage, JobMessage } from './workerMessages';
 import { watchFile, type FileWatcher } from './watcher';
 
 // Runs (harmlessly no-ops) on every thread that executes this bundle -- see this
@@ -35,8 +56,6 @@ import { watchFile, type FileWatcher } from './watcher';
 maybeStartEngineThread();
 
 if (isMainThread) runMain();
-
-const POLL_INTERVAL_MS = 3000;
 
 function runMain(): void {
   const worker = new Worker(__filename, { workerData: { role: 'engine' } });
@@ -50,15 +69,33 @@ function runMain(): void {
   let openPath: string | null = null;
   let watcher: FileWatcher | null = null;
 
+  // Phase E9: id of the currently-outstanding (queued or running) internal
+  // `elog/checkChanges` job the watcher triggered, or `null` if none -- see this
+  // file's header. Deliberately untracked in `pendingResolvers` (fire-and-forget: no
+  // caller is awaiting it), so its eventual `response` message is simply dropped by
+  // the "response for an id we've already stopped tracking" branch below, same as any
+  // other response nobody is listening for.
+  let checkFileChangeRequestId: number | null = null;
+
+  function requestCheckFileChange(): void {
+    if (openPath === null || checkFileChangeRequestId !== null) return;
+    const id = nextJobId++;
+    checkFileChangeRequestId = id;
+    const cancelBuffer = new SharedArrayBuffer(4); // never signaled -- this internal check is never cancelled
+    const jobMessage: JobMessage = { kind: 'job', id, method: ElogMethods.checkChanges, params: undefined, cancelBuffer };
+    worker.postMessage(jobMessage);
+  }
+
   worker.on('message', (message: EngineToMainMessage) => {
     switch (message.kind) {
       case 'response': {
         const id = message.id as number;
+        if (id === checkFileChangeRequestId) checkFileChangeRequestId = null;
         const resolver = pendingResolvers.get(id);
         pendingResolvers.delete(id);
         pendingCancelDisposables.get(id)?.dispose();
         pendingCancelDisposables.delete(id);
-        if (resolver === undefined) return; // response for an id we've already stopped tracking (e.g. late reply after a drop)
+        if (resolver === undefined) return; // response for an id we've already stopped tracking (e.g. late reply after a drop, or the internal checkFileChange job above)
         if (message.error !== undefined) resolver.reject(new ResponseError(message.error.code, message.error.message, message.error.data));
         else resolver.resolve(message.result);
         break;
@@ -103,9 +140,11 @@ function runMain(): void {
     connection.onRequest(method, (params: unknown, token: CancellationToken) => {
       if (method === ElogMethods.open) {
         return callEngine(method, params, token).then((result) => {
-          openPath = (params as { path: string }).path;
+          const openParams = params as OpenParams;
+          openPath = openParams.path;
           watcher?.dispose();
-          watcher = watchFile(openPath, () => worker.postMessage({ kind: 'checkChanges' } satisfies CheckChangesMessage));
+          checkFileChangeRequestId = null; // any check against the previous file is now moot
+          watcher = watchFile(openPath, requestCheckFileChange, { pollIntervalMs: openParams.options?.pollIntervalMs });
           return result;
         });
       }
@@ -113,21 +152,13 @@ function runMain(): void {
         watcher?.dispose();
         watcher = null;
         openPath = null;
+        checkFileChangeRequestId = null;
       }
       return callEngine(method, params, token);
     });
   }
 
-  // 3s poll timer (per the port plan/E8 task list: "a 3s poll timer + fs.watch
-  // (watcher can be a stub file this phase)") -- this is the real, working half of
-  // change detection; watcher.ts's fs.watch push side is the E9 stub.
-  const pollTimer = setInterval(() => {
-    if (openPath !== null) worker.postMessage({ kind: 'checkChanges' } satisfies CheckChangesMessage);
-  }, POLL_INTERVAL_MS);
-  pollTimer.unref(); // never keeps the process alive on its own
-
   connection.onClose(() => {
-    clearInterval(pollTimer);
     watcher?.dispose();
     void worker.terminate();
     process.exit(0);

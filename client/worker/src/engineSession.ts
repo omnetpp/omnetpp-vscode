@@ -49,6 +49,7 @@ import { NodeRandomAccessFile } from '@omnetpp/shared/node';
 import type {
   AdjacencyParams,
   AdjacencyResult,
+  CheckChangesResult,
   ElogModule,
   ElogOpenOptions,
   EventDetail,
@@ -121,6 +122,19 @@ export class EngineSession {
 
   private pinnedViewportEventNumbers: number[] = [];
 
+  /**
+   * Phase E9 (live follow): the event number of the last event as of the most recent
+   * open()/synchronize(), kept pinned (see `pinFirstEvent()`/`repinLastEvent()` below)
+   * so it survives eviction across the moment between an APPENDED synchronize and the
+   * next request that actually looks at the new tail (e.g. a "goto end"/follow-end
+   * jump the UI issues right after an `elog/changed` notification). `null` before the
+   * first open() completes, or for an empty log. Note this is purely an *additional*
+   * pin on top of `EventLog`/`FilteredEventLog`'s own automatic first/last-event
+   * eviction protection (`isEventEvictable()`, phase E7) -- belt and suspenders, not a
+   * substitute for it.
+   */
+  private pinnedLastEventNumber: number | null = null;
+
   private activeJob: { cancelFlag: Int32Array; notify: () => void } | null = null;
 
   // ---- job/progress plumbing (see this file's header) ------------------------------
@@ -151,12 +165,13 @@ export class EngineSession {
   }
 
   /**
-   * E9 hook point ("the change-check request path should exist" per the E8 task
-   * list, even though the real watcher is a stub this phase): a side-effect-free-
-   * unless-changed poll, driven by `engineThread.ts`'s periodic `checkChanges`
-   * message (itself driven by `main.ts`'s 3s timer). Returns `null` if nothing
-   * changed, else the same `{change, summary}` shape `ContentChangedError` carries
-   * (which `engineThread.ts` forwards as an unsolicited `elog/changed` notification).
+   * Phase E9 ("live follow"): a side-effect-free-unless-changed poll, driven by the
+   * `elog/checkChanges` job (both the manual/UI-refresh request and the internal one
+   * `client/worker/src/watcher.ts`'s fs.watch/poll-timer hybrid posts -- see
+   * `checkChanges()` below and engineThread.ts's job handling). Returns `null` if
+   * nothing changed, else the same `{change, summary}` shape `ContentChangedError`
+   * carries (which engineThread.ts also forwards as an unsolicited `elog/changed`
+   * notification in both cases -- see this file's header and engineThread.ts).
    */
   checkForChanges(): { change: 'appended' | 'overwritten'; summary: LogSummary } | null {
     if (this.reader === null) return null;
@@ -165,16 +180,79 @@ export class EngineSession {
     return this.synchronizeToCurrentFileState(rawChange);
   }
 
+  /** `elog/checkChanges`'s handler (see elogProtocol.ts's `ElogMethods.checkChanges` doc comment) -- same underlying check as `checkForChanges()`, wrapped into the RPC-facing result shape (always returns a summary, whether or not anything changed). */
+  checkChanges(): CheckChangesResult {
+    const result = this.checkForChanges();
+    if (result === null) return { changed: false, summary: this.getSummary() };
+    return { changed: true, change: result.change, summary: result.summary };
+  }
+
+  /**
+   * Runs the Java `EventLogInput.doSynchronize()` orchestration verbatim (source:
+   * `omnetpp-dev/ui/.../common/eventlog/EventLogInput.java`): `eventLog.synchronize()`
+   * (whichever of the raw `EventLog`/`FilteredEventLog` is currently active -- Java's
+   * single `eventLog` field plays both roles, see this class's `log` getter), THEN
+   * `getEventLogTableFacade().synchronize()`, THEN `getSequenceChartFacade().synchronize()`
+   * -- in that order (verified: Java calls the table facade before the sequence chart
+   * facade). Both facades' own `synchronize()` only re-derive/re-anchor their *own*
+   * state (timeline coordinate system, filter-mode caches) from the already-synchronized
+   * log, so the two calls are independent of each other, but the order is kept faithful
+   * to the source rather than relying on that independence.
+   */
   private synchronizeToCurrentFileState(rawChange: FileChange): { change: 'appended' | 'overwritten'; summary: LogSummary } {
     if (this.reader === null || this.eventLog === null) throw new Error('EngineSession.synchronizeToCurrentFileState: no file open');
     const change: 'appended' | 'overwritten' = rawChange === FileChange.APPENDED ? 'appended' : 'overwritten';
     const engineChange = rawChange === FileChange.APPENDED ? FileChange.APPENDED : FileChange.OVERWRITTEN;
-    if (this.filteredEventLog !== null) this.filteredEventLog.synchronize(engineChange);
-    else this.eventLog.synchronize(engineChange);
-    this.sequenceChartFacade?.synchronize(engineChange);
+
+    this.log.synchronize(engineChange);
     this.tableFacade?.synchronize(engineChange);
+    this.sequenceChartFacade?.synchronize(engineChange);
+
+    if (engineChange === FileChange.OVERWRITTEN) {
+      // OVERWRITTEN's synchronize() path is a full reset (EventLog/FilteredEventLog's
+      // own `clearInternalState()` -- see their `synchronize()` methods): every pin
+      // (including first/last) is wiped along with the rest of the caches, and the
+      // sequence chart facade's timeline coordinate system is left undefined (its
+      // `clearInternalState()` doesn't re-establish one -- there is no Java-side
+      // equivalent of an EngineSession to make that call, since the Eclipse IDE's
+      // SequenceChart widget re-anchors lazily on its own). Any retained FilterParams
+      // are untouched (they live as plain fields on the same `FilteredEventLog`
+      // instance, which OVERWRITTEN never replaces -- only its caches are cleared), so
+      // "re-apply retained FilterParams" falls out for free here; re-establish a sane
+      // default anchor the same way open() does.
+      this.pinnedViewportEventNumbers = [];
+      this.pinnedLastEventNumber = null;
+      this.pinFirstEvent();
+    }
+    this.repinLastEvent();
+
     this.logVersion++;
     return { change, summary: this.getSummary() };
+  }
+
+  /** Pins the current first event and relocates the sequence chart's timeline coordinate system origin to it (a sane default anchor) -- shared by `open()` and the OVERWRITTEN synchronize path (see this file's header on both). No-op on an empty log. */
+  private pinFirstEvent(): void {
+    const first = this.log.getFirstEvent();
+    if (first === null) return;
+    this.pinnable.pinEvent(first.getEventNumber());
+    this.sc.relocateTimelineCoordinateSystem(first);
+  }
+
+  /**
+   * Moves the "pin the last event" protection (see `pinnedLastEventNumber`'s doc
+   * comment) to whatever the current last event is: unpins the previously-pinned
+   * event number (if it's no longer the last one), then pins the new last event.
+   * Called after every open()/synchronize() -- a no-op churn-wise on an unchanged log
+   * (same event number in, same event number out).
+   */
+  private repinLastEvent(): void {
+    const last = this.log.getLastEvent();
+    const lastEventNumber = last !== null ? last.getEventNumber() : null;
+    if (this.pinnedLastEventNumber !== null && this.pinnedLastEventNumber !== lastEventNumber) {
+      this.pinnable.unpinEvent(this.pinnedLastEventNumber);
+    }
+    if (last !== null) this.pinnable.pinEvent(last.getEventNumber());
+    this.pinnedLastEventNumber = lastEventNumber;
   }
 
   // ---- the active log (raw or filtered) + facades -----------------------------------
@@ -212,12 +290,11 @@ export class EngineSession {
     this.rebuildFacades(this.eventLog);
     this.logVersion++;
     // pin the origin (first event) so relocate-to-start stays cheap and the initial
-    // timeline coordinate system has a stable anchor across subsequent viewport pins.
-    const first = this.eventLog.getFirstEvent();
-    if (first !== null) {
-      this.sequenceChartFacade!.relocateTimelineCoordinateSystem(first);
-      this.eventLog.pinEvent(first.getEventNumber());
-    }
+    // timeline coordinate system has a stable anchor across subsequent viewport pins;
+    // also pin the last event (phase E9 -- see `pinnedLastEventNumber`'s doc comment).
+    // `closeInternal()` above already reset `pinnedLastEventNumber` to null.
+    this.pinFirstEvent();
+    this.repinLastEvent();
     return this.getSummary();
   }
 
@@ -251,6 +328,7 @@ export class EngineSession {
     this.sequenceChartFacade = null;
     this.tableFacade = null;
     this.pinnedViewportEventNumbers = [];
+    this.pinnedLastEventNumber = null;
   }
 
   private rebuildFacades(log: IEventLog): void {
@@ -282,6 +360,15 @@ export class EngineSession {
     }
     this.rebuildFacades(this.log);
     this.pinnedViewportEventNumbers = [];
+    // The previously-pinned last-event number (if any) was pinned on whichever log
+    // object was active before this call (the raw `EventLog`, or a now-discarded
+    // `FilteredEventLog`) -- not on the newly-active `this.log`/`this.pinnable`. Rather
+    // than unpin it on the wrong object, just drop the bookkeeping: the next
+    // synchronize() (`repinLastEvent()`) re-populates it fresh against whichever log
+    // is active then, and in the meantime the current last event stays protected
+    // regardless via `EventLog`/`FilteredEventLog`'s own automatic first/last-event
+    // eviction guard (phase E7).
+    this.pinnedLastEventNumber = null;
     this.logVersion++;
     return this.getSummary();
   }

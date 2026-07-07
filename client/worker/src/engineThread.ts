@@ -16,7 +16,7 @@
  */
 
 import { isMainThread, parentPort, workerData } from 'node:worker_threads';
-import { CONTENT_CHANGED_ERROR_CODE, REQUEST_CANCELLED_ERROR_CODE, type ContentChangedErrorData } from '@omnetpp/shared/elog-protocol';
+import { CONTENT_CHANGED_ERROR_CODE, ElogMethods, REQUEST_CANCELLED_ERROR_CODE, type CheckChangesResult, type ContentChangedErrorData } from '@omnetpp/shared/elog-protocol';
 import { ContentChangedError, EngineSession, RequestCancelledError } from './engineSession';
 import { handleElogRequest } from './handlers';
 import type { CancelMessage, EngineToMainMessage, JobMessage, MainToEngineMessage } from './workerMessages';
@@ -50,8 +50,30 @@ function startEngineThread(): void {
         try {
           const result = handleElogRequest(session, job.method, job.params, cancelFlag, () => post({ kind: 'progress', id: job!.id }));
           post({ kind: 'response', id: job.id, result });
+          // Phase E9 ("live follow"): `elog/checkChanges` is a normal, low-priority job
+          // like any other (see main.ts's header on why it's routed through this same
+          // FIFO queue rather than a separate immediate side-channel) -- but on top of
+          // the ordinary request/response round trip above, a *positive* result also
+          // gets broadcast as an unsolicited `elog/changed` notification, exactly like
+          // the mid-request case below. This covers both triggers uniformly: the
+          // watcher-driven check (fire-and-forget from `main.ts`'s perspective -- see
+          // its `requestCheckFileChange()`) and a client's own manual `elog/checkChanges`
+          // request both end up here, and either way every listener learns about the
+          // change, not just whoever happened to ask.
+          if (job.method === ElogMethods.checkChanges) {
+            const checkResult = result as CheckChangesResult;
+            if (checkResult.changed) post({ kind: 'changed', change: checkResult.change!, summary: checkResult.summary });
+          }
         } catch (err) {
           post({ kind: 'response', id: job.id, error: toRpcError(err) });
+          // Phase E9: a request that was interrupted mid-scan by a file change has
+          // already been synchronized (see EngineSession.runJob()'s catch clause,
+          // which converts the underlying `FileChangedError` into this
+          // `ContentChangedError` only after calling `synchronizeToCurrentFileState()`)
+          // -- so broadcast the same `elog/changed` notification here too, not just to
+          // this one caller via the error response above (item 3 of the phase's task
+          // list: "runs the full synchronize flow (incl. notification)").
+          if (err instanceof ContentChangedError) post({ kind: 'changed', change: err.change, summary: err.summary });
         } finally {
           runningJobId = null;
         }
@@ -70,11 +92,6 @@ function startEngineThread(): void {
       case 'cancel':
         dropQueuedJob(message);
         break;
-      case 'checkChanges': {
-        const changed = session.checkForChanges();
-        if (changed !== null) post({ kind: 'changed', change: changed.change, summary: changed.summary });
-        break;
-      }
     }
   });
 

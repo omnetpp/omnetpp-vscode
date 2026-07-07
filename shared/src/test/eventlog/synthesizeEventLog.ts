@@ -115,6 +115,42 @@ export function synthesizeChunkedEventLog(options: { eventCount: number; simTime
   return { text, eventCount: options.eventCount, simTimes };
 }
 
+export interface SynthesizedEventLogSteps {
+  /**
+   * `cumulativeText[k]` is the full `.elog` text (SB header + events `#0..#(k-1)`, no
+   * `SE` trailer -- a still-running simulation hasn't written one yet) for every `k`
+   * from `0` to `eventCount`. Deliberately built with the exact same per-event line
+   * shape as `synthesizeEventLog()` (single-event-per-`E`-line, `MC` only on event
+   * #0), so any `cumulativeText[k]` is a byte-for-byte-valid prefix of every
+   * `cumulativeText[m]` with `m > k` -- i.e. `cumulativeText[m].slice(cumulativeText[k]
+   * .length)` is exactly the bytes a live-growing eventlog file would have had
+   * appended to it between having `k` and `m` events. Phase E9's live-follow tests
+   * use this to simulate a real append (`fs.appendFileSync`) without needing an
+   * actual running simulation process.
+   */
+  cumulativeText: string[];
+  simTimes: string[];
+}
+
+/** Like `synthesizeEventLog()`, but returns every prefix instead of only the final text -- see `SynthesizedEventLogSteps`'s doc comment. */
+export function synthesizeEventLogSteps(options: { eventCount: number; simTimeForEvent?: (i: number) => string; fillerBytesPerEvent?: number }): SynthesizedEventLogSteps {
+  const simTimeForEvent = options.simTimeForEvent ?? ((i: number) => String(i));
+  const filler = options.fillerBytesPerEvent ?? 0;
+  let text = 'SB ov 1536 ev 2 rid Test-0\n\n';
+  const cumulativeText: string[] = [text];
+  const simTimes: string[] = [];
+  for (let i = 0; i < options.eventCount; i++) {
+    const simTime = simTimeForEvent(i);
+    simTimes.push(simTime);
+    text += `E # ${i} t ${simTime} m 1 ce -1 msg -1\n`;
+    if (i === 0) text += 'MC id 1 c C t T n root cm 1\n';
+    if (filler > 0) text += '- ' + 'x'.repeat(filler) + '\n';
+    text += '\n';
+    cumulativeText.push(text);
+  }
+  return { cumulativeText, simTimes };
+}
+
 /** Non-decreasing simulation-time generator with runs of duplicate values, e.g.
  * `runLengths=[10,5,3]` yields ten events at t=0, five at t=1, three at t=2, and (if
  * `eventCount` exceeds the sum) continues incrementing by 1 per subsequent event. */

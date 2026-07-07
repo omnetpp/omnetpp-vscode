@@ -75,6 +75,19 @@ export const ElogMethods = {
   findText: 'elog/findText',
   /** request: EventDetailParams → EventDetail | null */
   getEventDetail: 'elog/getEventDetail',
+  /**
+   * request: void → CheckChangesResult. ADDITIVE (phase E9, "live follow"): forces an
+   * immediate check of the underlying file against the last-synchronized state (the
+   * same check the fs.watch/poll-timer hybrid in `client/worker/src/watcher.ts` drives
+   * automatically) -- for a UI refresh button, or a client that wants a synchronous
+   * answer instead of waiting for an unsolicited `elog/changed`. Runs as a normal,
+   * low-priority job on the engine thread's FIFO queue (see engineThread.ts), so it
+   * never preempts an already-queued/in-flight request; if a change is found, the
+   * engine also emits the matching `elog/changed` notification (so every listener --
+   * not just whoever happened to call this -- learns about it), in addition to
+   * returning the result to this specific caller.
+   */
+  checkChanges: 'elog/checkChanges',
   /** request: void → void. ADDITIVE: releases the open file/engine (E9 will add "Release Memory" semantics on top). */
   close: 'elog/close',
 } as const;
@@ -126,6 +139,16 @@ export interface ElogOpenOptions {
   offsetCacheLimit?: number;
   smallFileThresholdBytes?: number;
   parseBeginEndBytes?: number;
+  /**
+   * Phase E9 ("live follow"): poll-timer interval, in ms, for `client/worker/src/
+   * watcher.ts`'s change-detection fallback (used alongside `fs.watch`, which can miss
+   * events -- e.g. across a rename/recreate on some filesystems -- or be unsupported on
+   * a network mount). `0` disables the poll timer entirely (fs.watch keeps running);
+   * intended for tests that want to drive change detection deterministically via the
+   * manual `elog/checkChanges` request instead of waiting on a timer. Default 3000,
+   * matching the Eclipse IDE's `EventLogInput`'s `RecurringJob(3000)`.
+   */
+  pollIntervalMs?: number;
 }
 
 export interface OpenParams {
@@ -456,6 +479,19 @@ export interface FindTextParams {
 export interface FindTextResult {
   found: boolean;
   ref: RowRef | null;
+}
+
+// ---------------------------------------------------------------------------------
+// elog/checkChanges
+// ---------------------------------------------------------------------------------
+
+/** Result of `elog/checkChanges` -- see `ElogMethods.checkChanges`'s doc comment. */
+export interface CheckChangesResult {
+  changed: boolean;
+  /** Present iff `changed`. */
+  change?: 'appended' | 'overwritten';
+  /** The current summary either way: unchanged from before if `!changed`, fresh (post-synchronize) if `changed`. */
+  summary: LogSummary;
 }
 
 // ---------------------------------------------------------------------------------

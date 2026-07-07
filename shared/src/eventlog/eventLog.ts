@@ -325,14 +325,44 @@ export class EventLog extends EventLogIndex implements IEventLogContext, Progres
    * Port of `EventLog.synchronize()`. NOTE: Java literally calls
    * `super.synchronize(change)` TWICE in a row here (verified against the source, not
    * a transcription artifact of this port). This is preserved verbatim ("port
-   * BEHAVIOR, not appearance") -- it is harmless, not merely coincidentally: the
-   * second call re-derives `reader.synchronize(change)` (idempotent) and, on APPENDED,
-   * removes `lastEventNumber`/`lastSimulationTime` from the two cache maps, but
-   * `EventLogIndex.synchronize()`'s own APPENDED branch already reset both fields to
-   * their "not yet calculated" sentinels on the first call, so the second call's
-   * `.delete()`s are guaranteed no-ops. E9 (live-follow) is expected to exercise this
-   * path for real; it is implemented faithfully now per the phase plan but not
-   * exhaustively tested until then.
+   * BEHAVIOR, not appearance") -- it is harmless: the second call just re-derives
+   * `reader.synchronize(change)` (idempotent) and re-does the two field resets below
+   * (also idempotent, since they're plain assignments to fixed sentinel values).
+   *
+   * FIX (phase E9, live-follow integration testing): the APPENDED branch below reads
+   * `this.lastEvent.getEventNumber()` -- verified against
+   * `omnetpp-dev/ui/.../EventLog.java`'s `eventNumberToCacheEntryMap.remove(lastEvent
+   * .getEventNumber())`, i.e. it reads the event number off the still-live `lastEvent`
+   * object, NOT the `lastEventNumber` *field*. That distinction matters: by this point
+   * the two `super.synchronize(change)` calls above have already reset the
+   * `lastEventNumber` field to the `EVENT_NOT_YET_CALCULATED` sentinel
+   * (`EventLogIndex.synchronize()`'s own APPENDED branch, phase E4). The phase-E4 port
+   * of this method used `this.lastEventNumber` (the already-reset field) here instead
+   * -- a transcription bug that turned this into a no-op deleting the sentinel key,
+   * leaving the *real* last event's now-stale offset-cache entry in place. That stale
+   * entry could then make a subsequent `getEventForEventNumber()`/offset search resolve
+   * the old (pre-reparse) begin/end offset for that event number, instead of falling
+   * through to a fresh parse -- exactly the kind of gap phase E9 was told to look for.
+   * Fixed by reading `this.lastEvent.getEventNumber()` directly (unaffected by the
+   * field reset, and unaffected by the very next line's `parseLines()`, which only
+   * extends the event's *end* offset, never changes its event number).
+   *
+   * FIX #2 (phase E9, live-follow integration testing): `lastEvent.parseLines(reader,
+   * lastEvent.getEndOffset())` is Java-faithful (`Event.java`'s `parseLines()` has the
+   * identical `Assert.isTrue((eventEntry == null && readEventEntry != null) ||
+   * (eventEntry != null && readEventEntry == null))`), but calling it UNCONDITIONALLY
+   * here throws whenever `lastEvent` had already been *cleanly* terminated by its own
+   * blank-line separator before this append -- i.e. whenever the appended bytes start
+   * a brand new event rather than continuing `lastEvent`'s own (previously
+   * incomplete) entry list. `parseLines()` has no way to tell "clean prior boundary,
+   * now starting fresh on a new event" apart from "corrupt file, an unexpected
+   * mid-event `E` line" from inside its own loop -- that distinction can only be made
+   * here, by peeking at the first line before deciding whether to continue parsing
+   * the old event at all. This is also the overwhelmingly common live-follow case in
+   * practice (an append landing between two complete events, not mid-event), so
+   * skipping this check isn't a rare-edge-case gap -- it made basic append handling
+   * unusable. Ported the general shape of `parseLines()`'s own `EventEntry` check
+   * (`entries.ts`'s `EventEntry`, "E "-prefixed lines) for the peek.
    */
   synchronize(change: FileChange): void {
     if (change !== FileChange.UNCHANGED) {
@@ -346,23 +376,46 @@ export class EventLog extends EventLogIndex implements IEventLogContext, Progres
         case FileChange.APPENDED:
           this.approximateNumberOfEvents = -1;
           if (this.lastEvent !== null) {
-            this.lastEvent.parseLines(this.reader, this.lastEvent.getEndOffset());
-            // NOTE (kept verbatim from Java -- see this method's doc comment above):
-            // by this point the two `super.synchronize(change)` calls above have
-            // already reset `this.lastEventNumber` to the EVENT_NOT_YET_CALCULATED
-            // sentinel (EventLogIndex's own APPENDED branch), so this `.delete(...)`
-            // removes that sentinel key, not `this.lastEvent`'s real event number --
-            // a no-op, exactly as in the Java source (`eventNumberToCacheEntryMap
-            // .remove(lastEventNumber)` reads the same already-reset field). Fields
-            // are `protected` on `EventLogIndex`, hence this direct subclass access.
-            this.eventNumberToCacheEntryMap.delete(this.lastEventNumber);
+            // See "FIX #2" above: only continue parsing `lastEvent` itself if the
+            // first line right after its previously-known end is NOT already a fresh
+            // event line (i.e. genuinely more entries were appended for THIS event,
+            // not a whole new one).
+            this.reader.seekTo(this.lastEvent.getEndOffset());
+            const peeked = this.reader.getNextLine();
+            const nextLineStartsANewEvent = peeked !== null && peeked.text.length >= 2 && peeked.text[0] === 'E' && peeked.text[1] === ' ';
+            if (!nextLineStartsANewEvent) this.lastEvent.parseLines(this.reader, this.lastEvent.getEndOffset());
+            // See this method's doc comment above: read the event number off the
+            // `lastEvent` object itself, not the already-reset `lastEventNumber` field.
+            this.eventNumberToCacheEntryMap.delete(this.lastEvent.getEventNumber());
             this.endOffsetToEventMap.delete(this.lastEvent.getEndOffset());
             this.lastEventNumber = EventNumberKind.EVENT_NOT_YET_CALCULATED;
             this.lastSimulationTime = BigDecimal.MINUS_ONE;
             this.lastEventOffset = -1;
             this.lastEvent = null;
           }
-          for (const event of this.eventNumberToEventMap.values()) event.synchronize(change);
+          // DEVIATION (phase E9, live-follow integration testing) from the literal Java
+          // `for (Event it : eventNumberToEventMap.values()) it.synchronize(change)`:
+          // `Event.synchronize()`'s APPENDED case calls the *same* `clearInternalState()`
+          // as OVERWRITTEN (verified against Event.java -- not a transcription
+          // difference), which nulls out `eventEntry`/`eventLogEntries`/offsets on
+          // EVERY still-cached event, not just the repaired `lastEvent` above. Doing
+          // that turned any subsequent access to an already-cached event (most
+          // immediately: `SequenceChartFacade.synchronize()`'s own APPENDED handling,
+          // which re-fetches the timeline origin event by number with `useCacheOnly:
+          // true` right after this method returns) into a crash dereferencing a null
+          // `eventEntry` -- neither Java's nor this port's `getEventForEventNumber()`/
+          // `getEventForBeginOffset()` cache-hit paths re-parse a "hollowed" object
+          // before handing it back (Java's original design has no notion of a stale-
+          // but-still-cached event at all: it never mutates a *valid* cached Event in
+          // place except via this exact call). An append, by definition, cannot change
+          // anything about a *previously written* event's own content/offsets/level
+          // nesting -- only `lastEvent` (already repaired above, since the append may
+          // have continued its previously-incomplete tail) can possibly need updating.
+          // So: leave every other still-cached event exactly as it is (matches E7's
+          // eviction-safety invariant already documented on `evictCachedEvent()`: "any
+          // reference a caller is still holding stays a perfectly valid ... snapshot"),
+          // and let `parseIndicesAndSnapshots()` below discover the newly appended
+          // events (which were never cached at all yet) the normal way.
           this.parseIndicesAndSnapshots();
           break;
         default:

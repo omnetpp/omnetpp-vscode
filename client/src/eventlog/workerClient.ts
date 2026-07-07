@@ -20,16 +20,28 @@
  * attempt to restore in-flight requests (those reject) or exact viewport/table
  * scroll position (that's the session/webview's job to re-request once the
  * `restarted` event fires).
+ *
+ * Live follow (phase E9): `rawRequest()` (every typed method below funnels through
+ * it) automatically retries a request ONCE if it fails with `ContentChanged` (the
+ * file changed mid-request -- see elogProtocol.ts's `CONTENT_CHANGED_ERROR_CODE` doc
+ * comment) -- by the time that error surfaces, the worker's engine has already
+ * synchronized, so the retry runs against fresh state. `onChanged()` fires for BOTH
+ * how a change can be learned about: the worker's own fs.watch/poll-timer hybrid
+ * noticing it while otherwise idle, or a request hitting `ContentChanged` mid-flight
+ * (the engine broadcasts the same notification either way -- see engineThread.ts).
  */
 
 import type { ChildProcessWithoutNullStreams, SpawnOptions } from 'node:child_process';
 import { spawn } from 'node:child_process';
-import { createMessageConnection, StreamMessageReader, StreamMessageWriter, type CancellationToken, type Disposable, type MessageConnection } from 'vscode-jsonrpc/node';
+import { createMessageConnection, ResponseError, StreamMessageReader, StreamMessageWriter, type CancellationToken, type Disposable, type MessageConnection } from 'vscode-jsonrpc/node';
 import {
+  CONTENT_CHANGED_ERROR_CODE,
   ElogMethods,
   ElogNotifications,
   type AdjacencyParams,
   type AdjacencyResult,
+  type CheckChangesResult,
+  type ContentChangedErrorData,
   type ElogChangedParams,
   type ElogModule,
   type ElogProgressParams,
@@ -57,6 +69,11 @@ import {
   type ViewportModel,
   type ViewportParams,
 } from '@omnetpp/shared/elog-protocol';
+
+/** True iff `err` is the JSON-RPC error response for `CONTENT_CHANGED_ERROR_CODE` (`ElogMethods`'s doc comment, `-32010 ContentChanged`), narrowing `err.data` to `ContentChangedErrorData`. */
+function isContentChangedError(err: unknown): err is ResponseError<ContentChangedErrorData> {
+  return err instanceof ResponseError && err.code === CONTENT_CHANGED_ERROR_CODE;
+}
 
 export interface WorkerClientOptions {
   /** Extra `child_process.spawn` options (cwd/env/etc.) -- `args`/`stdio` are always the worker's own. */
@@ -177,9 +194,30 @@ export class WorkerClient {
 
   // ---- typed request wrappers -----------------------------------------------------------
 
+  /**
+   * Phase E9 ("live follow"): on a `ContentChanged` error (the worker's engine
+   * synchronized to a file change mid-request, per `ElogMethods`'s doc comment on
+   * `CONTENT_CHANGED_ERROR_CODE`), automatically replays the exact same request ONCE.
+   * By the time that error was thrown, the engine has already synchronized to the new
+   * file state (see `engineSession.ts`'s `runJob()`), so the retry runs against fresh
+   * state and normally just succeeds outright. If the retry itself also hits
+   * `ContentChanged` (the file is changing unusually fast), that second error is
+   * propagated as-is -- exactly one automatic retry, never a loop.
+   *
+   * This method does not itself notify `changedListeners` with the fresh summary
+   * carried on the error (`err.data`): the worker's engine thread already broadcasts
+   * the matching `elog/changed` notification for this exact case (see
+   * engineThread.ts's `pump()`), which reaches `changedListeners` via the ordinary
+   * `onChanged()` wiring below -- adding a second, client-side firing here would just
+   * double the notification.
+   */
   private rawRequest<P, R>(method: string, params: P, token?: CancellationToken): Promise<R> {
     if (this.connection === null) return Promise.reject(new Error(`WorkerClient: not connected (worker restarting after a crash?), method=${method}`));
-    return this.connection.sendRequest<R>(method, params, token);
+    return this.connection.sendRequest<R>(method, params, token).catch((err: unknown) => {
+      if (!isContentChangedError(err)) throw err;
+      if (this.connection === null) throw err; // disconnected between the failed attempt and this retry (e.g. a crash) -- nothing sensible to retry against
+      return this.connection.sendRequest<R>(method, params, token);
+    });
   }
 
   async open(params: OpenParams, token?: CancellationToken): Promise<LogSummary> {
@@ -192,6 +230,11 @@ export class WorkerClient {
 
   getSummary(token?: CancellationToken): Promise<LogSummary> {
     return this.rawRequest(ElogMethods.getSummary, undefined, token);
+  }
+
+  /** Phase E9 ("live follow"): forces an immediate check against the underlying file -- for a UI "refresh" button. See `ElogMethods.checkChanges`'s doc comment. */
+  checkChanges(token?: CancellationToken): Promise<CheckChangesResult> {
+    return this.rawRequest(ElogMethods.checkChanges, undefined, token);
   }
 
   getModuleTree(token?: CancellationToken): Promise<ElogModule | null> {

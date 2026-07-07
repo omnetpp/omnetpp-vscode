@@ -32,7 +32,7 @@ function assert(condition, message) {
   }
 }
 
-/** Streams a large, plain (no I/S chunks) synthetic .elog to disk -- same shape as shared/src/test/eventlog/memoryBounding.test.ts's stress fixture -- so a findText miss forces a genuinely long full-file scan (needed to measure cancellation latency meaningfully). */
+/** Streams a large, plain (no I/S chunks) synthetic .elog to disk -- same shape as shared/src/test/eventlog/memoryBounding.test.ts's stress fixture -- so a findText miss forces a genuinely long full-file scan (needed to measure cancellation latency meaningfully). Ends with an "SE" (simulation-end) trailer, like a completed run -- NOT suitable as the starting point for the live-follow tests below (see writeLiveEventLog's doc comment). */
 function writeSyntheticEventLog(file, eventCount) {
   const fd = fs.openSync(file, 'w');
   try {
@@ -43,6 +43,30 @@ function writeSyntheticEventLog(file, eventCount) {
       fs.writeSync(fd, '\n');
     }
     fs.writeSync(fd, 'SE e 0 c 9 m "done"\n');
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
+ * Like writeSyntheticEventLog(), but deliberately omits the "SE" trailer -- a real,
+ * still-running simulation never writes "SE" until it actually finishes, so a log
+ * that's still being appended to (this smoke test's live-follow section) must not
+ * have one either: appending more events after an "SE" line doesn't happen in
+ * practice and isn't a scenario the engine needs to support (see eventLog.ts's
+ * `synchronize()` header on the peek-guard this depends on -- it recognizes "the
+ * next line is a fresh event" as the signal that the previous last event was
+ * already complete, which only holds when nothing else was ever written after it).
+ */
+function writeLiveEventLog(file, eventCount) {
+  const fd = fs.openSync(file, 'w');
+  try {
+    fs.writeSync(fd, 'SB ov 1536 ev 2 rid Smoke-0\n\n');
+    for (let i = 0; i < eventCount; i++) {
+      fs.writeSync(fd, `E # ${i} t ${i} m 1 ce -1 msg -1\n`);
+      if (i === 0) fs.writeSync(fd, 'MC id 1 c C t T n root cm 1\n');
+      fs.writeSync(fd, '\n');
+    }
   } finally {
     fs.closeSync(fd);
   }
@@ -153,6 +177,62 @@ async function main() {
       assert(cancelledInTime, `findText: a long-running scan is cancelled promptly (elapsed ${elapsedMs.toFixed(1)}ms, budget 500ms)`);
     } finally {
       fs.rmSync(bigDir, { recursive: true, force: true });
+    }
+
+    // ---- live follow: append -> elog/changed notification -> viewport extends ------------
+    // (phase E9). Uses a small `pollIntervalMs` so the real fs.watch/poll-timer hybrid in
+    // client/worker/src/watcher.ts notices the change quickly without this script ever
+    // calling the manual `elog/checkChanges` request itself -- i.e. this exercises the
+    // *automatic* detection path end-to-end against the real bundled process, which
+    // bun:test's liveFollow.test.ts (in-process, no watcher/process involved) can't cover.
+    const liveDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omnetpp-elog-worker-smoke-live-'));
+    const liveFile = path.join(liveDir, 'live.elog');
+    try {
+      writeLiveEventLog(liveFile, 20);
+      const liveSummary = await connection.sendRequest('elog/open', { path: liveFile, options: { pollIntervalMs: 200 } });
+      assert(liveSummary.lastEventNumber === 19, 'live-follow: initial file has 20 events (#0..#19)');
+
+      changedEvents.length = 0;
+      // append 5 more well-formed events directly onto the file, same shape as
+      // writeSyntheticEventLog's per-event body
+      const fd = fs.openSync(liveFile, 'a');
+      for (let i = 20; i < 25; i++) fs.writeSync(fd, `E # ${i} t ${i} m 1 ce -1 msg -1\n\n`);
+      fs.closeSync(fd);
+
+      // generous wait for the poll timer (200ms) or fs.watch (near-instant) to notice,
+      // and for the resulting elog/changed notification to arrive over the wire
+      await new Promise((r) => setTimeout(r, 2000));
+
+      const appendedNotif = changedEvents.find((e) => e.change === 'appended');
+      assert(appendedNotif !== undefined, 'live-follow: an "appended" elog/changed notification arrived without any manual checkChanges call');
+      assert(appendedNotif?.summary.lastEventNumber === 24, 'live-follow: the notification carries a fresh summary reflecting the 5 appended events');
+
+      const summaryAfterAppend = await connection.sendRequest('elog/getSummary', undefined);
+      assert(summaryAfterAppend.lastEventNumber === 24, 'live-follow: getSummary reflects the appended events post-synchronize');
+
+      const extendedViewport = await connection.sendRequest('elog/sc/getViewport', {
+        range: { kind: 'event', startEventNumber: 0, endEventNumber: 24 },
+      });
+      assert(
+        extendedViewport.events.some((e) => e.eventNumber === 24),
+        'live-follow: sc/getViewport sees the newly appended event #24',
+      );
+
+      // ---- overwrite -> reset (phase E9) ---------------------------------------------
+      changedEvents.length = 0;
+      writeSyntheticEventLog(liveFile, 8); // shorter + different content -> OVERWRITTEN, not APPENDED (unconditional size decrease)
+
+      await new Promise((r) => setTimeout(r, 2000));
+
+      const overwrittenNotif = changedEvents.find((e) => e.change === 'overwritten');
+      assert(overwrittenNotif !== undefined, 'live-follow: an "overwritten" elog/changed notification arrived automatically');
+      assert(overwrittenNotif?.summary.lastEventNumber === 7, 'live-follow: the notification reflects the new (shorter) 8-event file');
+
+      const summaryAfterOverwrite = await connection.sendRequest('elog/getSummary', undefined);
+      assert(summaryAfterOverwrite.lastEventNumber === 7, 'live-follow: getSummary reflects the overwrite');
+      assert(summaryAfterOverwrite.isEmpty === false, 'live-follow: the new (shorter) log is still non-empty');
+    } finally {
+      fs.rmSync(liveDir, { recursive: true, force: true });
     }
 
     // ---- close ---------------------------------------------------------------------------
