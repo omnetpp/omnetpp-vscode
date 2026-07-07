@@ -1,6 +1,6 @@
 // Public surface of the '@omnetpp/shared/eventlog' subpath (see shared/package.json
-// "exports"). This is the foundation + parsing + event/chunk/dependency layer of the
-// OMNeT++ eventlog library port:
+// "exports"). This is the foundation + parsing + event/chunk/dependency + manager
+// layer of the OMNeT++ eventlog library port:
 //   - phase E1: exact-precision simulation time, line tokenization, a TreeMap
 //     replacement, and a buffered bidirectional file reader with change detection.
 //   - phase E2: the entry parsing layer — the ~56 eventlog entry classes (generated
@@ -8,7 +8,10 @@
 //     plus their hand-written base classes and factory dispatch.
 //   - phase E3: the Event object model (EventBase/Event), the Index/Snapshot chunk
 //     types, the bounded per-category entry cache, message dependencies, and the
-//     IEventLog/IEventLogContext interfaces E4's EventLog manager will implement.
+//     IEventLog/IEventLogContext interfaces E4's EventLog manager implements.
+//   - phase E4: the EventLog manager itself -- EventLogBase/EventLogIndex (the
+//     cached/binary/linear offset-search engine, eventLogIndex.ts) and the concrete
+//     EventLog class (parsing/caching/parse-policy/synchronize, eventLog.ts).
 // Host-agnostic: no vscode or Node imports (the RandomAccessFile it reads through
 // is injected by the caller — see shared/src/fs/randomAccess.ts and
 // shared/src/node/nodeRandomAccessFile.ts for the Node-backed implementation).
@@ -36,6 +39,9 @@ export { EventBase, Event } from './event';
 export { Index, Snapshot } from './chunks';
 export { EventLogEntryCache } from './eventLogEntryCache';
 export { MessageDependencyBase, MessageSendDependency, MessageReuseDependency, FilteredMessageDependency } from './messageDependency';
+
+export { EventLogBase, EventLogIndex } from './eventLogIndex';
+export { EventLog, type EventLogOptions } from './eventLog';
 
 import type { IChunk } from './ieventlog';
 import { parseEventLogEntry } from './eventLogEntry';

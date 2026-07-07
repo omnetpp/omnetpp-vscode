@@ -85,6 +85,7 @@ export class FileReader {
   private lastFileSize = 0;
   private lastMtimeMs = 0;
   private savedTail = new Uint8Array(0);
+  private numReadBytes = 0;
 
   constructor(
     private readonly raf: RandomAccessFile,
@@ -105,6 +106,19 @@ export class FileReader {
   /** Returns the file size as of the last synchronize() (NOT a fresh stat — see getFileChange()). */
   getFileSize(): number {
     return this.lastFileSize;
+  }
+
+  /**
+   * Port of the C++/Java `FileReader.getNumReadBytes()` -- cumulative count of bytes
+   * actually pulled from the underlying `RandomAccessFile` (i.e. buffer window
+   * (re)loads via `forceLoad()`), not bytes handed back through `getNextLine()`/
+   * `getPreviousLine()` (which mostly come from the already-resident window). Used by
+   * `EventLog.parseBegin()`/`parseEnd()` (eventLog.ts) to budget how much of a huge
+   * file to eagerly parse at open time -- the same byte-budget role `numReadBytes` plays
+   * in `EventLog.java`.
+   */
+  getNumReadBytes(): number {
+    return this.numReadBytes;
   }
 
   seekTo(offset: number): void {
@@ -246,6 +260,7 @@ export class FileReader {
     }
     this.dataBeginOffset = begin;
     this.dataEndOffset = begin + total;
+    this.numReadBytes += total;
   }
 
   /** Ensures the window covers `[neededBegin, neededEnd)`, reloading (recentered around the need) only if it doesn't already. */
