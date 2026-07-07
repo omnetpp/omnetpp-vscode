@@ -20,6 +20,10 @@
     "./preview": {
       "types": "./out/preview.d.ts",
       "default": "./out/preview.js"
+    },
+    "./eventlog": {
+      "types": "./out/eventlog/index.d.ts",
+      "default": "./out/eventlog/index.js"
     }
   },
   "dependencies": {
