@@ -461,6 +461,34 @@ test(
   60_000,
 );
 
+// ---------------------------------------------------------------------------------
+// 7. EventLogIndex offset-cache cap (phase E8 follow-up): wholesale-clearing
+//    eventNumberToCacheEntryMap/simulationTimeToCacheEntryMap at a small cap must
+//    never change a result -- only how much re-scanning a later search does -- and
+//    the cache must actually stay bounded through heavy churn.
+// ---------------------------------------------------------------------------------
+
+test('memoryBounding: EventLogIndex offsetCacheLimit caps the offset-search caches without changing any result', () => {
+  const { text, eventCount } = synthesizeEventLog({ eventCount: 400, simTimeForEvent: makeDuplicateRunSimTime([12, 1, 1, 1, 30, 1, 350]) });
+  const unbounded = new EventLog(fileReaderForContent(text), { offsetCacheLimit: Infinity });
+  const bounded = new EventLog(fileReaderForContent(text), { offsetCacheLimit: 10 });
+  assert.equal(bounded.getOffsetCacheLimit(), 10);
+
+  const rnd = mulberry32(99);
+  let maxSizeSeen = 0;
+  for (let i = 0; i < 500; i++) {
+    const n = Math.floor(rnd() * eventCount);
+    for (const matchKind of ALL_MATCH_KINDS) {
+      const expected = unbounded.getEventForEventNumber(n, matchKind);
+      const actual = bounded.getEventForEventNumber(n, matchKind);
+      assert.equal(actual === null ? null : actual.getEventNumber(), expected === null ? null : expected.getEventNumber(), `getEventForEventNumber(${n}, ${matchKind})`);
+    }
+    maxSizeSeen = Math.max(maxSizeSeen, bounded.getOffsetCacheSize());
+  }
+  assert.ok(maxSizeSeen <= 10 + 1, `offset cache should stay near its cap throughout heavy churn (saw ${maxSizeSeen})`);
+  assert.ok(bounded.getOffsetCacheSize() <= 10 + 1, `final offset cache size ${bounded.getOffsetCacheSize()} should not exceed the cap`);
+});
+
 /** Streams a plain (no I/S chunks) synthesized eventlog straight to disk, avoiding building the whole text as one in-memory string first (relevant only at this test's scale). */
 function writeSynthesizedEventLogToDisk(file: string, eventCount: number): void {
   const fd = fs.openSync(file, 'w');

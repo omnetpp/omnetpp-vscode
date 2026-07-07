@@ -1,0 +1,100 @@
+/**
+ * The engine worker_thread's entry point. `main.ts` spawns this same bundle as a
+ * `Worker` (`new Worker(__filename, { workerData: { role: 'engine' } })` -- see
+ * main.ts's header for the single-bundle re-entry trick); `startEngineThread()`
+ * below is only ever invoked from that worker's own module-scope guard.
+ *
+ * Owns: one `EngineSession`, a serial FIFO job queue (only one `elog/*` request
+ * executes at a time -- the engine itself is synchronous, per the port plan), and
+ * the cancellation wiring: each `JobMessage` carries a `SharedArrayBuffer`-backed
+ * Int32 cancel flag; `EngineSession.runJob()`'s progress hook checks it on every
+ * `eventLog.progress()` call and throws `RequestCancelledError` the moment it's set
+ * -- true mid-scan cancellation, not just "don't start the next queued job".
+ * `main.ts` flips the flag via `Atomics.store()` directly (no message round-trip)
+ * when a `vscode-jsonrpc` `CancellationToken` fires for the currently-running job; a
+ * `CancelMessage` is only needed to drop a still-*queued* (not yet started) job.
+ */
+
+import { isMainThread, parentPort, workerData } from 'node:worker_threads';
+import { CONTENT_CHANGED_ERROR_CODE, REQUEST_CANCELLED_ERROR_CODE, type ContentChangedErrorData } from '@omnetpp/shared/elog-protocol';
+import { ContentChangedError, EngineSession, RequestCancelledError } from './engineSession';
+import { handleElogRequest } from './handlers';
+import type { CancelMessage, EngineToMainMessage, JobMessage, MainToEngineMessage } from './workerMessages';
+
+/** Guard per this file's header: only actually start when running as the spawned engine worker_thread, never when this same bundled module is merely `import`-ed by `main.ts` running on the main thread. */
+export function maybeStartEngineThread(): void {
+  if (isMainThread) return;
+  if ((workerData as { role?: string } | undefined)?.role !== 'engine') return;
+  startEngineThread();
+}
+
+function startEngineThread(): void {
+  const port = parentPort;
+  if (port === null) throw new Error('engineThread: parentPort is null (not actually running as a worker_thread)');
+
+  const session = new EngineSession();
+  const queue: JobMessage[] = [];
+  let runningJobId: number | string | null = null;
+  let processing = false;
+
+  const post = (message: EngineToMainMessage): void => port.postMessage(message);
+
+  function pump(): void {
+    if (processing) return;
+    processing = true;
+    try {
+      let job: JobMessage | undefined;
+      while ((job = queue.shift()) !== undefined) {
+        runningJobId = job.id;
+        const cancelFlag = new Int32Array(job.cancelBuffer);
+        try {
+          const result = handleElogRequest(session, job.method, job.params, cancelFlag, () => post({ kind: 'progress', id: job!.id }));
+          post({ kind: 'response', id: job.id, result });
+        } catch (err) {
+          post({ kind: 'response', id: job.id, error: toRpcError(err) });
+        } finally {
+          runningJobId = null;
+        }
+      }
+    } finally {
+      processing = false;
+    }
+  }
+
+  port.on('message', (message: MainToEngineMessage) => {
+    switch (message.kind) {
+      case 'job':
+        queue.push(message);
+        pump();
+        break;
+      case 'cancel':
+        dropQueuedJob(message);
+        break;
+      case 'checkChanges': {
+        const changed = session.checkForChanges();
+        if (changed !== null) post({ kind: 'changed', change: changed.change, summary: changed.summary });
+        break;
+      }
+    }
+  });
+
+  function dropQueuedJob(message: CancelMessage): void {
+    // A running job's cancellation is handled entirely via the shared cancel-flag
+    // buffer (see this file's header) -- nothing to do here for `runningJobId`.
+    if (message.id === runningJobId) return;
+    const index = queue.findIndex((j) => j.id === message.id);
+    if (index < 0) return;
+    queue.splice(index, 1);
+    post({ kind: 'response', id: message.id, error: { code: REQUEST_CANCELLED_ERROR_CODE, message: 'request cancelled before it started' } });
+  }
+}
+
+function toRpcError(err: unknown): { code: number; message: string; data?: unknown } {
+  if (err instanceof RequestCancelledError) return { code: REQUEST_CANCELLED_ERROR_CODE, message: err.message };
+  if (err instanceof ContentChangedError) {
+    const data: ContentChangedErrorData = { change: err.change, summary: err.summary };
+    return { code: CONTENT_CHANGED_ERROR_CODE, message: err.message, data };
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return { code: -32001 /* ErrorCodes.UnknownErrorCode */, message };
+}

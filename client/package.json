@@ -6,6 +6,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@omnetpp/shared": "workspace:*",
-    "vscode-languageclient": "^9.0.1"
+    "vscode-languageclient": "^9.0.1",
+    "vscode-jsonrpc": "^8.2.0"
   }
 }

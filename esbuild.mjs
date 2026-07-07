@@ -27,6 +27,11 @@ const targets = [
   { entryPoints: ['mcp/src/lint.ts'], outfile: 'dist/opp_lint.js', banner: { js: '#!/usr/bin/env node' } },
   // standalone CLI documentation generator
   { entryPoints: ['mcp/src/neddoc.ts'], outfile: 'dist/opp_neddoc.js', banner: { js: '#!/usr/bin/env node' } },
+  // the dedicated per-.elog eventlog worker process (client/worker/): a single CJS
+  // bundle re-entered both as the main process script (JSON-RPC over stdio) and,
+  // via `new Worker(__filename)`, as its own engine worker_thread -- see
+  // client/worker/src/main.ts's header for the isMainThread-guarded re-entry.
+  { entryPoints: ['client/worker/src/main.ts'], outfile: 'dist/eventlogWorker.js' },
   // the NED preview webview app: a browser IIFE (loaded via <script> in the
   // webview; imports only @omnetpp/shared/preview — no tree-sitter, no Node APIs)
   {

@@ -5,6 +5,7 @@
     { "path": "./server" },
     { "path": "./client" },
     { "path": "./client/webview" },
+    { "path": "./client/worker" },
     { "path": "./mcp" }
   ]
 }

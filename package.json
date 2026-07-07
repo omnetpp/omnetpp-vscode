@@ -40,7 +40,7 @@
     "dev:build": "bun run copy:assets && bun run bundle",
     "copy:assets": "bun ./scripts/copy-assets.mjs",
     "prepackage": "bun run compile && bun run build:wasm && bun run copy:assets && bun ./esbuild.mjs --production",
-    "test": "bun run compile && bun test ./shared/src/test ./server/src/test ./client/webview/src/test",
+    "test": "bun run compile && bun test ./shared/src/test ./server/src/test ./client/webview/src/test ./client/worker/src/test",
     "package": "bun run prepackage && bun ./node_modules/@vscode/vsce/vsce package --no-dependencies",
     "deploy": "bun run prepackage && bun ./node_modules/@vscode/vsce/vsce publish --no-dependencies"
   },
@@ -628,6 +628,7 @@
     "esbuild": "^0.23.0",
     "tree-sitter-cli": "0.25.10",
     "typescript": "^5.5.0",
+    "vscode-jsonrpc": "^8.2.0",
     "web-tree-sitter": "0.25.10"
   }
 }

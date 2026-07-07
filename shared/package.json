@@ -25,6 +25,10 @@
       "types": "./out/eventlog/index.d.ts",
       "default": "./out/eventlog/index.js"
     },
+    "./elog-protocol": {
+      "types": "./out/eventlog/elogProtocol.d.ts",
+      "default": "./out/eventlog/elogProtocol.js"
+    },
     "./match": {
       "types": "./out/match/index.d.ts",
       "default": "./out/match/index.js"

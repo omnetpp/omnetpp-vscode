@@ -149,6 +149,18 @@ export class SequenceChartFacade extends EventLogFacade {
     return this.timelineCoordinateCache.size;
   }
 
+  /**
+   * Phase E8: exposes the internal coordinate-system version counter (bumped by
+   * `relocateTimelineCoordinateSystem()`/`undefineTimelineCoordinateSystem()`, see this
+   * file's header) -- the `coordinateSystemVersion` the worker protocol
+   * (elogProtocol.ts) hands the webview for stale-response protection ("the webview
+   * drops mismatched responses" per the port plan). `-1` before any origin has ever
+   * been set.
+   */
+  getTimelineCoordinateSystemVersion(): number {
+    return this.timelineCoordinateSystemVersion;
+  }
+
   calculateNonLinearFocus(): number {
     if (!this.eventLog.isEmpty()) {
       const lastEventSimulationTime = this.eventLog.getLastEvent()!.getSimulationTime().doubleValue();

@@ -110,6 +110,15 @@ export interface EventLogOptions {
    * the old unbounded semantics).
    */
   eventCacheLimit?: number;
+  /**
+   * Phase E8 follow-up: cap on `EventLogIndex`'s offset-search-acceleration maps
+   * (`eventNumberToCacheEntryMap`/`simulationTimeToCacheEntryMap`) -- see
+   * eventLogIndex.ts's `offsetCacheLimit` field doc for why a wholesale clear at this
+   * limit is always safe (they are pure search caches, never a correctness source).
+   * Default 1_000_000. Pass `Infinity` to disable (matches the literal unbounded Java
+   * behavior).
+   */
+  offsetCacheLimit?: number;
 }
 
 /** Port of `EventLog`. */
@@ -154,7 +163,7 @@ export class EventLog extends EventLogIndex implements IEventLogContext, Progres
   private eventNumberToSnapshotMap = new SortedMap<number, Snapshot>(numberCompare); // snapshots are parsed lazily
 
   constructor(reader: FileReader, options: EventLogOptions = {}) {
-    super(reader);
+    super(reader, options.offsetCacheLimit ?? 1_000_000);
     this.options = options;
     this.eventCacheLimit = options.eventCacheLimit ?? 50_000;
     // NOTE: Java's `reader.setFileLocking(true)` call is not ported here -- file

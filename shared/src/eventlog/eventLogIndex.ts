@@ -280,13 +280,37 @@ export abstract class EventLogIndex extends EventLogBase {
   /** Subsequent events in an eventlog file may have the same simulation time, therefore it is insufficient to store the file offset only in the cache. */
   protected simulationTimeToCacheEntryMap = new SortedMap<BigDecimal, CacheEntry>(bigDecimalCompare);
 
-  constructor(reader: FileReader) {
+  /**
+   * Phase E8 follow-up (memoryBounding.test.ts's stress test flagged this as the
+   * residual unbounded grower once the E7 Event-object cache was capped):
+   * `eventNumberToCacheEntryMap`/`simulationTimeToCacheEntryMap` are pure
+   * search-acceleration caches (see `searchForOffset()`'s header) -- unlike the E7
+   * Event/FilteredEvent/coordinate caches, losing an entry never changes a result,
+   * only how many bytes must be re-scanned to re-derive it. That makes a wholesale
+   * clear (rather than a real per-entry LRU) always safe here: simplest possible fix
+   * for what is, in the worst case (a linear full-file scan), an unbounded grower.
+   * Default 1_000_000 (comfortably above realistic viewport/random-access working
+   * sets); `Infinity` restores the literal unbounded Java behavior for tests that want
+   * it (e.g. the eventLogIndex.test.ts oracle suite already exercises this
+   * unboundedly).
+   */
+  protected offsetCacheLimit: number;
+
+  constructor(reader: FileReader, offsetCacheLimit = 1_000_000) {
     super();
     this.reader = reader;
+    this.offsetCacheLimit = offsetCacheLimit;
   }
 
   /** Port of `EventLogIndex.cacheEntry()`. */
   protected cacheEntry(eventNumber: number, simulationTime: BigDecimal, beginOffset: number, endOffset: number): void {
+    // wholesale clear before inserting once either map is at capacity -- see this
+    // field's doc comment above for why a full clear (not a per-entry LRU) is safe.
+    if (this.eventNumberToCacheEntryMap.size >= this.offsetCacheLimit || this.simulationTimeToCacheEntryMap.size >= this.offsetCacheLimit) {
+      this.eventNumberToCacheEntryMap.clear();
+      this.simulationTimeToCacheEntryMap.clear();
+    }
+
     const eventNumberCacheEntry = this.eventNumberToCacheEntryMap.ceilingEntry(eventNumber);
     if (eventNumberCacheEntry !== undefined && eventNumberCacheEntry.key === eventNumber) eventNumberCacheEntry.value.include(eventNumber, simulationTime, beginOffset, endOffset);
     else this.eventNumberToCacheEntryMap.set(eventNumber, new CacheEntry(eventNumber, simulationTime, beginOffset, endOffset));
@@ -533,6 +557,16 @@ export abstract class EventLogIndex extends EventLogBase {
     this.lastEventOffset = -1;
     this.eventNumberToCacheEntryMap.clear();
     this.simulationTimeToCacheEntryMap.clear();
+  }
+
+  /** Number of entries currently retained in the offset-search caches -- exposed for tests/instrumentation (see `offsetCacheLimit`'s doc comment above). Both maps are cleared together, so either's size is representative. */
+  getOffsetCacheSize(): number {
+    return this.eventNumberToCacheEntryMap.size;
+  }
+
+  /** The configured cap that triggers a wholesale clear of the offset-search caches -- see `offsetCacheLimit`'s doc comment above. */
+  getOffsetCacheLimit(): number {
+    return this.offsetCacheLimit;
   }
 
   protected isEventBeginOffset(offset: number): boolean {

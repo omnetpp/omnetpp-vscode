@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./out",
+    // Keep the incremental-build state inside out/ so deleting out/ yields a
+    // coherent clean state (a surviving tsbuildinfo would make tsc skip re-emit).
+    "tsBuildInfoFile": "./out/tsconfig.tsbuildinfo",
+    // The worker process (main thread + engine worker_thread, see main.ts/
+    // engineThread.ts) runs in VS Code's bundled Node extension host's spawned
+    // child process -- Node types, no DOM, no vscode (kept import-free like
+    // client/webview is kept vscode/tree-sitter-free, just for the opposite
+    // reason: this code must be spawnable standalone by scripts/elog-worker-smoke.mjs
+    // with no VS Code process around it at all).
+    "lib": ["ES2021"],
+    "types": ["node"]
+  },
+  "references": [{ "path": "../../shared" }],
+  "include": ["src/**/*.ts"],
+  // tests import bun:test and run via `bun test` directly over the sources
+  "exclude": ["src/test"]
+}
