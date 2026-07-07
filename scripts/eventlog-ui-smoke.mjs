@@ -35,7 +35,9 @@ const ElogMethods = {
   tableGetRows: 'elog/table/getRows',
   tableNavigate: 'elog/table/navigate',
   tablePosition: 'elog/table/position',
+  tableGotoRelated: 'elog/table/gotoRelated',
   findText: 'elog/findText',
+  getEventDetail: 'elog/getEventDetail',
 };
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -97,6 +99,9 @@ async function main() {
 
   // ---- U2: Event Log table row-rendering round trips (before teardown) --------------
   await smokeTableU2(session, summary);
+
+  // ---- U6: table "Go To" family (elog/table/gotoRelated) against the real worker -----
+  await smokeSyncU6(session, summary);
 
   // ---- U4: real RPC cancellation end-to-end through the actual worker ---------------
   await smokeCancellationU4(bundlePath);
@@ -206,6 +211,50 @@ async function smokeTableU2(session, summary) {
   assert(position.approximateNumberOfEntries === rendered.approximateNumberOfEntries, 'smokeTableU2: tablePosition\'s approximateNumberOfEntries agrees with getRows()\'s');
 
   void summary;
+}
+
+// ---------------------------------------------------------------------------------
+// U6 (sync, bookmarks, goto): exercises `elog/table/gotoRelated` -- the table's "Go To"
+// family (Cause/Arrival/Origin/Reuse/Previous-Next Event/Previous-Next Module Event,
+// ported from `EventLogTableContributor.java`) -- against the REAL bundled worker
+// (`client/worker/src/test/gotoRelated.test.ts` covers the same logic in-process,
+// no worker_thread/child process; this is the end-to-end sanity net through the
+// actual JSON-RPC transport, same relationship as U2/U3's own smoke sections above).
+// Module ids for Fifo1 (event #10 is module 3, nearest same-module neighbors #7/#11)
+// are the same hand-derived facts `gotoRelated.test.ts`'s header documents.
+// ---------------------------------------------------------------------------------
+async function smokeSyncU6(session, summary) {
+  const prev = await session.handleEngineRequest(ElogMethods.tableGotoRelated, { from: { eventNumber: 10, entryIndex: 0 }, relation: 'prevEvent' });
+  assert(prev && prev.eventNumber === 9, 'smokeSyncU6: gotoRelated(prevEvent) from #10 resolves to #9');
+  const next = await session.handleEngineRequest(ElogMethods.tableGotoRelated, { from: { eventNumber: 10, entryIndex: 0 }, relation: 'nextEvent' });
+  assert(next && next.eventNumber === 11, 'smokeSyncU6: gotoRelated(nextEvent) from #10 resolves to #11');
+
+  const prevModule = await session.handleEngineRequest(ElogMethods.tableGotoRelated, { from: { eventNumber: 10, entryIndex: 0 }, relation: 'prevModuleEvent' });
+  assert(prevModule && prevModule.eventNumber === 7, 'smokeSyncU6: gotoRelated(prevModuleEvent) from #10 resolves to #7');
+  const nextModule = await session.handleEngineRequest(ElogMethods.tableGotoRelated, { from: { eventNumber: 10, entryIndex: 0 }, relation: 'nextModuleEvent' });
+  assert(nextModule && nextModule.eventNumber === 11, 'smokeSyncU6: gotoRelated(nextModuleEvent) from #10 resolves to #11');
+
+  // cause: scan for any event with a real cause (ce >= 0) via getEventDetail, then
+  // confirm gotoRelated(cause) lands back in that exact cause event.
+  let causeChecked = false;
+  for (let n = summary.firstEventNumber; n <= summary.lastEventNumber && !causeChecked; n++) {
+    const detail = await session.handleEngineRequest(ElogMethods.getEventDetail, { eventNumber: n });
+    if (detail && detail.causeEventNumber >= 0) {
+      const cause = await session.handleEngineRequest(ElogMethods.tableGotoRelated, { from: { eventNumber: n, entryIndex: 0 }, relation: 'cause' });
+      assert(cause !== null, `smokeSyncU6: gotoRelated(cause) from #${n} resolves (causeEventNumber=${detail.causeEventNumber})`);
+      assert(cause && cause.eventNumber === detail.causeEventNumber, `smokeSyncU6: gotoRelated(cause) from #${n} lands in cause event #${detail.causeEventNumber}`);
+      causeChecked = true;
+    }
+  }
+  assert(causeChecked, 'smokeSyncU6: found at least one event with a real cause to exercise gotoRelated(cause)');
+
+  // reuse/origin: Fifo1 has no message-reuse pattern -- both must be silent no-ops (null).
+  const reuseResult = await session.handleEngineRequest(ElogMethods.tableGotoRelated, { from: { eventNumber: summary.firstEventNumber, entryIndex: 0 }, relation: 'reuse' });
+  assert(reuseResult === null, 'smokeSyncU6: gotoRelated(reuse) is a no-op (null) on a fixture with no message reuses');
+
+  // unresolvable `from` -> null, never throws
+  const notFound = await session.handleEngineRequest(ElogMethods.tableGotoRelated, { from: { eventNumber: summary.lastEventNumber + 1, entryIndex: 0 }, relation: 'cause' });
+  assert(notFound === null, 'smokeSyncU6: gotoRelated() with an unresolvable `from` returns null rather than throwing');
 }
 
 /** Streams a large, plain synthetic .elog -- same shape as scripts/elog-worker-smoke.mjs's own fixture generator -- so a findText miss forces a genuinely long full-file scan (needed to measure cancellation latency meaningfully; a tiny fixture like Fifo1 finishes before a cancelRequest notification could ever land, which is exactly why this needs its own big file + its own session/worker rather than reusing the one above). */

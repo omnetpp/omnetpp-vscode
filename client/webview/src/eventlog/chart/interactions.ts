@@ -26,7 +26,7 @@
  *    the Filter UI this needs); plain ArrowLeft/ArrowRight -> move focus to the
  *    previous/next event; Ctrl/Cmd+ArrowLeft/ArrowRight -> go to cause/consequence
  *    event; Shift+ArrowLeft/ArrowRight -> go to the previous/next event on the SAME
- *    module.
+ *    module; Ctrl/Cmd+D (phase U6) -> toggle bookmark for the current selection.
  */
 
 import type { AxesLayout } from './axes';
@@ -66,6 +66,8 @@ export interface InteractionCallbacks {
   /** Shift+ArrowLeft/Right -- nearest previous/next event on the SAME module as the focused event. */
   onSameModuleNeighbor(direction: -1 | 1): void;
   onDefaultZoom(): void;
+  /** Ctrl/Cmd+D (phase U6, port plan's suggested accelerator -- Java's own chart "Toggle bookmark" action has none) -- toggles a bookmark for the current selection. */
+  onToggleBookmark(): void;
 }
 
 const WHEEL_ZOOM_FACTOR = 1.1;
@@ -225,6 +227,13 @@ export function attachInteractions(canvas: HTMLElement, cb: InteractionCallbacks
       case 'Backspace':
         cb.onDeleteExclude();
         e.preventDefault();
+        break;
+      case 'd':
+      case 'D':
+        if (ctrl) {
+          cb.onToggleBookmark();
+          e.preventDefault();
+        }
         break;
     }
   };

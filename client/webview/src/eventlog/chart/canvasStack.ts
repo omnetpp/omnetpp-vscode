@@ -156,7 +156,7 @@ export interface CanvasStackHandle {
   dispose(): void;
 }
 
-const NONCACHEABLE_KINDS = new Set<DrawPrimitive['kind']>(['gutter', 'tick', 'axisLabel', 'label', 'selectionMark', 'infoPanel', 'timeDifferenceLabel']);
+const NONCACHEABLE_KINDS = new Set<DrawPrimitive['kind']>(['gutter', 'tick', 'axisLabel', 'label', 'selectionMark', 'bookmarkMark', 'infoPanel', 'timeDifferenceLabel']);
 
 export function createCanvasStack(container: HTMLElement): CanvasStackHandle {
   const content = document.createElement('canvas');
@@ -356,6 +356,28 @@ export function createCanvasStack(container: HTMLElement): CanvasStackHandle {
         ctx.arc(p.x, p.y, p.radius, 0, 2 * Math.PI);
         ctx.stroke();
         break;
+      case 'bookmarkMark': {
+        // A small filled "flag" glyph (a vertical pole + a triangular pennant) -- see
+        // `drawList.ts`'s `DrawPrimitive` doc for why this stands in for Eclipse's
+        // actual bookmark ruler icon.
+        const poleHeight = 8;
+        const flagWidth = 6;
+        ctx.fillStyle = p.color;
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y - poleHeight);
+        ctx.lineTo(p.x, p.y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y - poleHeight);
+        ctx.lineTo(p.x + flagWidth, p.y - poleHeight + flagWidth / 2);
+        ctx.lineTo(p.x, p.y - poleHeight + flagWidth);
+        ctx.closePath();
+        ctx.fill();
+        break;
+      }
     }
   }
 

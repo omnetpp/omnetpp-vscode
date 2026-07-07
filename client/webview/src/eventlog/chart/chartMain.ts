@@ -18,19 +18,19 @@ import {
   type ViewportModel,
   type ViewportParams,
 } from '@omnetpp/shared/elog-protocol';
-import type { HostToWebviewMessage, RevealTarget, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
+import type { Bookmark, BookmarkCandidate, HostToWebviewMessage, RevealTarget, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
 import { EngineRpc } from '../common/rpc';
 import { buildToolbar, type ToolbarHandle } from '../common/toolbar';
 import { renderSummaryStrip } from '../common/summary';
 import { readPalette, watchThemeChange, type EventLogPalette } from '../common/theme';
 import { showContextMenu } from '../common/contextMenu';
 import { DEFAULT_FIND_TEXT_STATE, openFindTextDialog, openGotoEventDialog, openGotoSimTimeDialog, type FindTextState } from '../common/dialogs';
-import { deriveAxes, findModuleNode, maxVerticalScroll, type AxesLayout } from './axes';
+import { deriveAxes, findModuleIdByFullName, findModuleNode, maxVerticalScroll, type AxesLayout } from './axes';
 import { calculateAxisHeaders } from './axisHeaders';
 import { buildChartContextMenu, type ChartMenuActions } from './chartContextMenu';
 import { buildSampleTable, pixelToTc, tcToSimTimeApprox, type TcSimSample } from './coords';
 import { mergeDisplayFlags, toggleFlag, type ChartDisplayFlags } from './displayFlags';
-import { buildDrawList, type DrawPrimitive, type InfoPanelText } from './drawList';
+import { bookmarkDependencyKey, buildDrawList, type DrawPrimitive, type InfoPanelText } from './drawList';
 import { calculateTicks, formatTickLabel } from './ticks';
 import { ANTIALIAS_TURN_OFF_AT_MSEC, ANTIALIAS_TURN_ON_AT_MSEC, createCanvasStack, type CanvasStackHandle } from './canvasStack';
 import { hitTest, pickDoubleClickTarget, pickPrimary, pickPrimaryGroup, type HitObject } from './hitTest';
@@ -115,6 +115,23 @@ let antialiasEnabled = true;
 let findTextState: FindTextState = DEFAULT_FIND_TEXT_STATE;
 /** Anchor row of the last successful find, so "Find Next" continues from there instead of restarting at the beginning/end. `null` before any search (or after the file changes underneath it). */
 let lastFindRef: RowRef | null = null;
+/** Phase U6 -- the session's current bookmark list (`init`/`bookmarksChanged`); `recomputeBookmarkIndexes()` derives the three render-ready sets below from it (+ `moduleTree`, for Axis bookmarks' `modulePath` -> `moduleId` resolution). */
+let bookmarks: Bookmark[] = [];
+let bookmarkedEventNumbers = new Set<number>();
+let bookmarkedDependencyKeys = new Set<string>();
+let bookmarkedModuleIds = new Set<number>();
+
+/** Re-derives the three render-ready bookmark index sets `drawList.ts` consumes from `bookmarks`/`moduleTree` -- call after either changes (a fresh `init`/`bookmarksChanged`, or the module tree finishing its first `elog/getModuleTree` load). Does NOT itself schedule a render (callers already do, alongside whatever else they're updating). */
+function recomputeBookmarkIndexes(): void {
+  bookmarkedEventNumbers = new Set(bookmarks.filter((b) => b.kind === 'Event').map((b) => b.eventNumber!));
+  bookmarkedDependencyKeys = new Set(bookmarks.filter((b) => b.kind === 'MessageDependency').map((b) => bookmarkDependencyKey(b.eventNumber!, b.consequenceEventNumber, b.messageId)));
+  bookmarkedModuleIds = new Set(
+    bookmarks
+      .filter((b) => b.kind === 'Axis' && b.modulePath)
+      .map((b) => findModuleIdByFullName(b.modulePath!, moduleTree))
+      .filter((id): id is number => id !== null),
+  );
+}
 /** Mutable view onto `moduleTree` for `labelProvider.ts`'s tooltip builders -- a getter (not a snapshot) so it always reflects the latest `elog/getModuleTree` result even though it's captured once by `attachTooltip()` below. */
 const labelProviderCtx: LabelProviderContext = {
   get moduleTree() {
@@ -247,6 +264,9 @@ function renderFrame(): void {
     ticks: tickResult.ticks,
     theme: palette,
     selectedEventNumbers: selection.events,
+    bookmarkedEventNumbers,
+    bookmarkedModuleIds,
+    bookmarkedDependencyKeys,
     displayFlags,
     axisHeaderRoot,
     infoPanelText: computeInfoPanelText(),
@@ -458,14 +478,73 @@ function broadcastSelection(): void {
   vscode.postMessage({ type: 'selectionChanged', selection: { eventNumbers: [...selection.events], originId: 'chart' } });
 }
 
+/**
+ * "Select in Event Log Table" (chart context menu, per-event section) -- explicitly
+ * asks the table to reveal `eventNumber` without waiting for a passive cross-view
+ * `setSelection` reveal-if-off-screen. Reuses the same engine `gotoEvent` round trip
+ * `doGotoEvent()` already does for goto/cause/consequence navigation (which selects +
+ * recenters THIS chart too, via the `reveal` the host's `session.gotoEvent()`
+ * broadcasts to every attachment) -- a documented simplification: Java's own
+ * chart-only "Select in table"-equivalent has no engine round trip and only reveals
+ * the OTHER view, but re-centering the chart on an event the user just right-clicked
+ * (already near the viewport center) is harmless, and this avoids inventing a second,
+ * narrower reveal pathway for one context-menu item.
+ */
+function selectInTable(eventNumber: number): void {
+  void doGotoEvent(eventNumber);
+}
+
+// ---- bookmarks (phase U6) ------------------------------------------------------------
+
+function postToggleBookmark(candidate: BookmarkCandidate): void {
+  vscode.postMessage({ type: 'toggleBookmark', candidate });
+}
+
+function toggleEventBookmark(eventNumber: number): void {
+  postToggleBookmark({ kind: 'Event', eventNumber });
+}
+
+function toggleAxisBookmark(moduleId: number): void {
+  const modulePath = findModuleNode(moduleId, moduleTree)?.fullName;
+  if (modulePath) postToggleBookmark({ kind: 'Axis', modulePath });
+}
+
+function toggleDependencyBookmark(dep: RenderDependency): void {
+  postToggleBookmark({ kind: 'MessageDependency', eventNumber: dep.causeEventNumber, consequenceEventNumber: dep.consequenceEventNumber, messageId: dep.messageId ?? undefined });
+}
+
+/**
+ * Ctrl/Cmd+D (`interactions.ts`'s `onToggleBookmark`) -- toggles a bookmark for every
+ * currently selected event/dependency/axis (port of `SequenceChartContributor.java`'s
+ * "Toggle bookmark" action operating on the whole `IEventLogSelection`, one marker per
+ * selected item). Method-call selections are NOT included: `RenderMethodCall` (the
+ * viewport DTO) has no `entryIndex`/`EventLogEntryIndex` field the way Java's
+ * `ComponentMethodBeginEntry` does, so this port cannot build a well-formed
+ * `ComponentMethodCall` bookmark candidate from client-side data alone -- a documented
+ * gap (the data MODEL/store fully supports the kind; only this one creation path is
+ * missing, tracked as a follow-up rather than blocking the other 3 kinds).
+ */
+function toggleBookmarkForSelection(): void {
+  for (const eventNumber of selection.events) toggleEventBookmark(eventNumber);
+  for (const key of selection.dependencies) {
+    const dep = dependencyForKey(key);
+    if (dep) toggleDependencyBookmark(dep);
+  }
+  for (const moduleId of selection.axes) toggleAxisBookmark(moduleId);
+}
+
 function findEvent(eventNumber: number): TimelineEvent | null {
   return lastModel?.events.find((e) => e.eventNumber === eventNumber) ?? null;
 }
 
-function findDependency(hit: Extract<HitObject, { kind: 'dependency' }>): RenderDependency | null {
+/** Looks up a loaded `RenderDependency` by its `dependencyKey()`-shaped identity string -- shared by `findDependency()` (from a hit-test result) and the bookmark toggle path (from a `selection.dependencies` set member, which only carries the key, not the object). */
+function dependencyForKey(key: string): RenderDependency | null {
   if (!lastModel) return null;
-  const key = dependencyKey(hit);
   return lastModel.dependencies.find((d) => dependencyKey({ dependencyKind: d.kind, causeEventNumber: d.causeEventNumber, consequenceEventNumber: d.consequenceEventNumber }) === key) ?? null;
+}
+
+function findDependency(hit: Extract<HitObject, { kind: 'dependency' }>): RenderDependency | null {
+  return dependencyForKey(dependencyKey(hit));
 }
 
 function findMethodCall(hit: Extract<HitObject, { kind: 'methodCall' }>): RenderMethodCall | null {
@@ -579,6 +658,12 @@ function centerOnAxis(moduleId: number): void {
   scheduleRender();
 }
 
+/** `true` iff `tc` already falls within the currently-visible horizontal range -- the visibility gate `setSelection`'s handler (phase U6) uses to decide whether an incoming cross-view selection needs to actually scroll, vs. just re-render in place (mirrors `tableView.ts`'s `revealRef()`, which gates its own scroll the same way). */
+function isTcVisible(tc: number): boolean {
+  const range = visibleTcRange(viewport);
+  return tc >= range.leftTc && tc <= range.rightTc;
+}
+
 /** "Center" on an event: horizontally reveals its tc, vertically centers its axis. Falls back to `relocateAndCenter` (an origin relocation + engine round trip) if the event isn't in the currently-loaded viewport model. */
 function centerOnEvent(eventNumber: number): void {
   const event = findEvent(eventNumber);
@@ -661,12 +746,19 @@ function openChartContextMenu(clientX: number, clientY: number, hits: HitObject[
       scheduleRender();
     },
     centerOnEvent,
+    selectInTable,
     goToCauseEvent: (eventNumber) => void doGotoEvent(eventNumber),
     goToConsequenceEvent: (eventNumber) => void doGotoEvent(eventNumber),
     zoomToDependency: (causeTc, consequenceTc) => {
       viewport = zoomToFit(viewport, Math.min(causeTc, consequenceTc), Math.max(causeTc, consequenceTc));
       scheduleRender();
     },
+    toggleEventBookmark,
+    toggleDependencyBookmark: (hit) => {
+      const dep = findDependency(hit);
+      if (dep) toggleDependencyBookmark(dep);
+    },
+    toggleAxisBookmark,
     centerOnAxis,
     setTimelineMode: (mode) => void applyTimelineMode(mode, false),
     zoomIn: () => {
@@ -824,6 +916,7 @@ attachInteractions(canvasContainer, {
     viewport = { ...viewport, pixelsPerTc: DEFAULT_PIXELS_PER_TC };
     scheduleRender();
   },
+  onToggleBookmark: toggleBookmarkForSelection,
 });
 
 attachTooltip({
@@ -852,6 +945,17 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
     case 'init': {
       fileUri = message.fileUri;
       summary = message.summary;
+      bookmarks = message.bookmarks;
+      recomputeBookmarkIndexes();
+      if (message.selection.eventNumbers.length > 0) {
+        // Phase U6: seed the session's current selection right away (repaints with the
+        // right highlight even before data loads) -- a proper reveal (centering on it)
+        // happens below once the initial timeline-mode setup/relocate-to-start settles,
+        // so a webview reattaching to an already-selected session (a pinned table
+        // rebind, or this very chart reloading) still ends up looking at the right event.
+        const eventNumbers = message.selection.eventNumbers;
+        selection = { ...EMPTY_CHART_SELECTION, events: new Set(eventNumbers), focusEventNumber: eventNumbers[eventNumbers.length - 1] };
+      }
       if (message.persistedState && typeof message.persistedState === 'object') {
         state = { ...state, ...(message.persistedState as PersistedChartState) };
         toolbar.setDropdownValue('timelineMode', state.timelineMode ?? TimelineMode.SIMULATION_TIME);
@@ -861,9 +965,12 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
       if (fileUri) {
         void rpc.request<ElogModule | null>(ElogMethods.getModuleTree, undefined).then((tree) => {
           moduleTree = tree;
+          recomputeBookmarkIndexes();
           scheduleRender();
         });
-        void applyTimelineMode(state.timelineMode ?? TimelineMode.SIMULATION_TIME, !hasInitializedViewport);
+        void applyTimelineMode(state.timelineMode ?? TimelineMode.SIMULATION_TIME, !hasInitializedViewport).then(() => {
+          if (selection.focusEventNumber !== null) centerOnEvent(selection.focusEventNumber);
+        });
       }
       break;
     }
@@ -895,15 +1002,28 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
       void handleRevealTarget(message.target);
       break;
     case 'setSelection': {
-      // The OTHER view's (or a re-entrant echo-guarded) selection changed -- apply it
-      // locally without re-broadcasting (see uiProtocol.ts's header on the re-entry
-      // guard; full bidirectional chart<->table sync semantics are U6's job, this just
-      // renders whatever the session hands us).
+      // The OTHER view's (table's, or a rebind/late-attach push -- see uiProtocol.ts's
+      // header + eventLogSession.ts's `attach()`/`setSelection()`) selection changed --
+      // apply it locally WITHOUT re-broadcasting (the session's own re-entry guard
+      // already keeps this from echoing, but this handler must not call
+      // `broadcastSelection()` regardless, since it isn't a new user gesture).
+      // Phase U6: receiving a selection from elsewhere both selects AND reveals it if
+      // it isn't already on screen (the researched Eclipse semantics -- see
+      // `EventLogSelection`'s doc in uiProtocol.ts: a LOCAL click only selects since the
+      // clicked thing is already visible, but an incoming selection might not be).
       const eventNumbers = message.selection.eventNumbers;
       selection = { ...EMPTY_CHART_SELECTION, events: new Set(eventNumbers), focusEventNumber: eventNumbers.length > 0 ? eventNumbers[eventNumbers.length - 1] : selection.focusEventNumber };
-      scheduleRender();
+      const focus = selection.focusEventNumber;
+      const loaded = focus !== null ? findEvent(focus) : null;
+      if (focus !== null && (!loaded || !isTcVisible(loaded.tcBegin))) centerOnEvent(focus);
+      else scheduleRender();
       break;
     }
+    case 'bookmarksChanged':
+      bookmarks = message.bookmarks;
+      recomputeBookmarkIndexes();
+      scheduleRender();
+      break;
     case 'command':
       // Forwarded from `eventLogDialogs.ts`'s native commands when this webview is
       // attached (see that file's header) -- opens the corresponding in-webview dialog.
@@ -920,6 +1040,15 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
         case 'findNext':
           repeatFind();
           break;
+        case 'centerOnAxisBookmark': {
+          // Phase U6 -- "Show Bookmarks" QuickPick reveal for an Axis-kind bookmark
+          // (`bookmarks.ts`'s `revealBookmark()`): no event number to goto, so the host
+          // sends the stored `modulePath` directly for this webview to resolve.
+          const args = message.args as { modulePath?: string } | undefined;
+          const moduleId = args?.modulePath ? findModuleIdByFullName(args.modulePath, moduleTree) : null;
+          if (moduleId !== null) centerOnAxis(moduleId);
+          break;
+        }
       }
       break;
   }

@@ -47,6 +47,8 @@ function dispatch(session: EngineSession, method: string, params: unknown): unkn
       return session.tableNavigate(params as Parameters<EngineSession['tableNavigate']>[0]);
     case ElogMethods.tablePosition:
       return session.tablePosition(params as Parameters<EngineSession['tablePosition']>[0]);
+    case ElogMethods.tableGotoRelated:
+      return session.tableGotoRelated(params as Parameters<EngineSession['tableGotoRelated']>[0]);
     case ElogMethods.gotoEvent:
       return session.gotoEvent(params as Parameters<EngineSession['gotoEvent']>[0]);
     case ElogMethods.gotoSimTime:

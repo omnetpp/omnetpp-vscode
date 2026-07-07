@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { showBookmarksCommand } from './bookmarks';
 import { EventLogController } from './eventLogController';
 import { EventLogTableViewProvider } from './eventLogTableView';
 import { SequenceChartEditorProvider } from './sequenceChartEditor';
@@ -40,6 +41,7 @@ export function registerEventLog(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('omnetpp.eventlog.gotoSimulationTime', () => gotoSimulationTimeCommand(controller)),
     vscode.commands.registerCommand('omnetpp.eventlog.findText', () => findTextCommand(controller)),
     vscode.commands.registerCommand('omnetpp.eventlog.findNext', () => findNextCommand(controller)),
+    vscode.commands.registerCommand('omnetpp.eventlog.showBookmarks', () => showBookmarksCommand(controller, tableView.getBoundSession())),
     // pin/unpin follows this codebase's established pattern for the other
     // pinnable views (pinType/unpinType, pinModule/unpinModule, ...): one
     // command per icon state, gated by the `omnetpp.eventlogTablePinned`

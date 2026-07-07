@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { EventLogUiSettings, HostToWebviewMessage, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
+import { handleToggleBookmarkMessage } from './bookmarks';
 import type { EventLogController } from './eventLogController';
 import type { EventLogSession } from './eventLogSession';
 import { buildEventLogWebviewHtml } from './webviewHtml';
@@ -126,11 +127,26 @@ export class SequenceChartEditorProvider implements vscode.CustomReadonlyEditorP
       // eventLogTableView.ts already uses for its own per-uri table state.
       if (message.type === 'ready') {
         const settings = readEventLogUiSettings();
-        sink.postMessage({ type: 'init', fileUri: uriString, persistedState: this.getPersistedState(uriString), settings, summary: session.summary });
+        sink.postMessage({
+          type: 'init',
+          fileUri: uriString,
+          persistedState: this.getPersistedState(uriString),
+          settings,
+          summary: session.summary,
+          selection: session.getSelection(),
+          bookmarks: this.controller.getBookmarkStore(document.uri).list(),
+        });
         return;
       }
       if (message.type === 'stateChanged') {
         void this.setPersistedState(uriString, message.state);
+        return;
+      }
+      // Phase U6: bookmarks need the controller (for its per-uri BookmarkStore), which
+      // the chart/table-shared handleWebviewMessage() below doesn't have access to --
+      // same "intercept before the shared function" pattern as 'ready'/'stateChanged'.
+      if (message.type === 'toggleBookmark') {
+        void handleToggleBookmarkMessage(this.controller.getBookmarkStore(document.uri), session, message.candidate);
         return;
       }
       void handleWebviewMessage(session, sink, document.uri, message);
@@ -176,6 +192,11 @@ export async function handleWebviewMessage(
 ): Promise<void> {
   switch (message.type) {
     case 'ready': {
+      // Dead in practice: both `sequenceChartEditor.ts` and `eventLogTableView.ts`
+      // intercept 'ready' themselves (to send a per-uri `persistedState`/bookmark list
+      // this generic fallback has no access to -- no `controller` reference here) --
+      // kept only so this shared function stays a complete, correctly-typed handler in
+      // its own right.
       const settings = readEventLogUiSettings();
       const init: HostToWebviewMessage = {
         type: 'init',
@@ -183,6 +204,8 @@ export async function handleWebviewMessage(
         persistedState: undefined,
         settings,
         summary: session.summary,
+        selection: session.getSelection(),
+        bookmarks: [],
       };
       sink.postMessage(init);
       break;
@@ -227,6 +250,12 @@ export async function handleWebviewMessage(
       break;
     case 'contextValue':
       void vscode.commands.executeCommand('setContext', message.key, message.value);
+      break;
+    case 'toggleBookmark':
+      // Always intercepted before reaching here (needs the controller's per-uri
+      // BookmarkStore -- see both callers' own 'toggleBookmark' handling) -- present
+      // only so this switch stays a complete, self-documenting map of every message
+      // type, matching this function's own "shared message-pump body" header.
       break;
   }
 }

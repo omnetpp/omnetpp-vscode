@@ -33,6 +33,8 @@ import {
   type RowRef,
   type RowWindow,
   type RowWindowParams,
+  type TableGotoRelatedParams,
+  type TableGotoRelation,
   type TableNavigateParams,
   type TablePositionParams,
   type TablePositionResult,
@@ -40,10 +42,12 @@ import {
   type TableRow,
   DEFAULT_TABLE_RENDER_MODES,
 } from '@omnetpp/shared/elog-protocol';
-import type { EventLogSelection, RevealTarget, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
+import type { Bookmark, EventLogSelection, RevealTarget, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
 import type { EngineRpc } from '../common/rpc';
+import { showContextMenu } from '../common/contextMenu';
 import { buildToolbar, type ToolbarHandle } from '../common/toolbar';
 import { createRowPool, computeTopIndex, type RowPool } from './rowPool';
+import { buildTableContextMenu, type TableMenuActions } from './tableContextMenu';
 import { compareRowRef, gotoElement, isSelected, moveFocusTo, refEquals, EMPTY_SELECTION, type SelectionState } from './selectionModel';
 import { computeScrollbarGeometry, computeScrollbarPercentage, percentageToScrollbarSelection } from './scrollMath';
 
@@ -65,6 +69,8 @@ export interface TableViewOptions {
   rpc: EngineRpc;
   postToHost: (message: WebviewToHostMessage) => void;
   persistedState: unknown;
+  /** Phase U6 -- the session's bookmark list as of when this table view was (re)mounted (see `tableMain.ts`'s `init`/`bookmarksChanged` handling). */
+  initialBookmarks?: Bookmark[];
 }
 
 export interface TableViewHandle {
@@ -73,6 +79,8 @@ export interface TableViewHandle {
   onEngineChanged(change: 'appended' | 'overwritten'): void;
   applyReveal(target: RevealTarget): void;
   applySetSelection(selection: EventLogSelection): void;
+  /** Phase U6 -- replaces the bookmark set this view tints rows for (`bookmarksChanged`/fresh `init`). */
+  setBookmarks(bookmarks: Bookmark[]): void;
   dispose(): void;
 }
 
@@ -138,6 +146,8 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
   let lastAnchorRef: RowRef | null = null;
   let approximateNumberOfEntries = 0;
   let selection: SelectionState = EMPTY_SELECTION;
+  /** Phase U6 -- event numbers with an `'Event'`-kind bookmark, for the row-background tint (the port plan's "table = row background tint" -- see this file's `renderRowInto()`). */
+  let bookmarkedEventNumbers = new Set<number>(options.initialBookmarks?.filter((b) => b.kind === 'Event').map((b) => b.eventNumber!));
   let scrolledToEnd = false;
   let requestSeq = 0;
   let viewportRowCount = 1;
@@ -165,6 +175,11 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
   );
   tableEl.addEventListener('keydown', (e) => void handleKeyDown(e));
   rowsWrapperEl.addEventListener('mousedown', (e) => void handleRowMouseDown(e));
+  // Double-click -- the second click's own 'mousedown' (handled above, just like any
+  // single click) already selected+focused the row by the time 'dblclick' fires; this
+  // just adds the explicit "center in chart" action on top (see `requestRevealInChart()`'s doc).
+  rowsWrapperEl.addEventListener('dblclick', () => requestRevealInChart());
+  rowsWrapperEl.addEventListener('contextmenu', (e) => handleContextMenu(e));
   thumbEl.addEventListener('mousedown', (e) => handleThumbMouseDown(e));
   scrollbarEl.addEventListener('mousedown', (e) => {
     if (e.target === thumbEl) return;
@@ -287,6 +302,7 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
   function renderRowInto(el: HTMLDivElement, row: TableRow, selected: boolean, isFocusRow: boolean): void {
     el.classList.toggle('selected', selected);
     el.classList.toggle('focus-row', isFocusRow);
+    el.classList.toggle('bookmarked', bookmarkedEventNumbers.has(row.eventNumber));
     el.dataset.eventNumber = String(row.ref.eventNumber);
     el.dataset.entryIndex = String(row.ref.entryIndex);
     el.innerHTML = '';
@@ -417,6 +433,31 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
       openFindBar();
       return;
     }
+    // Phase U6 -- the "Go To" family (`EventLogTableContributor.java`'s accelerators,
+    // see `tableContextMenu.ts`'s header): Ctrl+Up/Down = Cause/Arrival, Alt+Up/Down =
+    // Previous/Next Event, Shift+Up/Down = Previous/Next Module Event. Checked BEFORE
+    // the plain distance-based Up/Down handling below, and consumes the keystroke
+    // entirely (a documented interpretation choice: Shift+Up/Down no longer also
+    // extends the keyboard selection range the way Shift+PageUp/PageDown/Home/End still
+    // do below -- Eclipse's own accelerator binding would consume the keystroke the
+    // same way before it ever reaches `VirtualTable`'s native key handler).
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      const up = e.key === 'ArrowUp';
+      let relation: TableGotoRelation | null = null;
+      if (ctrl) relation = up ? 'cause' : 'arrival';
+      else if (e.altKey) relation = up ? 'prevEvent' : 'nextEvent';
+      else if (e.shiftKey) relation = up ? 'prevModuleEvent' : 'nextModuleEvent';
+      if (relation) {
+        e.preventDefault();
+        await doGotoRelated(relation);
+        return;
+      }
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      requestRevealInChart();
+      return;
+    }
     let distance = 0;
     switch (e.key) {
       case 'ArrowDown':
@@ -454,6 +495,38 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
     const resolved = target ?? (distance < 0 ? rows[0]?.ref : rows[rows.length - 1]?.ref) ?? null;
     if (!resolved) return;
     await applyMoveFocus(resolved, e.shiftKey, ctrl, false);
+  }
+
+  /**
+   * The table's "Go To" family (context menu + keyboard, see `handleKeyDown()`/
+   * `tableContextMenu.ts`) -- resolves `relation` relative to the focused row via the
+   * engine's `elog/table/gotoRelated` (port of `EventLogTableContributor.java`'s
+   * per-action handlers, see `TableGotoRelation`'s doc in elogProtocol.ts), then applies
+   * it exactly like any other programmatic goto: replaces the selection with just the
+   * resolved row (no shift/ctrl semantics -- matches Java's plain `gotoElement()`/
+   * `gotoClosestElement()`), reveals it, and broadcasts `selectionChanged` (so the chart
+   * follows, per the session's cross-view sync). A `null` result (no cause/consequence/
+   * neighbor/etc.) is a silent no-op, matching every Java handler's own behavior for
+   * "nothing there."
+   */
+  async function doGotoRelated(relation: TableGotoRelation): Promise<void> {
+    const focus = selection.focus;
+    if (!focus) return;
+    let target: RowRef | null;
+    try {
+      target = await rpc.request<RowRef | null>(ElogMethods.tableGotoRelated, { from: focus, relation } satisfies TableGotoRelatedParams);
+    } catch {
+      return;
+    }
+    if (!target) return;
+    await applyMoveFocus(target, false, false, false);
+  }
+
+  /** Enter / double-click -- explicitly asks the chart to CENTER on the focused event (a stronger action than the passive "reveal if off-screen" a plain cross-view `setSelection` already does -- see `applySetSelection()`'s doc and `chartMain.ts`'s `setSelection` handler). No-op with nothing focused. */
+  function requestRevealInChart(): void {
+    const ref = selection.focus;
+    if (!ref) return;
+    postToHost({ type: 'revealRequest', target: { kind: 'event', eventNumber: ref.eventNumber, ref } });
   }
 
   async function gotoEdge(which: 'first' | 'last', e: KeyboardEvent): Promise<void> {
@@ -530,6 +603,76 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
     await revealRef(result.ref);
     repaint();
     emitSelectionChanged();
+  }
+
+  // ---- cross-view selection sync (phase U6) ------------------------------------------------
+
+  /**
+   * Applies an incoming `setSelection` (the chart's selection changed, or a session
+   * rebind/late-attach push -- see `EventLogSession.setSelection()`/`attach()`'s doc):
+   * resolves each event number to its first table row via the `elog/table/getRows`
+   * `{kind: 'event'}` anchor (additive, elogProtocol.ts), replaces the local selection
+   * (no shift/ctrl semantics -- an incoming selection is always a plain "this is now the
+   * selection", matching `gotoElement()`), and REVEALS it -- per the researched Eclipse
+   * semantics (`EventLogSelection.java`'s header/citations in `uiProtocol.ts`):
+   * receiving a selection from elsewhere both selects AND scrolls into view, unlike a
+   * local click (which only selects, since the clicked row is already on screen).
+   * Deliberately does NOT call `emitSelectionChanged()` -- this is the RECEIVING half of
+   * the sync, not a new user action; re-broadcasting it would be redundant at best (the
+   * session's own re-entry guard already prevents an echo-back-to-origin, but nothing
+   * stops a needless second hop through the session otherwise).
+   */
+  async function applySetSelectionImpl(sel: EventLogSelection): Promise<void> {
+    if (sel.eventNumbers.length === 0) {
+      selection = EMPTY_SELECTION;
+      repaint();
+      return;
+    }
+    const refs: RowRef[] = [];
+    for (const eventNumber of sel.eventNumbers) {
+      let win: RowWindow;
+      try {
+        win = await rpc.request<RowWindow>(ElogMethods.tableGetRows, { anchor: { kind: 'event', eventNumber }, before: 0, after: 1 } satisfies RowWindowParams);
+      } catch {
+        continue;
+      }
+      const ref = win.anchorIndex >= 0 ? win.rows[win.anchorIndex]?.ref : undefined;
+      if (ref) refs.push(ref);
+    }
+    if (refs.length === 0) return;
+    const focus = refs[refs.length - 1];
+    selection = { anchor: refs[0], focus, ranges: refs.map((r) => ({ from: r, to: r })) };
+    await revealRef(focus);
+    repaint();
+  }
+
+  // ---- bookmarks (phase U6) -----------------------------------------------------------------
+
+  /** "Toggle Bookmark" (context menu -- Java gives the table's own version no accelerator either) -- the focused row's EVENT (Java: `EventLogTableContributor.java`'s own simpler "Toggle Bookmark", which always bookmarks the focused event, never a dependency/axis/method-call -- those are chart-only, see `chartMain.ts`). */
+  function toggleBookmarkForFocus(): void {
+    const ref = selection.focus;
+    if (!ref) return;
+    postToHost({ type: 'toggleBookmark', candidate: { kind: 'Event', eventNumber: ref.eventNumber } });
+  }
+
+  function handleContextMenu(e: MouseEvent): void {
+    e.preventDefault();
+    const actions: TableMenuActions = {
+      gotoCause: () => void doGotoRelated('cause'),
+      gotoArrival: () => void doGotoRelated('arrival'),
+      gotoOrigin: () => void doGotoRelated('origin'),
+      gotoReuse: () => void doGotoRelated('reuse'),
+      gotoPrevEvent: () => void doGotoRelated('prevEvent'),
+      gotoNextEvent: () => void doGotoRelated('nextEvent'),
+      gotoPrevModuleEvent: () => void doGotoRelated('prevModuleEvent'),
+      gotoNextModuleEvent: () => void doGotoRelated('nextModuleEvent'),
+      toggleBookmark: toggleBookmarkForFocus,
+      copySelection,
+      openFindBar,
+      refresh: () => void rpc.request(ElogMethods.checkChanges, undefined),
+    };
+    const entries = buildTableContextMenu({ hasFocus: selection.focus !== null, hasSelection: rows.some((r) => isSelected(selection, r.ref)), actions });
+    showContextMenu(e.clientX, e.clientY, entries);
   }
 
   // ---- persistence ------------------------------------------------------------------------
@@ -666,9 +809,11 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
       });
     },
     applySetSelection(sel): void {
-      // U6 (cross-view sync) will resolve arbitrary event numbers into refs; U2 only
-      // needs to accept the message shape without erroring (see uiProtocol.ts's header).
-      void sel;
+      void applySetSelectionImpl(sel);
+    },
+    setBookmarks(bookmarks): void {
+      bookmarkedEventNumbers = new Set(bookmarks.filter((b) => b.kind === 'Event').map((b) => b.eventNumber!));
+      repaint();
     },
     dispose(): void {
       disposed = true;

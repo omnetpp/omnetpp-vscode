@@ -47,9 +47,15 @@ import type { HitObject } from './hitTest';
 export interface ChartMenuActions {
   selectEvent(eventNumber: number): void;
   centerOnEvent(eventNumber: number): void;
+  /** Phase U6 -- explicitly reveals `eventNumber` in the Event Log table (see `chartMain.ts`'s `selectInTable()`). */
+  selectInTable(eventNumber: number): void;
   goToCauseEvent(eventNumber: number): void;
   goToConsequenceEvent(eventNumber: number): void;
   zoomToDependency(causeTc: number, consequenceTc: number): void;
+  /** Phase U6 -- "Toggle Bookmark" per object kind (Event/MessageDependency/Axis -- see `bookmarks.ts`'s header for why ComponentMethodCall has no per-object menu entry). */
+  toggleEventBookmark(eventNumber: number): void;
+  toggleDependencyBookmark(hit: Extract<HitObject, { kind: 'dependency' }>): void;
+  toggleAxisBookmark(moduleId: number): void;
   centerOnAxis(moduleId: number): void;
   setTimelineMode(mode: TimelineMode): void;
   zoomIn(): void;
@@ -92,6 +98,8 @@ function eventSection(hit: Extract<HitObject, { kind: 'event' }>, actions: Chart
     submenu: [
       { id: 'select', label: 'Select', onSelect: () => actions.selectEvent(hit.eventNumber) },
       { id: 'center', label: 'Center', onSelect: () => actions.centerOnEvent(hit.eventNumber) },
+      { id: 'selectInTable', label: 'Select in Event Log Table', onSelect: () => actions.selectInTable(hit.eventNumber) },
+      { id: 'toggleBookmark', label: 'Toggle Bookmark', onSelect: () => actions.toggleEventBookmark(hit.eventNumber) },
       { id: 'filter', label: 'Filter Causes/Consequences...', disabled: true },
     ],
   };
@@ -105,6 +113,7 @@ function dependencySection(hit: Extract<HitObject, { kind: 'dependency' }>, labe
       { id: 'gotoCause', label: 'Go to Cause Event', onSelect: () => actions.goToCauseEvent(hit.causeEventNumber) },
       { id: 'gotoConsequence', label: 'Go to Consequence Event', onSelect: () => actions.goToConsequenceEvent(hit.consequenceEventNumber) },
       { id: 'zoomToMessage', label: 'Zoom to Message', onSelect: () => actions.zoomToDependency(hit.causeTc, hit.consequenceTc) },
+      { id: 'toggleBookmark', label: 'Toggle Bookmark', onSelect: () => actions.toggleDependencyBookmark(hit) },
       { id: 'filterMessage', label: 'Filter Message...', disabled: true },
     ],
   };
@@ -116,6 +125,7 @@ function axisSection(hit: Extract<HitObject, { kind: 'axis' }>, actions: ChartMe
     label: `Axis (id = ${hit.moduleId})`,
     submenu: [
       { id: 'center', label: 'Center', onSelect: () => actions.centerOnAxis(hit.moduleId) },
+      { id: 'toggleBookmark', label: 'Toggle Bookmark', onSelect: () => actions.toggleAxisBookmark(hit.moduleId) },
       { id: 'openModule', label: 'Open Module', disabled: true },
       { id: 'more', label: 'More axis actions… (axis management, phase U8)', disabled: true },
     ],

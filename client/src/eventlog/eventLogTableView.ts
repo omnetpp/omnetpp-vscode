@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { EventLogUiSettings, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
+import { handleToggleBookmarkMessage } from './bookmarks';
 import type { EventLogController } from './eventLogController';
 import type { EventLogSession } from './eventLogSession';
 import { handleWebviewMessage } from './sequenceChartEditor';
@@ -112,13 +113,24 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
         // Bypass handleWebviewMessage()'s generic 'ready' case (which always sends
         // `persistedState: undefined` -- U1 had no persistence matrix yet) so a fresh
         // webview reload picks the table's own remembered modes back up immediately.
+        const session = this.currentSession();
         void webviewView.webview.postMessage({
           type: 'init',
           fileUri: this.boundUri?.toString() ?? '',
           persistedState: this.boundUri ? this.getPersistedState(this.boundUri.toString()) : undefined,
           settings: readEventLogUiSettingsForTable(),
-          summary: this.currentSession()?.summary ?? null,
+          summary: session?.summary ?? null,
+          selection: session?.getSelection() ?? { eventNumbers: [] },
+          bookmarks: this.boundUri ? this.controller.getBookmarkStore(this.boundUri).list() : [],
         });
+        return;
+      }
+      // Phase U6: needs the controller's per-uri BookmarkStore, which
+      // handleWebviewMessage() below doesn't have access to (same "intercept before
+      // the shared function" pattern as 'copyText'/'stateChanged'/'ready' above).
+      if (message.type === 'toggleBookmark') {
+        const session = this.currentSession();
+        if (this.boundUri && session) void handleToggleBookmarkMessage(this.controller.getBookmarkStore(this.boundUri), session, message.candidate);
         return;
       }
       const session = this.currentSession();
@@ -146,6 +158,11 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
     return this.boundUri ? this.controller.getSession(this.boundUri) : undefined;
   }
 
+  /** Public accessor for whichever session this panel is currently bound to (pinned or following the active chart editor) -- used by `bookmarks.ts`'s `showBookmarksCommand()` as a fallback when no Sequence Chart editor happens to be focused (e.g. invoked from THIS panel's own view/title, per package.json). */
+  getBoundSession(): EventLogSession | undefined {
+    return this.currentSession();
+  }
+
   /** Detach from the old session (if any) and attach to `uri`'s session (if any); pushes a fresh `init` so the view re-renders immediately with the new summary. */
   private rebind(uri: vscode.Uri | undefined): void {
     if (this.boundUri?.toString() === uri?.toString()) return;
@@ -155,7 +172,7 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
     else if (this.view) {
       // No active session anymore (e.g. all chart editors closed while unpinned) --
       // let the webview fall back to its own empty state.
-      void this.view.webview.postMessage({ type: 'init', fileUri: '', persistedState: undefined, settings: readEventLogUiSettingsForTable(), summary: null });
+      void this.view.webview.postMessage({ type: 'init', fileUri: '', persistedState: undefined, settings: readEventLogUiSettingsForTable(), summary: null, selection: { eventNumbers: [] }, bookmarks: [] });
     }
   }
 
@@ -170,6 +187,8 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
       persistedState: this.getPersistedState(this.boundUri.toString()),
       settings: readEventLogUiSettingsForTable(),
       summary: session.summary,
+      selection: session.getSelection(),
+      bookmarks: this.controller.getBookmarkStore(this.boundUri).list(),
     });
   }
 

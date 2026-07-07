@@ -11,6 +11,7 @@
 
 import * as vscode from 'vscode';
 import type { LogSummary } from '@omnetpp/shared/elog-protocol';
+import { BookmarkStore } from './bookmarks';
 import { EventLogSession, eventlogWorkerBundlePath, type AttachmentKind, type MessageSink } from './eventLogSession';
 
 /** Context key kept true while at least one `.elog` session is open -- gates the panel's webview view (`when: omnetpp.eventlogOpen`, package.json). */
@@ -19,6 +20,8 @@ const CONTEXT_EVENTLOG_OPEN = 'omnetpp.eventlogOpen';
 export class EventLogController {
   private readonly sessions = new Map<string, EventLogSession>();
   private readonly pendingOpens = new Map<string, Promise<EventLogSession>>();
+  /** One `BookmarkStore` per file uri (phase U6) -- created lazily, on first access, and kept for the lifetime of the extension host (bookmarks must remain reachable -- e.g. for "Show Bookmarks" -- even while no session/webview for that file happens to be open). */
+  private readonly bookmarkStores = new Map<string, BookmarkStore>();
   private activeUri: string | undefined;
 
   private readonly activeChangedEmitter = new vscode.EventEmitter<EventLogSession | undefined>();
@@ -109,6 +112,17 @@ export class EventLogController {
 
   detach(uri: vscode.Uri, kind: AttachmentKind, sink: MessageSink): void {
     this.sessions.get(uri.toString())?.detach(kind, sink);
+  }
+
+  /** The bookmark store for `uri`'s file, created on first access and reused thereafter. */
+  getBookmarkStore(uri: vscode.Uri): BookmarkStore {
+    const key = uri.toString();
+    let store = this.bookmarkStores.get(key);
+    if (!store) {
+      store = new BookmarkStore(this.context.workspaceState, key);
+      this.bookmarkStores.set(key, store);
+    }
+    return store;
   }
 
   async refreshActive(): Promise<LogSummary | undefined> {

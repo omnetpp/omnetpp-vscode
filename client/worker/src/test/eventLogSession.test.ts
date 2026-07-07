@@ -142,3 +142,94 @@ test('EventLogSession: force dispose() is idempotent and safe with no attachment
   session.dispose();
   session.dispose(); // must not throw a second time
 });
+
+// ---------------------------------------------------------------------------------
+// Phase U6: canonical session selection -- re-entry guard, canonicalization, rebind push.
+// ---------------------------------------------------------------------------------
+
+test('EventLogSession: setSelection() re-broadcasts to every OTHER attached sink, never back to the originator', async () => {
+  const session = new EventLogSession('elog:test-7', fixturePath, bundlePath);
+  try {
+    await session.initialize();
+    const chartSink = fakeSink();
+    const tableSink = fakeSink();
+    session.attach('chart', chartSink);
+    session.attach('table', tableSink);
+
+    session.setSelection({ eventNumbers: [3, 1] }, tableSink);
+
+    // the originator (table) must NOT see its own selection echoed back
+    assert.equal(tableSink.messages.filter((m) => m.type === 'setSelection').length, 0);
+    // the other view (chart) must receive it, canonicalized (deduplicated + sorted)
+    const setSelectionMessages = chartSink.messages.filter((m) => m.type === 'setSelection');
+    assert.equal(setSelectionMessages.length, 1);
+    assert.deepEqual(setSelectionMessages[0], { type: 'setSelection', selection: { eventNumbers: [1, 3] } });
+    assert.deepEqual(session.getSelection(), { eventNumbers: [1, 3] });
+  } finally {
+    session.dispose();
+  }
+});
+
+test('EventLogSession: setSelection() deduplicates and sorts event numbers regardless of click order', async () => {
+  const session = new EventLogSession('elog:test-8', fixturePath, bundlePath);
+  try {
+    await session.initialize();
+    session.setSelection({ eventNumbers: [5, 2, 5, 2, 9] });
+    assert.deepEqual(session.getSelection(), { eventNumbers: [2, 5, 9] });
+  } finally {
+    session.dispose();
+  }
+});
+
+test('EventLogSession: attach() pushes the current selection to a newly attached sink (pinned table rebind / late attachment)', async () => {
+  const session = new EventLogSession('elog:test-9', fixturePath, bundlePath);
+  try {
+    await session.initialize();
+    const chartSink = fakeSink();
+    session.attach('chart', chartSink);
+    session.setSelection({ eventNumbers: [7] }, chartSink);
+
+    // a table view attaching AFTER the selection was already made (e.g. a pinned table
+    // switching to this session, or a webview reload reattaching) must see it immediately
+    const tableSink = fakeSink();
+    session.attach('table', tableSink);
+    const pushed = tableSink.messages.filter((m) => m.type === 'setSelection');
+    assert.equal(pushed.length, 1);
+    assert.deepEqual(pushed[0], { type: 'setSelection', selection: { eventNumbers: [7] } });
+  } finally {
+    session.dispose();
+  }
+});
+
+test('EventLogSession: attach() does NOT push a setSelection when the session has no selection yet', async () => {
+  const session = new EventLogSession('elog:test-10', fixturePath, bundlePath);
+  try {
+    await session.initialize();
+    const sink = fakeSink();
+    session.attach('chart', sink);
+    assert.equal(sink.messages.filter((m) => m.type === 'setSelection').length, 0);
+  } finally {
+    session.dispose();
+  }
+});
+
+test('EventLogSession: reveal() round-trips to both a chart and a table sink attached at the time it fires', async () => {
+  const session = new EventLogSession('elog:test-11', fixturePath, bundlePath);
+  try {
+    const summary = await session.initialize();
+    const chartSink = fakeSink();
+    const tableSink = fakeSink();
+    session.attach('chart', chartSink);
+    session.attach('table', tableSink);
+
+    const target = { kind: 'event' as const, eventNumber: summary.firstEventNumber, ref: { eventNumber: summary.firstEventNumber, entryIndex: 0 } };
+    session.reveal(target);
+
+    for (const sink of [chartSink, tableSink]) {
+      const reveal = sink.messages.find((m) => m.type === 'reveal');
+      assert.deepEqual(reveal, { type: 'reveal', target });
+    }
+  } finally {
+    session.dispose();
+  }
+});

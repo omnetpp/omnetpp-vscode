@@ -75,6 +75,7 @@ import type {
   ScRelocateOriginParams,
   ScSetTimelineModeParams,
   ScState,
+  TableGotoRelatedParams,
   TableNavigateParams,
   TablePositionParams,
   TablePositionResult,
@@ -662,6 +663,15 @@ export class EngineSession {
         if (entry === null) return null;
         return table.matchesFilter(entry) ? entry : table.getClosestEntryInEvent(entry);
       }
+      case 'event': {
+        // Same resolution `gotoEvent`'s `GotoResult.ref` uses (see
+        // `eventToGotoResult()`): the first (index 0) matching entry of the event,
+        // under the table's *current* filter mode -- always resolvable (the "E" line
+        // always passes every filter) as long as the event itself exists.
+        const event = this.log.getEventForEventNumber(anchor.eventNumber);
+        if (event === null) return null;
+        return table.getEntryInEvent(event, 0);
+      }
     }
   }
 
@@ -739,6 +749,102 @@ export class EngineSession {
     };
   }
 
+  /** `elog/table/gotoRelated` -- port of `EventLogTableContributor.java`'s "Go To" family (see `TableGotoRelation`'s doc in elogProtocol.ts for the exact per-relation algorithm/citations). */
+  tableGotoRelated(params: TableGotoRelatedParams): RowRef | null {
+    const log = this.log;
+    const table = this.table;
+    const event = log.getEventForEventNumber(params.from.eventNumber);
+    if (event === null) return null;
+    const focusedEntry = params.from.entryIndex >= 0 && params.from.entryIndex < event.getNumEventLogEntries() ? event.getEventLogEntry(params.from.entryIndex) : null;
+
+    let targetEntry: EventLogEntry | null = null;
+    let gotoClosest = false;
+
+    switch (params.relation) {
+      case 'cause': {
+        const cause = event.getCause();
+        targetEntry = cause?.getBeginMessageDescriptionEntry() ?? null;
+        gotoClosest = true;
+        break;
+      }
+      case 'arrival': {
+        const consequences = event.getConsequences().filter((c) => !(c instanceof MessageReuseDependency));
+        if (consequences.length === 1) {
+          targetEntry = consequences[0].getConsequenceEvent()?.getEventEntry() ?? null;
+        } else if (focusedEntry !== null) {
+          for (const consequence of event.getConsequences()) {
+            if (consequence instanceof MessageReuseDependency) continue;
+            const beginEntry = consequence.getBeginMessageDescriptionEntry();
+            if (beginEntry !== null && sameEntry(beginEntry, focusedEntry)) {
+              targetEntry = consequence.getConsequenceEvent()?.getEventEntry() ?? null;
+              break;
+            }
+          }
+        }
+        break;
+      }
+      case 'origin': {
+        if (focusedEntry !== null) {
+          for (const cause of event.getCauses()) {
+            if (!(cause instanceof MessageReuseDependency)) continue;
+            const beginEntry = cause.getBeginMessageDescriptionEntry();
+            if (beginEntry !== null && sameEntry(beginEntry, focusedEntry)) {
+              targetEntry = cause.getCauseEvent()?.getEventEntry() ?? null;
+              break;
+            }
+          }
+        }
+        break;
+      }
+      case 'reuse': {
+        for (const consequence of event.getConsequences()) {
+          if (consequence instanceof MessageReuseDependency) {
+            targetEntry = consequence.getBeginMessageDescriptionEntry();
+            break;
+          }
+        }
+        gotoClosest = true;
+        break;
+      }
+      case 'prevEvent':
+        targetEntry = event.getPreviousEvent()?.getEventEntry() ?? null;
+        break;
+      case 'nextEvent':
+        targetEntry = event.getNextEvent()?.getEventEntry() ?? null;
+        break;
+      case 'prevModuleEvent': {
+        const moduleId = event.getModuleId();
+        let cur: IEvent | null = event;
+        while (cur !== null) {
+          log.progress();
+          cur = cur.getPreviousEvent();
+          if (cur !== null && cur.getModuleId() === moduleId) {
+            targetEntry = cur.getEventEntry();
+            break;
+          }
+        }
+        break;
+      }
+      case 'nextModuleEvent': {
+        const moduleId = event.getModuleId();
+        let cur: IEvent | null = event;
+        while (cur !== null) {
+          log.progress();
+          cur = cur.getNextEvent();
+          if (cur !== null && cur.getModuleId() === moduleId) {
+            targetEntry = cur.getEventEntry();
+            break;
+          }
+        }
+        break;
+      }
+    }
+
+    if (targetEntry === null) return null;
+    const resolved = gotoClosest && !table.matchesFilter(targetEntry) ? table.getClosestEntryInEvent(targetEntry) : targetEntry;
+    return toRowRef(resolved);
+  }
+
   // ---- elog/gotoEvent, elog/gotoSimTime ------------------------------------------------
 
   gotoEvent(params: GotoEventParams): GotoResult {
@@ -808,6 +914,22 @@ function toEventLogOptions(options: ElogOpenOptions | undefined): EventLogOption
 
 function toRowRef(entry: EventLogEntry): RowRef {
   return { eventNumber: entry.getEventNumber(), entryIndex: entry.getEntryIndex() };
+}
+
+/**
+ * Compound-key entry-identity comparison (port plan risk #3's established convention --
+ * same rationale as `eventLogTableFacade.ts`'s `entryKey()`: a bounded LRU can evict and
+ * later re-parse an `Event`, so a fresh `EventLogEntry` object can come back for the same
+ * logical `(eventNumber, entryIndex)`; comparing by that compound key instead of object
+ * identity/`===` survives that). Java's `EventLogEntry.equals(other)` (the literal
+ * comparison `EventLogTableContributor.java`'s "Go To" handlers use) has no override of
+ * its own, so it is reference equality there -- safe in Java only because nothing evicts
+ * mid-session; this port's engine deliberately does evict, so the compound key is the
+ * correct comparison here even though it is a documented deviation from a literal `===`
+ * port.
+ */
+function sameEntry(a: EventLogEntry, b: EventLogEntry): boolean {
+  return a.getEntryIndex() === b.getEntryIndex() && a.getEventNumber() === b.getEventNumber();
 }
 
 function toTableRow(entry: EventLogEntry): TableRow {

@@ -95,7 +95,16 @@ export type DrawPrimitive =
   | { kind: 'timeDifferenceLabel'; x: number; y: number; text: string; color: string }
   | { kind: 'infoPanel'; x: number; y: number; w: number; h: number; lines: string[]; background: string; color: string; align: 'right' }
   /** Phase U4 — a selection ring around a selected event. */
-  | { kind: 'selectionMark'; x: number; y: number; radius: number; color: string };
+  | { kind: 'selectionMark'; x: number; y: number; radius: number; color: string }
+  /**
+   * Phase U6 — a bookmark mark: a small filled "flag" glyph, port of Eclipse's
+   * bookmark ring/flag decoration on the event mark (`IMarker.BOOKMARK`'s default
+   * annotation, ported loosely -- the exact Eclipse ruler icon isn't reproduced, just a
+   * small, consistently-colored flag shape). Reused verbatim for event/axis/
+   * dependency bookmarks -- only the `(x, y)` anchor differs per caller (see
+   * `buildDrawList()`'s three call sites below).
+   */
+  | { kind: 'bookmarkMark'; x: number; y: number; color: string };
 
 /** Colors this module needs beyond `EventLogPalette` (reuse/filtered-dependency dash colors, the "long" arrowhead color) — derived locally from the imported palette rather than editing `common/theme.ts` (out of this phase's file ownership). */
 export function deriveArrowColors(theme: EventLogPalette): Record<ArrowKind, string> {
@@ -160,6 +169,21 @@ class VLineBuffer {
 }
 
 export const SELECTION_MARK_COLOR = '#ff3b30';
+/** Eclipse's default `IMarker.BOOKMARK` ruler-annotation color (a muted blue) -- kept as a literal like the other Eclipse semantic data colors (see this port's Theming section). */
+export const BOOKMARK_MARK_COLOR = '#4a90d9';
+
+/**
+ * Identity key for a `MessageDependency`-kind bookmark, matching `bookmarkStore.ts`'s
+ * `bookmarkMatches()` field set exactly `(eventNumber [= cause], consequenceEventNumber,
+ * messageId)` -- NOT `dependencyKey()` from `selection.ts` (which keys on `kind` instead
+ * of `messageId`, a different identity notion used only for selection membership).
+ * Exported so `chartMain.ts` builds the SAME key both when constructing a
+ * `toggleBookmark` candidate and when computing `bookmarkedDependencyKeys` for this
+ * module -- one definition, used both places, never drifting apart.
+ */
+export function bookmarkDependencyKey(eventNumber: number, consequenceEventNumber: number | undefined, messageId: number | null | undefined): string {
+  return `${eventNumber}:${consequenceEventNumber ?? -1}:${messageId ?? -1}`;
+}
 
 export interface InfoPanelText {
   positionAndRange?: [string, string];
@@ -177,6 +201,12 @@ export interface BuildDrawListParams {
   theme: EventLogPalette;
   /** Phase U4 — event numbers currently selected; each gets a `'selectionMark'` ring around its event mark, and (if `displayFlags.showTimeDifferences`) participates in the time-differences polyline. */
   selectedEventNumbers?: ReadonlySet<number>;
+  /** Phase U6 — event numbers with an `'Event'`-kind bookmark; each gets a `'bookmarkMark'` flag near its event mark. */
+  bookmarkedEventNumbers?: ReadonlySet<number>;
+  /** Phase U6 — module ids with an `'Axis'`-kind bookmark (already resolved from the bookmark's stored `modulePath` -- see `chartMain.ts`'s `recomputeBookmarkIndexes()`); each gets a `'bookmarkMark'` at the start of its axis line. */
+  bookmarkedModuleIds?: ReadonlySet<number>;
+  /** Phase U6 — `MessageDependency`-kind bookmark identity keys (`${causeEventNumber}:${consequenceEventNumber}:${messageId}` -- see `chartMain.ts`'s `bookmarkDepKey()`, which both this and the toggle-candidate builder use so the two stay in sync); a matching dependency gets a `'bookmarkMark'` at its arrow's midpoint. */
+  bookmarkedDependencyKeys?: ReadonlySet<string>;
   /** Phase U5 — the ~25 Show/Hide toggles (`displayFlags.ts`); defaults to `DEFAULT_DISPLAY_FLAGS` when omitted. */
   displayFlags?: ChartDisplayFlags;
   /** Phase U5 — merged axis-header tree (`axisHeaders.ts`'s `calculateAxisHeaders()`), or `null`/omitted for no headers (e.g. module tree not loaded yet). */
@@ -188,7 +218,7 @@ export interface BuildDrawListParams {
 }
 
 export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
-  const { viewport, events, dependencies, methodCalls, axesLayout, ticks, theme, selectedEventNumbers, axisHeaderRoot, infoPanelText, skipLabelsForPerf } = params;
+  const { viewport, events, dependencies, methodCalls, axesLayout, ticks, theme, selectedEventNumbers, bookmarkedEventNumbers, bookmarkedModuleIds, bookmarkedDependencyKeys, axisHeaderRoot, infoPanelText, skipLabelsForPerf } = params;
   const flags = params.displayFlags ?? DEFAULT_DISPLAY_FLAGS;
   const primitives: DrawPrimitive[] = [];
   const arrowColors = deriveArrowColors(theme);
@@ -228,6 +258,7 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       if (y < GUTTER_TOP_HEIGHT - axis.lineHeight || y > viewport.canvasHeight + axis.lineHeight) continue;
       primitives.push({ kind: 'axisLine', moduleId: axis.moduleId, x1: GUTTER_LEFT_WIDTH, x2: viewport.canvasWidth, y, lineHeight: axis.lineHeight, color: theme.foreground });
       if (flags.showAxisLabels) primitives.push({ kind: 'axisLabel', moduleId: axis.moduleId, x: 4 + labelIndent, y, text: axis.label, color: theme.foreground });
+      if (bookmarkedModuleIds?.has(axis.moduleId)) primitives.push({ kind: 'bookmarkMark', x: GUTTER_LEFT_WIDTH - 6, y, color: BOOKMARK_MARK_COLOR });
     }
   }
 
@@ -274,6 +305,7 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
         );
         if (flags.showEventNumbers && showLabels) primitives.push({ kind: 'label', x: x + 2, y: y + 10, text: `#${event.eventNumber}`, color: theme.descriptionForeground, align: 'left' });
         if (selectedEventNumbers?.has(event.eventNumber)) primitives.push({ kind: 'selectionMark', x, y, radius: EVENT_RADIUS + 3, color: SELECTION_MARK_COLOR });
+        if (bookmarkedEventNumbers?.has(event.eventNumber)) primitives.push({ kind: 'bookmarkMark', x: x - EVENT_RADIUS - 3, y: y - EVENT_RADIUS - 3, color: BOOKMARK_MARK_COLOR });
       }
     }
     for (const [xKey, col] of columnDensity) {
@@ -285,7 +317,7 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
   const vlineBuffer = new VLineBuffer();
   const axisSpacing = Math.max(axesLayout.spacing, 1);
   for (const dep of dependencies) {
-    pushDependency(primitives, dep, { axisByModuleId, viewport, theme, arrowColors, flags, axisSpacing, vlineBuffer, showLabels });
+    pushDependency(primitives, dep, { axisByModuleId, viewport, theme, arrowColors, flags, axisSpacing, vlineBuffer, showLabels, bookmarkedDependencyKeys });
   }
 
   // ---- method calls ----
@@ -368,10 +400,13 @@ interface DependencyDrawContext {
   axisSpacing: number;
   vlineBuffer: VLineBuffer;
   showLabels: boolean;
+  /** Phase U6 -- see `bookmarkDependencyKey()`'s doc. */
+  bookmarkedDependencyKeys?: ReadonlySet<string>;
 }
 
 function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx: DependencyDrawContext): void {
-  const { axisByModuleId, viewport, theme, arrowColors, flags, axisSpacing, vlineBuffer, showLabels } = ctx;
+  const { axisByModuleId, viewport, theme, arrowColors, flags, axisSpacing, vlineBuffer, showLabels, bookmarkedDependencyKeys } = ctx;
+  const isBookmarked = bookmarkedDependencyKeys?.has(bookmarkDependencyKey(dep.causeEventNumber, dep.consequenceEventNumber, dep.messageId)) ?? false;
   if (dep.causeModuleId === null && dep.consequenceModuleId === null) return;
   // Both sides need a resolvable axis to be placed at all -- an event whose module was
   // never seen in any fetched viewport has nowhere to draw a row for (matches the U3/U4
@@ -425,6 +460,7 @@ function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx:
     if (geom.arrowhead) primitives.push({ kind: 'arrowHead', x: geom.arrowhead.x, y: geom.arrowhead.y, angle: geom.arrowhead.angle, color: geom.arrowhead.long ? LONG_ARROWHEAD_COLOR : color, length: geom.arrowhead.length, width: geom.arrowhead.width });
     if (isFiltered && geom.signAnchor) primitives.push({ kind: 'zigzag', segments: buildFilteredSignSegments(geom.signAnchor), color });
     if (flags.showMessageNames && showLabels && dep.messageName) primitives.push({ kind: 'label', x: geom.labelAnchor.x + (isFiltered ? 7 : 0), y: geom.labelAnchor.y, text: dep.messageName, color, align: 'left' });
+    if (isBookmarked) primitives.push({ kind: 'bookmarkMark', x: geom.labelAnchor.x, y: geom.labelAnchor.y, color: BOOKMARK_MARK_COLOR });
     return;
   }
 
@@ -450,4 +486,5 @@ function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx:
   if (geom.arrowhead) primitives.push({ kind: 'arrowHead', x: geom.arrowhead.x, y: geom.arrowhead.y, angle: geom.arrowhead.angle, color: geom.arrowhead.long ? LONG_ARROWHEAD_COLOR : color, length: geom.arrowhead.length, width: geom.arrowhead.width });
   if (isFiltered && geom.signAnchor) primitives.push({ kind: 'zigzag', segments: buildFilteredSignSegments(geom.signAnchor), color });
   if (flags.showMessageNames && showLabels && dep.messageName) primitives.push({ kind: 'label', x: geom.labelAnchor.x + (isFiltered ? 7 : 0), y: geom.labelAnchor.y, text: dep.messageName, color, align: 'left' });
+  if (isBookmarked) primitives.push({ kind: 'bookmarkMark', x: geom.labelAnchor.x, y: geom.labelAnchor.y, color: BOOKMARK_MARK_COLOR });
 }

@@ -1,0 +1,11 @@
+SB ov 1536 ev 2 rid Test-0
+
+E # 0 t 0 m 1 ce -1 msg -1
+CM id 10 tid 10 eid 10 etid 10 c cMessage n reused pe -1
+
+E # 1 t 1 m 1 ce -1 msg -1
+BS id 10 tid 10 eid 10 etid 10 c cMessage n reused pe 0
+
+E # 2 t 2 m 1 ce -1 msg -1
+
+SE e 0 c 9 m "done"

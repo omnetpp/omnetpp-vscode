@@ -78,6 +78,13 @@ export const ElogMethods = {
   tableNavigate: 'elog/table/navigate',
   /** request: TablePositionParams → TablePositionResult */
   tablePosition: 'elog/table/position',
+  /**
+   * request: TableGotoRelatedParams → RowRef | null. ADDITIVE (phase U6): the table's
+   * "Go To" context-menu/keyboard family (Cause/Arrival/Origin/Reuse/Previous-Next
+   * Event/Previous-Next Module Event), ported from `EventLogTableContributor.java`'s
+   * per-action handlers -- see `TableGotoRelation`'s doc for the exact semantics.
+   */
+  tableGotoRelated: 'elog/table/gotoRelated',
   /** request: GotoEventParams → GotoResult */
   gotoEvent: 'elog/gotoEvent',
   /** request: GotoSimTimeParams → GotoResult */
@@ -440,7 +447,23 @@ export interface RowRef {
   entryIndex: number;
 }
 
-export type RowAnchor = { kind: 'ref'; ref: RowRef } | { kind: 'first' } | { kind: 'last' } | { kind: 'percentage'; percentage: number };
+export type RowAnchor =
+  | { kind: 'ref'; ref: RowRef }
+  | { kind: 'first' }
+  | { kind: 'last' }
+  | { kind: 'percentage'; percentage: number }
+  /**
+   * ADDITIVE (phase U6, "Sync, bookmarks, goto"): anchors at the first table row
+   * (`EventLogTableFacade.getEntryInEvent(event, 0)`, which is always the "E" line and
+   * so always passes every filter mode) of `eventNumber` -- the same resolution
+   * `gotoEvent`'s `GotoResult.ref` already uses internally (`EngineSession.
+   * eventToGotoResult()`), exposed as a `RowAnchor` variant so a webview that only has
+   * an event number (e.g. an incoming cross-view `setSelection`, or a bookmark reveal)
+   * can resolve a `RowRef` for it via the ordinary `elog/table/getRows` request instead
+   * of a new one-off method. `-1`/nonexistent `eventNumber` resolves like any other
+   * unresolvable anchor (`RowWindow.anchorIndex === -1`).
+   */
+  | { kind: 'event'; eventNumber: number };
 
 export interface RowWindowParams {
   anchor: RowAnchor;
@@ -575,6 +598,50 @@ export interface TablePositionParams {
 export interface TablePositionResult {
   approximatePercentage: number;
   approximateNumberOfEntries: number;
+}
+
+// ---------------------------------------------------------------------------------
+// elog/table/gotoRelated -- phase U6 "Go To" family (EventLogTableContributor.java port)
+// ---------------------------------------------------------------------------------
+
+/**
+ * The table's "Go To" family, ported from `EventLogTableContributor.java`'s per-action
+ * handlers (verified by reading the source):
+ *  - `cause` (Ctrl+Up, "Go to Event Cause"): `event.getCause()`'s
+ *    `getBeginMessageDescriptionEntry()` -- the sending event's `BeginSendEntry`, NOT
+ *    just that event's first row (`gotoClosest=true`: if the exact entry is filtered
+ *    out under the table's current line-filter mode, lands on the closest matching
+ *    entry in the same event instead, `EventLogTableFacade.getClosestEntryInEvent()`).
+ *  - `arrival` (Ctrl+Down, "Go to Message Arrival"): entry-precise -- `from.entryIndex`
+ *    must be the specific `BeginSendEntry` row being asked about (an event can send
+ *    several messages); resolves via `event.getConsequences()`, skipping
+ *    `MessageReuseDependency`s, to the matching consequence's arrival event
+ *    (`getEventEntry()`, `gotoClosest=false`). Java has a discard-the-result bug in the
+ *    single-consequence case (verified: `return consequenceEvent.getEventEntry()` from
+ *    an `execute()` whose return value nothing reads) -- this port fixes it (single
+ *    non-reuse consequence navigates, matching every multi-consequence branch's intent).
+ *  - `origin` (context menu only, no Java accelerator): entry-precise, the reverse of a
+ *    message reuse -- `event.getCauses()`, first `MessageReuseDependency` whose
+ *    `getBeginMessageDescriptionEntry()` is `from`'s own entry, → that reuse's
+ *    `getCauseEvent().getEventEntry()` (`gotoClosest=false`).
+ *  - `reuse` (context menu only): event-level (not entry-precise, matching Java) --
+ *    `event.getConsequences()`, first `MessageReuseDependency` → its
+ *    `getBeginMessageDescriptionEntry()` (`gotoClosest=true`).
+ *  - `prevEvent`/`nextEvent` (Alt+Up/Alt+Down): `event.getPreviousEvent()`/
+ *    `getNextEvent()` → `getEventEntry()`.
+ *  - `prevModuleEvent`/`nextModuleEvent` (Shift+Up/Shift+Down): nearest previous/next
+ *    event sharing `event.getModuleId()`, walking one event at a time.
+ * `null` (no cause/consequence/neighbor/etc., or `from` doesn't resolve) means "no-op" --
+ * matches every Java handler's silent-no-navigation behavior (none of these show an
+ * error dialog for the ordinary "nothing there" case, only for a stale/filtered-out
+ * `from` reference, which this port folds into "just returns null" too).
+ */
+export type TableGotoRelation = 'cause' | 'arrival' | 'origin' | 'reuse' | 'prevEvent' | 'nextEvent' | 'prevModuleEvent' | 'nextModuleEvent';
+
+export interface TableGotoRelatedParams {
+  /** The focused/anchor row the action is relative to -- `entryIndex` matters for `arrival`/`origin` (see `TableGotoRelation`'s doc). */
+  from: RowRef;
+  relation: TableGotoRelation;
 }
 
 // ---------------------------------------------------------------------------------

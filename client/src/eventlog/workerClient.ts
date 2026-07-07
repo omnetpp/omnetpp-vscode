@@ -63,6 +63,7 @@ import {
   type ScRelocateOriginParams,
   type ScSetTimelineModeParams,
   type ScState,
+  type TableGotoRelatedParams,
   type TableNavigateParams,
   type TablePositionParams,
   type TablePositionResult,
@@ -294,6 +295,10 @@ export class WorkerClient {
 
   tablePosition(params: TablePositionParams, token?: CancellationToken): Promise<TablePositionResult> {
     return this.rawRequest(ElogMethods.tablePosition, params, token);
+  }
+
+  tableGotoRelated(params: TableGotoRelatedParams, token?: CancellationToken): Promise<RowRef | null> {
+    return this.rawRequest(ElogMethods.tableGotoRelated, params, token);
   }
 
   gotoEvent(params: GotoEventParams, token?: CancellationToken): Promise<GotoResult> {

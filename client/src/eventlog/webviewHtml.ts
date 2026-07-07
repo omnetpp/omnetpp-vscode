@@ -69,6 +69,7 @@ export function buildEventLogWebviewHtml(webview: vscode.Webview, extensionUri: 
   .elog-row.selected { background: var(--vscode-list-inactiveSelectionBackground); }
   .elog-table.focused .elog-row.selected { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
   .elog-row.focus-row { outline: 1px solid var(--vscode-list-focusOutline, transparent); outline-offset: -1px; }
+  .elog-row.bookmarked { box-shadow: inset 3px 0 0 0 var(--vscode-charts-green, #89d185); }
   .elog-span-const { color: var(--vscode-foreground); }
   .elog-span-constBold { color: var(--vscode-foreground); font-weight: bold; }
   .elog-span-raw, .elog-span-type, .elog-span-data { color: var(--vscode-charts-blue, #4daafc); }

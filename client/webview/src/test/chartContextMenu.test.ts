@@ -15,9 +15,13 @@ function fakeActions(): ChartMenuActions & Record<string, unknown> {
     calls,
     selectEvent: record('selectEvent'),
     centerOnEvent: record('centerOnEvent'),
+    selectInTable: record('selectInTable'),
     goToCauseEvent: record('goToCauseEvent'),
     goToConsequenceEvent: record('goToConsequenceEvent'),
     zoomToDependency: record('zoomToDependency'),
+    toggleEventBookmark: record('toggleEventBookmark'),
+    toggleDependencyBookmark: record('toggleDependencyBookmark'),
+    toggleAxisBookmark: record('toggleAxisBookmark'),
     centerOnAxis: record('centerOnAxis'),
     setTimelineMode: record('setTimelineMode'),
     zoomIn: record('zoomIn'),
@@ -69,6 +73,14 @@ test('buildChartContextMenu: an event hit gets its own submenu with Select/Cente
   center.onSelect();
   assert.deepEqual(actions.calls.centerOnEvent, [42]);
 
+  const selectInTable = findEntry(sub, 'selectInTable')! as { onSelect: () => void };
+  selectInTable.onSelect();
+  assert.deepEqual(actions.calls.selectInTable, [42]);
+
+  const toggleBookmark = findEntry(sub, 'toggleBookmark')! as { onSelect: () => void };
+  toggleBookmark.onSelect();
+  assert.deepEqual(actions.calls.toggleEventBookmark, [42]);
+
   const filter = findEntry(sub, 'filter')!;
   assert.ok('disabled' in filter && filter.disabled, 'Filter Causes/Consequences is disabled -- deferred to U7');
 });
@@ -98,6 +110,8 @@ test('buildChartContextMenu: dependency hit -- Go to Cause/Consequence + Zoom to
   assert.deepEqual(actions.calls.goToConsequenceEvent, [2]);
   (findEntry(sub, 'zoomToMessage') as { onSelect: () => void }).onSelect();
   assert.deepEqual(actions.calls.zoomToDependency, [10, 20]);
+  (findEntry(sub, 'toggleBookmark') as { onSelect: () => void }).onSelect();
+  assert.deepEqual(actions.calls.toggleDependencyBookmark, [hits[0]]);
   assert.ok((findEntry(sub, 'filterMessage') as { disabled: boolean }).disabled);
 });
 
@@ -116,6 +130,8 @@ test('buildChartContextMenu: axis hit -- Center wired, Open Module + more-action
   const sub = submenuOf(entries, 'axis-7');
   (findEntry(sub, 'center') as { onSelect: () => void }).onSelect();
   assert.deepEqual(actions.calls.centerOnAxis, [7]);
+  (findEntry(sub, 'toggleBookmark') as { onSelect: () => void }).onSelect();
+  assert.deepEqual(actions.calls.toggleAxisBookmark, [7]);
   assert.ok((findEntry(sub, 'openModule') as { disabled: boolean }).disabled);
 });
 

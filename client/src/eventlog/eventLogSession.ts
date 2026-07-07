@@ -37,6 +37,7 @@ import {
   type RowWindowParams,
   type ScRelocateOriginParams,
   type ScSetTimelineModeParams,
+  type TableGotoRelatedParams,
   type TableNavigateParams,
   type TablePositionParams,
   type ViewportParams,
@@ -107,8 +108,19 @@ export class EventLogSession {
 
   // ---- attachment refcounting --------------------------------------------------------
 
+  /**
+   * Attaches `sink`; if this session already has a non-empty selection (e.g. a pinned
+   * Event Log table rebinding to a different session, or a webview reload reattaching
+   * to a session another still-open webview already drove), pushes it immediately so
+   * the newly attached view renders the right highlight/reveal without waiting for the
+   * OTHER view to change something first (the `init` message built by
+   * `sequenceChartEditor.ts`/`eventLogTableView.ts` also carries `getSelection()` for
+   * the same reason -- belt and suspenders, since `init`'s construction lives one layer
+   * up, outside this `vscode`-free class).
+   */
   attach(kind: AttachmentKind, sink: MessageSink): void {
     (kind === 'chart' ? this.chartSinks : this.tableSinks).add(sink);
+    if (this.selection.eventNumbers.length > 0) sink.postMessage({ type: 'setSelection', selection: this.selection });
   }
 
   /** Detach one sink; once both chart and table sinks are empty, disposes the worker and fires `onIdle`. */
@@ -145,6 +157,18 @@ export class EventLogSession {
     for (const sink of this.tableSinks) sink.postMessage(message);
   }
 
+  /**
+   * Public passthrough for callers outside this class that need to fan a message out to
+   * every attached webview unconditionally (currently: `bookmarksChanged`, after
+   * `client/src/eventlog/bookmarks.ts`'s `BookmarkStore` mutates -- bookmark storage
+   * needs `vscode.Memento`/`showInputBox`, so it lives one layer up in
+   * `eventLogController.ts`/the two webview providers, not on this `vscode`-free class,
+   * but still needs a way to reach every sink this session owns).
+   */
+  postToAll(message: HostToWebviewMessage): void {
+    this.broadcast(message);
+  }
+
   private handleChanged(p: ElogChangedParams): void {
     this.lastSummary = p.summary;
     this.broadcast({ type: 'engineNotify', event: 'elog/changed', payload: p });
@@ -168,16 +192,27 @@ export class EventLogSession {
     return result;
   }
 
-  // ---- selection (U6 placeholder) ------------------------------------------------------
+  // ---- selection (U6: canonical, session-mediated chart<->table sync) -----------------
 
+  /** The session's current canonical selection (empty `{eventNumbers: []}` before anything has ever been selected) -- also pushed in every `init` message (`sequenceChartEditor.ts`/`eventLogTableView.ts`) so a freshly (re)attached webview (a reload, or a pinned table rebinding to a different session) picks it up immediately without waiting on the other view to re-broadcast. */
   getSelection(): EventLogSelection {
     return this.selection;
   }
 
-  /** Records the selection and fans it out to every OTHER attached sink (not the originator -- re-entry guard per the port plan's "Integrations" row). Full chart<->table wiring lands in U6; this just keeps the plumbing ready. */
+  /**
+   * Canonicalizes (`originId` stripped -- it is meaningful only for the re-entry guard
+   * below, never part of the durable session state; event numbers deduplicated and
+   * sorted so two logically-identical selections compare equal regardless of click
+   * order) and records `selection`, then re-broadcasts a `setSelection` to every OTHER
+   * attached sink -- NOT the originator (Eclipse's `isSelectionChangeInProgress` re-
+   * entry guard, `EventLogSelection.ts`'s header). Called both from a webview's own
+   * `selectionChanged` message (`originSink` = that webview) and, in principle, by any
+   * future host-driven selection change (`originSink` omitted = broadcast to everyone).
+   */
   setSelection(selection: EventLogSelection, originSink?: MessageSink): void {
-    this.selection = selection;
-    const message: HostToWebviewMessage = { type: 'setSelection', selection };
+    const eventNumbers = [...new Set(selection.eventNumbers)].sort((a, b) => a - b);
+    this.selection = { eventNumbers };
+    const message: HostToWebviewMessage = { type: 'setSelection', selection: this.selection };
     for (const sink of this.chartSinks) if (sink !== originSink) sink.postMessage(message);
     for (const sink of this.tableSinks) if (sink !== originSink) sink.postMessage(message);
   }
@@ -241,6 +276,8 @@ export class EventLogSession {
         return wc.tableNavigate(params as TableNavigateParams, token);
       case ElogMethods.tablePosition:
         return wc.tablePosition(params as TablePositionParams, token);
+      case ElogMethods.tableGotoRelated:
+        return wc.tableGotoRelated(params as TableGotoRelatedParams, token);
       case ElogMethods.gotoEvent:
         return this.gotoEvent(params as GotoEventParams, token);
       case ElogMethods.gotoSimTime:

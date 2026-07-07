@@ -43,11 +43,31 @@ import type { LogSummary, RowRef } from './elogProtocol';
 // ---------------------------------------------------------------------------------
 
 /**
- * Chart<->table selection (U6 "Sync, bookmarks, goto" -- `EventLogSelection` port).
- * `originId` lets the session apply the Eclipse "re-entry guard": a webview that
- * receives a `setSelection` it just originated (round-tripped back to it) should
- * not re-broadcast it. Left minimal on purpose -- U6 will likely grow this
- * (module id, entry index, range selections).
+ * Chart<->table selection -- `EventLogSelection`/`IEventLogSelection` port (phase U6;
+ * verified against `omnetpp-dev/ui/org.omnetpp.common/src/org/omnetpp/common/eventlog/
+ * EventLogSelection.java`). Java's version is a heterogeneous bag (event numbers,
+ * simulation times, module-tree items, ...) belonging to exactly one `EventLogInput`
+ * (single-file selections only, matching this port's one-session-per-file model); this
+ * shape keeps only the part that is meaningful ACROSS the chart/table boundary --
+ * `EventNumberRangeSet`'s flat membership as a plain array (selections stay
+ * human-click-sized, never "select all N million events", so no range-compression is
+ * needed the way the huge-file-scale table/viewport DTOs require elsewhere in this
+ * port). Chart-local rich kinds (axis selection, message-dependency selection, method-
+ * call selection, a bare timeline-coordinate click) are NOT part of this shared shape --
+ * they stay local to `chart/selection.ts`'s `ChartSelectionState`, matching how Java's
+ * `SequenceChart`-only selection kinds never make it into the workbench-wide
+ * `IEventLogSelection` contract either (verified: `EventLogSelection`'s public surface
+ * is only `getEventNumbers()`/`getSimulationTimes()`, nothing dependency/axis-shaped).
+ *
+ * `originId` implements the Eclipse re-entry guard (`isSelectionChangeInProgress`,
+ * `SequenceChart.java`/`VirtualTable.java`): `EventLogSession.setSelection()` re-
+ * broadcasts a `setSelection` to every attachment EXCEPT `originSink` (the one that
+ * produced it), so the originating webview never re-applies its own echo. Per the
+ * researched Java behavior, receiving a `setSelection` from elsewhere is NOT the same
+ * as a local click: Java's `setSelection()` both applies the selection AND reveals it
+ * (`reveal(event)`/`scrollToEvent(event)`), whereas a local click only selects (the
+ * clicked thing is already on screen) -- both webviews' `setSelection` handlers repeat
+ * that asymmetry (see `chartMain.ts`/`tableView.ts`).
  */
 export interface EventLogSelection {
   eventNumbers: number[];
@@ -61,6 +81,50 @@ export interface EventLogSelection {
 export type RevealTarget =
   | { kind: 'event'; eventNumber: number; ref: RowRef | null }
   | { kind: 'simTime'; simulationTime: string; ref: RowRef | null };
+
+// ---------------------------------------------------------------------------------
+// Bookmarks (phase U6) -- port of the Eclipse plugins' 4 `IMarker` kinds. See
+// `client/src/eventlog/bookmarks.ts`'s header for the storage/toggle logic; this file
+// only carries the wire shape both webviews and the host agree on.
+// ---------------------------------------------------------------------------------
+
+/**
+ * Port of the 4 marker kinds `SequenceChartContributor.java`'s "Toggle bookmark" action
+ * creates (verified by reading the source), unified into one flat, optional-field shape
+ * (rather than Eclipse's `IMarker` generic attribute bag) since every field is a plain
+ * JSON value already. Which optional fields are populated depends on `kind`:
+ *  - `'Event'`: `eventNumber`.
+ *  - `'Axis'`: `modulePath` (`ModuleTreeItem.getModuleFullPath()`).
+ *  - `'MessageDependency'`: `eventNumber` (the CAUSE event number), `messageId`,
+ *    `consequenceEventNumber` (ADDITIVE vs. the plan's own sketch field list -- Java
+ *    also stores a `dependencyIndex` into `causeEvent.getConsequences()` purely to
+ *    re-resolve the exact dependency object on reveal after a possible reload;
+ *    this port instead keys identity/marker-matching directly off
+ *    `(eventNumber, consequenceEventNumber, messageId)`, which is what `drawList.ts`'s
+ *    `dependencyKey()`-shaped matching against a loaded `RenderDependency` already
+ *    needs anyway -- no separate index to keep in sync).
+ *  - `'ComponentMethodCall'`: `eventNumber`, `entryIndex`, `methodName`.
+ * `id` is a store-assigned stable identifier (not part of the Eclipse original, which
+ * relies on `IMarker`'s own workspace-assigned id) -- lets `bookmarksChanged`/QuickPick
+ * selection reference one bookmark unambiguously without repeating its full identity.
+ */
+export type BookmarkKind = 'Event' | 'Axis' | 'MessageDependency' | 'ComponentMethodCall';
+
+export interface Bookmark {
+  id: string;
+  kind: BookmarkKind;
+  /** User-entered label (Java: `IMarker.MESSAGE`, from the "Add Bookmark" input dialog). */
+  label: string;
+  eventNumber?: number;
+  modulePath?: string;
+  messageId?: number;
+  consequenceEventNumber?: number;
+  entryIndex?: number;
+  methodName?: string;
+}
+
+/** A not-yet-labeled/identified bookmark candidate -- `id` is assigned by the store on add; `label` is filled in by the host's "Add Bookmark" input box (native UI, so the webview never carries it). */
+export type BookmarkCandidate = Omit<Bookmark, 'id' | 'label'>;
 
 /**
  * Settings threaded from `omnetpp.*` VS Code configuration into `init` (port
@@ -120,7 +184,17 @@ export type WebviewToHostMessage =
    */
   | { type: 'copyText'; text: string }
   /** Ask the host to set a `setContext` key (e.g. to gate a command's `when` clause off webview-local state such as "has a selection"). */
-  | { type: 'contextValue'; key: string; value: string | boolean | undefined };
+  | { type: 'contextValue'; key: string; value: string | boolean | undefined }
+  /**
+   * ADDITIVE (phase U6): "Toggle Bookmark" (chart: Ctrl+D on the current selection,
+   * one message per candidate; table: the focused row's event) -- see
+   * `client/src/eventlog/bookmarks.ts`'s header for the toggle algorithm (delete any
+   * existing match silently; otherwise prompt for a label via a native input box, then
+   * add). The host replies by re-broadcasting `bookmarksChanged` to every attachment
+   * (including the originator -- unlike selection, there is no echo/re-entry concern,
+   * since toggling is a one-shot action, not a continuously-driven state).
+   */
+  | { type: 'toggleBookmark'; candidate: BookmarkCandidate };
 
 // ---------------------------------------------------------------------------------
 // host -> webview
@@ -139,6 +213,22 @@ export type HostToWebviewMessage =
       persistedState: unknown;
       settings: EventLogUiSettings;
       summary: LogSummary | null;
+      /**
+       * ADDITIVE (phase U6): the session's current canonical selection, so a webview
+       * that (re)attaches -- a fresh reload, or a pinned table rebinding to a different
+       * session -- picks up whatever is already selected without waiting for the OTHER
+       * view to re-broadcast one (`EventLogSession.getSelection()`; empty
+       * `{eventNumbers: []}` before anything has ever been selected in this session).
+       */
+      selection: EventLogSelection;
+      /**
+       * ADDITIVE (phase U6): every bookmark currently stored for this file
+       * (`client/src/eventlog/bookmarks.ts`'s `BookmarkStore.list()`) -- both webviews
+       * render their own subset (chart: event/axis/dependency/methodCall marks; table:
+       * event row tint), so both need the full list up front, same reasoning as
+       * `selection` above.
+       */
+      bookmarks: Bookmark[];
     }
   /** Reply to a proxied `engineRequest` with the same `id`. Exactly one of `result`/`error` is set. */
   | { type: 'engineResponse'; id: number; result?: unknown; error?: { message: string; code?: number; data?: unknown } }
@@ -148,5 +238,7 @@ export type HostToWebviewMessage =
   | { type: 'setSelection'; selection: EventLogSelection }
   /** Scroll/highlight a resolved location (goto/find result, or the other view's reveal request). */
   | { type: 'reveal'; target: RevealTarget }
+  /** ADDITIVE (phase U6): the full bookmark list changed (a `toggleBookmark` was applied, or the "Show Bookmarks" QuickPick's own store mutation) -- sent to every attachment, origin included. */
+  | { type: 'bookmarksChanged'; bookmarks: Bookmark[] }
   /** A forwarded editor-title/view-title command the webview itself must act on (e.g. re-layout, export) -- mirrors `nedPreviewPanel.ts`'s `sendCommand()`. */
   | { type: 'command'; command: string; args?: unknown };

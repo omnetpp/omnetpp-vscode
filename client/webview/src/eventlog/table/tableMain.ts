@@ -1,5 +1,5 @@
 import { ElogMethods, type ElogChangedParams, type CheckChangesResult, type LogSummary } from '@omnetpp/shared/elog-protocol';
-import type { HostToWebviewMessage, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
+import type { Bookmark, HostToWebviewMessage, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
 import { EngineRpc } from '../common/rpc';
 import { renderSummaryStrip } from '../common/summary';
 import { readPalette, watchThemeChange } from '../common/theme';
@@ -28,6 +28,8 @@ let fileUri = '';
 let summary: LogSummary | null = null;
 let persistedState: unknown;
 let table: TableViewHandle | null = null;
+/** Phase U6 -- the session's current bookmark list, kept even while no table is mounted yet (an empty/not-yet-loaded summary) so `mountTableIfNeeded()` can seed a fresh `TableViewHandle` with it immediately. */
+let latestBookmarks: Bookmark[] = [];
 
 document.getElementById('root')!.innerHTML = `
   <div id="toolbar"></div>
@@ -61,7 +63,7 @@ function mountTableIfNeeded(): void {
   if (!summary || summary.isEmpty) return;
   if (table) return;
   const root = document.getElementById('rows')!;
-  table = createTableView({ root, rpc, postToHost: (m) => vscode.postMessage(m), persistedState });
+  table = createTableView({ root, rpc, postToHost: (m) => vscode.postMessage(m), persistedState, initialBookmarks: latestBookmarks });
   table.start();
 }
 
@@ -102,8 +104,17 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
       fileUri = message.fileUri;
       summary = message.summary;
       persistedState = message.persistedState;
+      latestBookmarks = message.bookmarks;
       if (fileChanged) unmountTable();
       render();
+      // Phase U6: seed the (possibly freshly (re)mounted) table with the session's
+      // current selection/bookmarks -- covers both "table created just now" (start()
+      // already ran inside render()/mountTableIfNeeded(), applySetSelection below then
+      // overrides its default first-row anchor) and "table already existed, session
+      // rebound underneath it" (a pinned table switching sessions -- see
+      // `eventLogTableView.ts`'s `attachToCurrent()`).
+      table?.applySetSelection(message.selection);
+      table?.setBookmarks(message.bookmarks);
       break;
     }
     case 'engineResponse':
@@ -133,6 +144,10 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
       break;
     case 'setSelection':
       table?.applySetSelection(message.selection);
+      break;
+    case 'bookmarksChanged':
+      latestBookmarks = message.bookmarks;
+      table?.setBookmarks(message.bookmarks);
       break;
     case 'command':
       // No table-specific commands yet (U1 accepted-and-dropped this too).

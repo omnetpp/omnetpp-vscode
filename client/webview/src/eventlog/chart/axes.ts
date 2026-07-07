@@ -60,6 +60,18 @@ function findModuleName(moduleId: number, tree: ElogModule | null): { label: str
   return node ? { label: node.fullName, compound: node.compound } : null;
 }
 
+/** The reverse of `findModuleNode()`'s id lookup -- resolves a module's `fullName` (`ModuleTreeItem.getModuleFullPath()` in Java) back to its id. Phase U6: Axis bookmarks are stored by `modulePath` (survives a session restart, unlike a bare id -- see `Bookmark`'s doc comment in `@omnetpp/shared/ui-protocol`), so rendering an Axis bookmark's mark needs this to find which axis row to decorate. */
+export function findModuleIdByFullName(fullName: string, tree: ElogModule | null): number | null {
+  if (tree === null) return null;
+  const stack: ElogModule[] = [tree];
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    if (node.fullName === fullName) return node.moduleId;
+    stack.push(...node.children);
+  }
+  return null;
+}
+
 /** Flattens every module id in `tree` (all descendants, compound and simple alike) -- used by `deriveAxes()`'s `includeEmptyAxes` option. */
 function allModuleIds(tree: ElogModule | null): number[] {
   if (tree === null) return [];
