@@ -116,6 +116,21 @@ export const ElogMethods = {
   checkChanges: 'elog/checkChanges',
   /** request: void → void. ADDITIVE: releases the open file/engine (E9 will add "Release Memory" semantics on top). */
   close: 'elog/close',
+  /**
+   * request: void → ReleaseMemoryResult. ADDITIVE (phase U9): the "Release Memory"
+   * command/context-menu item -- port of `SequenceChartContributor.
+   * createReleaseMemoryAction()` (verified by reading the source), which simply does
+   * `sequenceChart.getInput().synchronize(FileReader.FileChange.OVERWRITTEN)`: a full
+   * cache drop + re-parse of the (unchanged-on-disk) file, even though nothing on disk
+   * actually changed. This port's engine mirrors that exactly (`EngineSession.
+   * releaseMemory()` calls the same OVERWRITTEN reset path `elog/checkChanges`'s
+   * overwritten branch uses) -- pinned events (first/last/origin) are re-pinned
+   * immediately after, matching every other OVERWRITTEN reset in this port (E9's
+   * `synchronizeToCurrentFileState()`). Not long-running/cancellable (the reset itself
+   * is cheap -- `parseIndicesAndSnapshots()` only re-reads index/snapshot headers, not
+   * every event).
+   */
+  releaseMemory: 'elog/releaseMemory',
 } as const;
 
 /** Notification method names (server→client; no response expected). */
@@ -773,4 +788,28 @@ export interface ElogProgressParams {
 export interface ElogChangedParams {
   change: 'appended' | 'overwritten';
   summary: LogSummary;
+}
+
+// ---------------------------------------------------------------------------------
+// elog/releaseMemory -- phase U9
+// ---------------------------------------------------------------------------------
+
+/**
+ * Result of `elog/releaseMemory`. `eventCacheSizeBefore`/`After` + `eventCacheLimit`
+ * report the RAW (unfiltered) `EventLog`'s parsed-event LRU size (`EventLog.
+ * getEventCacheSize()`/`getEventCacheLimit()`, phase E7) -- the dominant memory cost
+ * this action targets, and the same number regardless of whether a filter is
+ * currently active (a `FilteredEventLog` always wraps the one raw `EventLog`, whose
+ * cache is what actually holds parsed line data). The `FilteredEvent` proxy cache
+ * `FilteredEventLog` layers on top is NOT separately reported (documented
+ * simplification -- it re-derives cheaply from the raw log and is a much smaller
+ * memory contributor). `EventLogSession` broadcasts this same shape to every attached
+ * webview as an `elog/memoryReleased` `engineNotify` event so both the Sequence Chart
+ * and the Event Log table refetch their current windows against the fresh state.
+ */
+export interface ReleaseMemoryResult {
+  summary: LogSummary;
+  eventCacheSizeBefore: number;
+  eventCacheSizeAfter: number;
+  eventCacheLimit: number;
 }

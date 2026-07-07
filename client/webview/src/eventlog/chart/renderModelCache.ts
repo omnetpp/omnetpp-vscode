@@ -44,6 +44,7 @@
  */
 
 import type { TimelineMode, ViewportModel, ViewportParams } from '@omnetpp/shared/elog-protocol';
+import { RequestCancelledError } from '../common/rpc';
 
 /** What `renderModelCache.ts` needs from the RPC layer — kept minimal so tests can supply a fake without touching `common/rpc.ts`. `cancel()` must be safe to call even after the promise has already settled (a no-op then). */
 export interface EngineViewportSource {
@@ -57,6 +58,18 @@ export interface RenderModelCacheOptions {
   prefetchFactor?: number;
   includeModuleIds?: number[];
   maxEvents?: number;
+  /**
+   * ADDITIVE (phase U9): called when a viewport fetch fails for a reason OTHER than
+   * being cancelled by `bumpGeneration()`/`invalidateAll()` (a caller-initiated
+   * supersede -- see this file's header -- surfaces as `RequestCancelledError` and is
+   * NEVER reported here, since panning/zooming routinely cancels dozens of these and a
+   * user-facing error for each would be absurd). A genuine engine/worker failure
+   * (unexpected exception, or a `ContentChanged` retry that also failed) IS reported
+   * here exactly once per failing fetch -- `chartMain.ts` feeds it through
+   * `common/notificationOverlay.ts`'s `classifyEngineError()` to decide whether/how to
+   * show the shared overlay.
+   */
+  onError?: (err: unknown) => void;
 }
 
 export interface ViewportRequest {
@@ -182,11 +195,14 @@ export class RenderModelCache {
             if (w.generation === this.generation && w.expectedVersion === model.coordinateSystemVersion) w.onReady(model);
           }
         })
-        .catch(() => {
+        .catch((err: unknown) => {
           // cancelled (see `cancel()` above) or a real engine error -- either way, stop tracking it;
           // there is no waiter left to usefully notify of a rejection (`request()` only ever hands
-          // back a value via `onReady`/the synchronous cache-hit return, never a rejection).
+          // back a value via `onReady`/the synchronous cache-hit return, never a rejection). A
+          // GENUINE (non-cancel) failure is still worth surfacing to the caller though (phase U9) --
+          // see `RenderModelCacheOptions.onError`'s doc comment on why cancels are excluded.
           this.inFlight.delete(key);
+          if (!(err instanceof RequestCancelledError)) this.options.onError?.(err);
         });
     }
     entry.waiters.push(waiter);

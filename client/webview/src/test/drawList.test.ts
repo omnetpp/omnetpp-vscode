@@ -14,9 +14,12 @@ const theme: EventLogPalette = {
   selectionBackground: '#04395e',
   border: '#454545',
   isDark: true,
+  isHighContrast: false,
   eventColor: '#e06666',
   arrowColor: '#6ea8fe',
   methodCallColor: '#f0a35e',
+  focusBorder: '#007fd4',
+  regionBandColor: '#2a2a2a',
 };
 
 function event_(eventNumber: number, moduleId: number, tc: number, opts: Partial<TimelineEvent> = {}): TimelineEvent {

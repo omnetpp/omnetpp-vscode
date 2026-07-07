@@ -141,3 +141,54 @@ export function findNextCommand(controller: EventLogController): void {
   }
   session.sendCommand('findNext');
 }
+
+/**
+ * Phase U9 -- "Export to SVG..." (`omnetpp.eventlog.exportSvg`): forwards into the
+ * Sequence Chart webview's own in-webview export-range dialog (`chart/exportDialog.
+ * ts`), which builds the SVG string client-side and posts an `export` message the
+ * shared `handleExport()` (`sequenceChartEditor.ts`) already handles -- same "forward
+ * if a chart is attached, otherwise inform" shape as `findTextCommand()` above (there
+ * is no sensible native fallback: exporting needs the chart's already-loaded
+ * draw-list geometry).
+ */
+export function exportSvgCommand(controller: EventLogController): void {
+  const session = controller.getActiveSession();
+  if (!session?.hasChartAttachment()) {
+    void vscode.window.showInformationMessage('OMNeT++: Export to SVG needs a focused Sequence Chart editor.');
+    return;
+  }
+  session.sendCommand('exportSvg');
+}
+
+/** Phase U9 -- "Copy Image to Clipboard" (`omnetpp.eventlog.copyImage`): forwards into the webview, which rasterizes its own on-screen canvas (see `chartMain.ts`'s `doCopyImage()` for the clipboard-API/file-save fallback split). */
+export function copyImageCommand(controller: EventLogController): void {
+  const session = controller.getActiveSession();
+  if (!session?.hasChartAttachment()) {
+    void vscode.window.showInformationMessage('OMNeT++: Copy Image to Clipboard needs a focused Sequence Chart editor.');
+    return;
+  }
+  session.sendCommand('copyImage');
+}
+
+/**
+ * Phase U9 -- "Release Memory" (`omnetpp.eventlog.releaseMemory`): unlike export/find,
+ * this is NOT chart-specific (it acts on the shared engine, benefiting the table too)
+ * -- mirrors `omnetpp.eventlog.refresh`'s own "prefer the focused chart editor, fall
+ * back to whatever the table view is bound to" shape (`index.ts`'s registration),
+ * so it works even when only the Event Log table panel is open.
+ */
+export async function releaseMemoryCommand(controller: EventLogController, tableView: EventLogTableViewProvider): Promise<void> {
+  const session = controller.getActiveSession() ?? tableView.getBoundSession();
+  if (!session) {
+    void vscode.window.showInformationMessage('OMNeT++: Release Memory needs an open .elog file (a Sequence Chart editor or a bound Event Log table).');
+    return;
+  }
+  try {
+    const result = await session.releaseMemory();
+    void vscode.window.showInformationMessage(
+      `OMNeT++: Released event cache (${result.eventCacheSizeBefore.toLocaleString()} → ${result.eventCacheSizeAfter.toLocaleString()} of ${result.eventCacheLimit.toLocaleString()} events cached).`,
+    );
+  } catch (err) {
+    void vscode.window.showErrorMessage(`OMNeT++: Release Memory failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}

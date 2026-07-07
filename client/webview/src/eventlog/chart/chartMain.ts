@@ -13,6 +13,7 @@ import {
   type GotoResult,
   type LogSummary,
   type MapCoordsResult,
+  type ReleaseMemoryResult,
   type RenderDependency,
   type RenderMethodCall,
   type RowRef,
@@ -29,6 +30,7 @@ import { renderSummaryStrip } from '../common/summary';
 import { readPalette, watchThemeChange, type EventLogPalette } from '../common/theme';
 import { showContextMenu } from '../common/contextMenu';
 import { DEFAULT_FIND_TEXT_STATE, openFindTextDialog, openGotoEventDialog, openGotoSimTimeDialog, type FindTextState } from '../common/dialogs';
+import { classifyEngineError, mountNotificationOverlay, type NotificationOverlayHandle } from '../common/notificationOverlay';
 import { AUTO_AXIS_SPACING, clampAxisSpacing, DENSE_AXIS_SPACING, deriveAxes, findModuleIdByFullName, findModuleNode, layoutAxes, maxVerticalScroll, type AxesLayout, type AxisSpacingSpec } from './axes';
 import { calculateAxisHeaders, flattenDrawableAxisHeaders, type AxisHeaderNode } from './axisHeaders';
 import {
@@ -68,7 +70,9 @@ import { bookmarkDependencyKey, buildDrawList, type DrawPrimitive, type InfoPane
 import { openSelectModulesDialog } from './selectModulesDialog';
 import { openListReorderDialog } from './reorderDialog';
 import { calculateTicks, formatTickLabel } from './ticks';
-import { ANTIALIAS_TURN_OFF_AT_MSEC, ANTIALIAS_TURN_ON_AT_MSEC, createCanvasStack, type CanvasStackHandle } from './canvasStack';
+import { ANTIALIAS_TURN_OFF_AT_MSEC, ANTIALIAS_TURN_ON_AT_MSEC, createCanvasStack, renderPrimitivesToCanvas, type CanvasStackHandle } from './canvasStack';
+import { openExportRangeDialog, type ExportDialogResult } from './exportDialog';
+import { buildChartSvg, computeExportWidthPx, resolveExportRange, type ExportRangeContext } from './svgExport';
 import { buildFilterPanel, type FilterPanelHandle } from './filterPanel';
 import {
   applyExcludedEventNumbersToState,
@@ -91,6 +95,7 @@ import {
   createViewportState,
   DEFAULT_PIXELS_PER_TC,
   GUTTER_LEFT_WIDTH,
+  GUTTER_TOP_HEIGHT,
   gotoBeginAt,
   gotoEndAt,
   panTo,
@@ -159,6 +164,8 @@ let state: PersistedChartState = vscode.getState() ?? {};
 let fileUri = '';
 let summary: LogSummary | null = null;
 let toolbar: ToolbarHandle;
+/** Phase U9 -- the shared error/canceled/out-of-sync overlay (`common/notificationOverlay.ts`), mounted once `body`'s DOM exists (below). */
+let notificationOverlay: NotificationOverlayHandle;
 
 let currentTimelineMode: TimelineMode = (state.timelineMode as TimelineMode) ?? TimelineMode.SIMULATION_TIME;
 let viewport: ViewportState = createViewportState();
@@ -374,10 +381,31 @@ const TIMELINE_MODE_OPTIONS = [
   { value: TimelineMode.NONLINEAR, label: 'Nonlinear' },
 ];
 
+/**
+ * Phase U9 -- "Refresh" action for the shared notification overlay (port plan: "Refresh
+ * = full re-init"): forces an immediate file-change check (picks up a real change, if
+ * that's what actually happened) AND unconditionally invalidates/re-fetches the render
+ * model cache (retries whatever failed, even when the file itself hadn't changed --
+ * e.g. a transient engine error) -- `elog/checkChanges`'s own `elog/refreshed`
+ * broadcast (handled below in the message pump) additionally refreshes `summary`/the
+ * module tree if THAT changed too.
+ */
+function refreshFromOverlay(): void {
+  refresh();
+  renderModelCache.invalidateAll();
+  scheduleRender();
+}
+
 const engineSource: EngineViewportSource = {
   getViewport: (params: ViewportParams) => rpc.requestCancelable<ViewportModel>(ElogMethods.scGetViewport, params),
 };
-const renderModelCache = new RenderModelCache(engineSource);
+const renderModelCache = new RenderModelCache(engineSource, {
+  // Phase U9: a genuine (non-cancel) viewport-fetch failure surfaces via the shared
+  // overlay instead of leaving the chart silently stuck on stale data -- see
+  // `renderModelCache.ts`'s `RenderModelCacheOptions.onError` doc comment for why
+  // cancellations (routine during pan/zoom churn) never reach here.
+  onError: (err) => notificationOverlay.show(classifyEngineError(err)!),
+});
 
 document.getElementById('root')!.innerHTML = `
   <div id="toolbar"></div>
@@ -386,12 +414,14 @@ document.getElementById('root')!.innerHTML = `
     <div id="chartCanvasContainer" role="application" aria-label="Sequence Chart" style="position:absolute;inset:0;overflow:hidden;"></div>
     <div class="elog-empty" id="empty">Open a Sequence Chart to see events here.</div>
     <div id="filterPanelHost"></div>
+    <div id="notificationHost"></div>
   </div>
   <div id="hscroll"></div>
 `;
 
 const canvasContainer = document.getElementById('chartCanvasContainer')!;
 const canvasStack: CanvasStackHandle = createCanvasStack(canvasContainer);
+notificationOverlay = mountNotificationOverlay(document.getElementById('notificationHost')!, refreshFromOverlay);
 
 const hscrollEl = document.getElementById('hscroll')!;
 hscrollEl.style.cssText = 'position:relative;height:12px;flex:0 0 auto;background:var(--vscode-scrollbarSlider-background,rgba(121,121,121,0.2));cursor:pointer;';
@@ -705,6 +735,178 @@ function refresh(): void {
 }
 
 // ---------------------------------------------------------------------------------
+// Phase U9 -- export/polish: SVG export, copy image to clipboard, release memory
+// ---------------------------------------------------------------------------------
+
+/** Resolves `eventNumber`'s tc for the export range dialog's "selected events" choice -- prefers the already-loaded viewport model (`findEvent()`), falling back to an `elog/sc/mapCoords` round trip for an event that isn't currently in view (e.g. selected, then panned away before opening the dialog). `null` if it can't be resolved at all. */
+async function tcForEventNumber(eventNumber: number): Promise<number | null> {
+  const loaded = findEvent(eventNumber);
+  if (loaded) return loaded.tcBegin;
+  try {
+    const result = await rpc.request<MapCoordsResult>(ElogMethods.scMapCoords, { kind: 'eventToTc', eventNumber });
+    return result.tc;
+  } catch {
+    return null;
+  }
+}
+
+/** Java's `ExportToSVGDialog`'s "Range of two selected events" choice needs EXACTLY two selected events (`createButton(..., 0).setEnabled(sequenceChart.getSelectedEvents().size() == 2)`) -- `undefined` (unavailable) otherwise, or if either event's tc can't be resolved. */
+async function selectedEventsTcRange(): Promise<[number, number] | undefined> {
+  if (selection.events.size !== 2) return undefined;
+  const [a, b] = [...selection.events];
+  const [tcA, tcB] = await Promise.all([tcForEventNumber(a), tcForEventNumber(b)]);
+  if (tcA === null || tcB === null) return undefined;
+  return tcA <= tcB ? [tcA, tcB] : [tcB, tcA];
+}
+
+function suggestedExportBaseName(): string {
+  const base = fileName().replace(/\.[^./\\]+$/, '');
+  return base.length > 0 ? base : 'sequencechart';
+}
+
+/**
+ * "Export to SVG..." -- opens the range dialog (`exportDialog.ts`), then builds the
+ * export's own throwaway draw list via a FRESH `elog/sc/getViewport` covering exactly
+ * the chosen range (NOT the live render cache's margined/prefetch-tuned one -- an
+ * export needs everything in range, once, not a panning-optimized window) and posts
+ * the result to the host as an `export` message. The host-side save-dialog/write-file
+ * flow (`sequenceChartEditor.ts`'s `handleExport()`) already exists since phase U1's
+ * forward-looking `uiProtocol.ts` sketch -- unchanged here.
+ */
+async function doExportSvg(): Promise<void> {
+  if (!summary || summary.isEmpty) return;
+  const selectedTcs = await selectedEventsTcRange();
+  const visible = visibleTcRange(viewport);
+  const ctx: ExportRangeContext = {
+    visibleLeftTc: visible.leftTc,
+    visibleRightTc: visible.rightTc,
+    wholeBeginTc: beginTc,
+    wholeEndTc: endTc,
+    selectedTcs,
+    pixelsPerTc: viewport.pixelsPerTc,
+    extraSpacePx: 10,
+  };
+  openExportRangeDialog(ctx, (result) => void performExportSvg(result, ctx));
+}
+
+async function performExportSvg(result: ExportDialogResult, ctxBase: ExportRangeContext): Promise<void> {
+  if (!summary) return;
+  const range = resolveExportRange(result.kind, { ...ctxBase, extraSpacePx: result.extraSpacePx });
+  if (!range) return;
+  const widthPx = computeExportWidthPx(range, viewport.pixelsPerTc);
+  showStatusNote('Exporting to SVG…');
+  try {
+    const model = await rpc.request<ViewportModel>(ElogMethods.scGetViewport, {
+      range: { kind: 'tc', tcBegin: range.tcBegin, tcEnd: range.tcEnd },
+      marginTc: 0,
+      maxEvents: 100_000,
+    });
+    const axesLayout = currentAxesLayout();
+    const exportViewport: ViewportState = {
+      leftTc: range.tcBegin,
+      pixelsPerTc: viewport.pixelsPerTc,
+      canvasWidth: GUTTER_LEFT_WIDTH + widthPx,
+      canvasHeight: GUTTER_TOP_HEIGHT + axesLayout.totalHeight + 40,
+      vscroll: 0,
+      followEnd: false,
+      coordinateSystemVersion: model.coordinateSystemVersion,
+    };
+    const lastSimTime = summary.lastSimulationTime !== null ? Number(summary.lastSimulationTime) : 0;
+    const tickResult = calculateTicks(currentTimelineMode, exportViewport.leftTc, range.tcEnd, exportViewport.pixelsPerTc, lastSimTime, simTimeAt);
+    // UNLIKE Java (which disables axis headers for SVG export -- its GraphicsSVG can't
+    // rotate text, see svgExport.ts's header), this port's SVG serializer CAN rotate
+    // text, so headers stay on when the live chart has them on (a fidelity improvement,
+    // not a gap).
+    const axisHeaderRoot = displayFlags.showAxisHeaders
+      ? calculateAxisHeaders(
+          axesLayout.axes.map((a) => a.moduleId),
+          (moduleId) => findModuleNode(moduleId, moduleTree)?.fullName ?? `Module #${moduleId}`,
+        )
+      : null;
+    const axisManagementLive = moduleTree !== null && openAxisModuleIds !== null;
+    const moduleIdToAxisModuleId = axisManagementLive ? moduleIdToAxisModuleIdMap(axesLayout.axes.map((a) => a.moduleId), moduleTree, knownModuleIds) : undefined;
+    const primitives = buildDrawList({
+      timelineMode: currentTimelineMode,
+      viewport: exportViewport,
+      events: model.events,
+      dependencies: model.dependencies,
+      methodCalls: model.methodCalls,
+      axesLayout,
+      ticks: tickResult.ticks,
+      theme: palette,
+      selectedEventNumbers: selection.events,
+      bookmarkedEventNumbers,
+      bookmarkedModuleIds,
+      bookmarkedDependencyKeys,
+      displayFlags,
+      axisHeaderRoot,
+      // No live status/info overlays in a static export -- they're screen-only conveniences.
+      infoPanelText: undefined,
+      skipLabelsForPerf: false,
+      moduleIdToAxisModuleId,
+    });
+    const fontFamily = getComputedStyle(document.body).fontFamily || 'sans-serif';
+    const svg = buildChartSvg({ primitives, widthPx: exportViewport.canvasWidth, heightPx: exportViewport.canvasHeight, backgroundColor: palette.background, fontFamily });
+    vscode.postMessage({ type: 'export', format: 'svg', data: svg, suggestedName: `${suggestedExportBaseName()}.svg` });
+    showStatusNote(model.truncated ? 'Exported to SVG (truncated: too many events in the chosen range).' : 'Exported to SVG.');
+  } catch (err) {
+    if (!(err instanceof RequestCancelledError)) showStatusNote(`Export to SVG failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * "Copy Image to Clipboard" -- port of `CachingCanvas.copyImageToClipboard()`:
+ * rasterizes exactly the CURRENTLY VISIBLE chart (no range dialog, matching Java) at
+ * `devicePixelRatio` for a crisp bitmap, then tries the webview's own async Clipboard
+ * API (`navigator.clipboard.write` with a `ClipboardItem`) -- VS Code's OWN
+ * `vscode.env.clipboard` host API is text-only (no image counterpart), but a webview's
+ * embedding iframe grants `clipboard-write` (verified: no CSP directive here blocks
+ * it), so the browser API itself is reachable from webview script. If it throws for
+ * any reason (an older VS Code build without the permission, a user-gesture
+ * requirement not satisfied, ...), falls back to a file save via the SAME `export`
+ * message PNG export would use -- identical fallback shape to the NED preview's own
+ * `doExportPng()` (`client/webview/src/main.ts`).
+ */
+function doCopyImage(): void {
+  if (!summary || summary.isEmpty || lastPrimitives.length === 0) return;
+  const scale = window.devicePixelRatio || 1;
+  const canvas = renderPrimitivesToCanvas(viewport.canvasWidth, viewport.canvasHeight, lastPrimitives, palette.background, scale);
+  canvas.toBlob((blob) => {
+    if (blob) void copyBlobToClipboardOrSave(blob);
+  }, 'image/png');
+}
+
+async function copyBlobToClipboardOrSave(blob: Blob): Promise<void> {
+  try {
+    if (typeof ClipboardItem === 'undefined' || !navigator.clipboard || typeof navigator.clipboard.write !== 'function') {
+      throw new Error('Clipboard image API unavailable in this webview');
+    }
+    await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+    showStatusNote('Image copied to clipboard.');
+  } catch {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+    const base64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+    vscode.postMessage({ type: 'export', format: 'png', data: base64, suggestedName: `${suggestedExportBaseName()}.png` });
+    showStatusNote('Clipboard image API unavailable here -- saved as a PNG file instead.');
+  }
+}
+
+/** "Release Memory" -- see `elogProtocol.ts`'s `ElogMethods.releaseMemory` doc comment. This webview issues the request directly (like `setFilter`), so the session's `elog/memoryReleased` broadcast (handled below in the message pump) reaches every attachment, including this one. */
+async function doReleaseMemory(): Promise<void> {
+  try {
+    const result = await rpc.request<ReleaseMemoryResult>(ElogMethods.releaseMemory, undefined);
+    showStatusNote(`Memory released: cached events ${result.eventCacheSizeBefore.toLocaleString()} → ${result.eventCacheSizeAfter.toLocaleString()} (limit ${result.eventCacheLimit.toLocaleString()}).`);
+  } catch (err) {
+    if (!(err instanceof RequestCancelledError)) showStatusNote(`Release Memory failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+// ---------------------------------------------------------------------------------
 // U4: hit-testing / selection / tooltip / context menu / dialogs / keyboard nav
 // ---------------------------------------------------------------------------------
 
@@ -852,6 +1054,12 @@ async function performFind(state: FindTextState, continueFromLast: boolean): Pro
       // already-resolved reveal -- the host just re-broadcasts it (same path the toolbar's Home/End
       // buttons use), which drives selection+centering via handleRevealTarget above.
       vscode.postMessage({ type: 'revealRequest', target: { kind: 'event', eventNumber: result.ref.eventNumber, ref: result.ref } });
+    } else {
+      // Phase U9 (loose end, U2's find was minimal): a miss used to be entirely
+      // silent -- surface it as a transient status-strip note so the user knows the
+      // search actually ran and simply found nothing, rather than wondering whether
+      // Find Next did anything at all.
+      showStatusNote(`"${state.search}" not found.`);
     }
   } catch {
     // engine busy/superseded -- ignore
@@ -1259,6 +1467,9 @@ function openChartContextMenu(clientX: number, clientY: number, hits: HitObject[
     findNext: repeatFind,
     refresh,
     toggleDisplayFlag: (key) => setDisplayFlags(toggleFlag(displayFlags, key)),
+    releaseMemory: () => void doReleaseMemory(),
+    copyImage: doCopyImage,
+    exportSvg: () => void doExportSvg(),
   };
   const entries = buildChartContextMenu({
     hits,
@@ -1714,7 +1925,16 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
         filterPanel.tickBusy();
         break;
       }
-      if (message.event === 'elog/changed' || message.event === 'elog/refreshed' || message.event === 'restarted') {
+      // Phase U9: `elog/memoryReleased` (from THIS webview's own "Release Memory" item,
+      // the OTHER Event Log table's, or the native `omnetpp.eventlog.releaseMemory`
+      // command) reuses the exact same invalidate-and-refetch path as a real
+      // `elog/changed`/`elog/refreshed` -- the engine's parsed-event cache was
+      // dropped, so every cached render window is just as stale as after a real
+      // file change, even though the file's actual CONTENT didn't change (only its
+      // `coordinateSystemVersion` bumped, which the `versionChanged` check below
+      // already treats as "re-fetch everything", including the module tree -- a
+      // little more work than strictly necessary, but simple and correct).
+      if (message.event === 'elog/changed' || message.event === 'elog/refreshed' || message.event === 'elog/memoryReleased' || message.event === 'restarted') {
         const payload = message.payload as { summary?: LogSummary; change?: 'appended' | 'overwritten' };
         if (payload?.summary) {
           const versionChanged = summary?.coordinateSystemVersion !== payload.summary.coordinateSystemVersion;
@@ -1797,6 +2017,17 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
           break;
         case 'findNext':
           repeatFind();
+          break;
+        // Phase U9 -- forwarded from `omnetpp.eventlog.exportSvg`/`.copyImage`/`.releaseMemory`
+        // (`eventLogDialogs.ts`) when this webview is the attached chart.
+        case 'exportSvg':
+          void doExportSvg();
+          break;
+        case 'copyImage':
+          doCopyImage();
+          break;
+        case 'releaseMemory':
+          void doReleaseMemory();
           break;
         case 'toggleFilterPanel':
           // From `omnetpp.eventlog.openFilter`/the table's "Filter…" item (see

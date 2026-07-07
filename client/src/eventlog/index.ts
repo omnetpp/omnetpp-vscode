@@ -4,7 +4,16 @@ import { showBookmarksCommand } from './bookmarks';
 import { EventLogController } from './eventLogController';
 import { EventLogTableViewProvider } from './eventLogTableView';
 import { SequenceChartEditorProvider } from './sequenceChartEditor';
-import { gotoEventCommand, gotoSimulationTimeCommand, openFilterCommand, findTextCommand, findNextCommand } from './eventLogDialogs';
+import {
+  gotoEventCommand,
+  gotoSimulationTimeCommand,
+  openFilterCommand,
+  findTextCommand,
+  findNextCommand,
+  exportSvgCommand,
+  copyImageCommand,
+  releaseMemoryCommand,
+} from './eventLogDialogs';
 
 /**
  * Registers the Sequence Chart custom editor + Event Log panel view + their
@@ -42,6 +51,10 @@ export function registerEventLog(context: vscode.ExtensionContext, client?: Lang
     vscode.commands.registerCommand('omnetpp.eventlog.findText', () => findTextCommand(controller)),
     vscode.commands.registerCommand('omnetpp.eventlog.findNext', () => findNextCommand(controller)),
     vscode.commands.registerCommand('omnetpp.eventlog.showBookmarks', () => showBookmarksCommand(controller, tableView.getBoundSession())),
+    // Phase U9 -- export/polish
+    vscode.commands.registerCommand('omnetpp.eventlog.exportSvg', () => exportSvgCommand(controller)),
+    vscode.commands.registerCommand('omnetpp.eventlog.copyImage', () => copyImageCommand(controller)),
+    vscode.commands.registerCommand('omnetpp.eventlog.releaseMemory', () => void releaseMemoryCommand(controller, tableView)),
     // pin/unpin follows this codebase's established pattern for the other
     // pinnable views (pinType/unpinType, pinModule/unpinModule, ...): one
     // command per icon state, gated by the `omnetpp.eventlogTablePinned`

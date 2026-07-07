@@ -58,6 +58,7 @@ import {
   type MapCoordsParams,
   type MapCoordsResult,
   type OpenParams,
+  type ReleaseMemoryResult,
   type RowWindow,
   type RowWindowParams,
   type RowRef,
@@ -332,5 +333,10 @@ export class WorkerClient {
     this.lastOpenParams = null;
     this.lastFilterParams = null;
     return this.rawRequest(ElogMethods.close, undefined, token);
+  }
+
+  /** Phase U9 -- "Release Memory": see `ElogMethods.releaseMemory`'s doc comment. */
+  releaseMemory(token?: CancellationToken): Promise<ReleaseMemoryResult> {
+    return this.rawRequest(ElogMethods.releaseMemory, undefined, token);
   }
 }

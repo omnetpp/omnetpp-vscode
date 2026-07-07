@@ -10,11 +10,15 @@
 
 import { test } from 'bun:test';
 import assert from 'node:assert';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { join, resolve } from 'node:path';
 import { EngineSession } from '../engineSession';
 import { handleElogRequest } from '../handlers';
 import { ElogMethods } from '@omnetpp/shared/elog-protocol';
-import type { FilterHints, GotoResult, LogSummary, MapCoordsResult, RowWindow, ViewportModel } from '@omnetpp/shared/elog-protocol';
+import type { EventDetail, FilterHints, GotoResult, LogSummary, MapCoordsResult, ReleaseMemoryResult, RowWindow, ViewportModel } from '@omnetpp/shared/elog-protocol';
+import { synthesizeEventLog } from '../../../../shared/src/test/eventlog/synthesizeEventLog';
 
 const repoRoot = resolve(__dirname, '..', '..', '..', '..');
 const fixturePath = join(repoRoot, 'shared', 'src', 'test', 'fixtures', 'elog', 'sample', 'Fifo1-#0.elog');
@@ -325,4 +329,70 @@ test('handlers: elog/setFilter with traceMessageReuses=false excludes the reuse 
   const rowEventNumbers = new Set(rows.rows.map((r) => r.eventNumber));
   assert.ok(rowEventNumbers.has(1));
   assert.ok(!rowEventNumbers.has(0), 'traceMessageReuses=false must NOT follow the reuse dependency back to event #0');
+});
+
+// ---------------------------------------------------------------------------------
+// Phase U9 -- "Release Memory" (elog/releaseMemory)
+// ---------------------------------------------------------------------------------
+
+function mkTempEventLogFile(name: string): { dir: string; file: string } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'omnetpp-release-memory-'));
+  return { dir, file: path.join(dir, name) };
+}
+
+test('handlers: elog/releaseMemory drops the parsed-event cache after a full scan, while subsequent queries stay correct (oracle spot check)', () => {
+  const { dir, file } = mkTempEventLogFile('release-memory.elog');
+  try {
+    const eventCount = 2000;
+    const synthesized = synthesizeEventLog({ eventCount });
+    fs.writeFileSync(file, synthesized.text);
+
+    const session = new EngineSession();
+    // `smallFileThresholdBytes: 0` forces the "large file" open path (parseBegin/
+    // parseEnd only, NOT a full parseAll()) even though this synthetic fixture is
+    // small in bytes -- otherwise the constructor's own parseAll() would already
+    // populate the whole cache and this test wouldn't be exercising the "populate via
+    // scans, then release" scenario the port plan's U9 row asks for.
+    const summary = call<LogSummary>(session, ElogMethods.open, { path: file, options: { smallFileThresholdBytes: 0, parseBeginEndBytes: 500 } });
+    assert.equal(summary.isEmpty, false);
+    assert.equal(summary.lastEventNumber, eventCount - 1);
+
+    // scan every event once via elog/getEventDetail (a plain by-number lookup, same as
+    // an Event Log table/chart round trip would do while the user pans/scrolls) --
+    // populates the bounded parsed-event LRU (phase E7) well beyond whatever
+    // parseBegin/parseEnd left cached at open() time.
+    for (let n = summary.firstEventNumber; n <= summary.lastEventNumber; n++) {
+      const detail = call<EventDetail | null>(session, ElogMethods.getEventDetail, { eventNumber: n });
+      assert.ok(detail !== null, `event #${n} must resolve during the populating scan`);
+    }
+
+    const released = call<ReleaseMemoryResult>(session, ElogMethods.releaseMemory, undefined);
+    assert.ok(released.eventCacheSizeBefore > eventCount / 2, `expected a well-populated cache before release, got ${released.eventCacheSizeBefore} (scanned ${eventCount} events)`);
+    assert.ok(
+      released.eventCacheSizeAfter < released.eventCacheSizeBefore / 4,
+      `expected a large drop after releasing memory, got ${released.eventCacheSizeBefore} -> ${released.eventCacheSizeAfter}`,
+    );
+    assert.equal(released.summary.isEmpty, false);
+    assert.equal(released.summary.lastEventNumber, summary.lastEventNumber, "releasing memory doesn't change the log's actual content");
+    assert.notEqual(released.summary.coordinateSystemVersion, summary.coordinateSystemVersion, 'release bumps the stale-response guard, same as any other reset');
+
+    // subsequent queries still resolve correctly (oracle spot check): the file itself
+    // was never touched, only the engine's own caches were dropped -- everything
+    // re-parses lazily and must agree with the ground truth `synthesizeEventLog()` built.
+    const midEvent = Math.floor(eventCount / 2);
+    const oracleMid = call<EventDetail | null>(session, ElogMethods.getEventDetail, { eventNumber: midEvent });
+    assert.equal(oracleMid?.simulationTime, synthesized.simTimes[midEvent]);
+    const oracleFirst = call<EventDetail | null>(session, ElogMethods.getEventDetail, { eventNumber: summary.firstEventNumber });
+    assert.equal(oracleFirst?.simulationTime, synthesized.simTimes[summary.firstEventNumber]);
+    const oracleLast = call<EventDetail | null>(session, ElogMethods.getEventDetail, { eventNumber: summary.lastEventNumber });
+    assert.equal(oracleLast?.simulationTime, synthesized.simTimes[summary.lastEventNumber]);
+
+    // a full re-scan after release still finds every event (nothing silently lost)
+    for (let n = summary.firstEventNumber; n <= summary.lastEventNumber; n++) {
+      const detail = call<EventDetail | null>(session, ElogMethods.getEventDetail, { eventNumber: n });
+      assert.ok(detail !== null, `event #${n} must still resolve after releaseMemory()`);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

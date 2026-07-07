@@ -87,6 +87,7 @@ import type {
   ViewportParams,
   RenderDependency,
   RenderMethodCall,
+  ReleaseMemoryResult,
 } from '@omnetpp/shared/elog-protocol';
 
 /** Thrown by `runJob()` when the job's cancel flag is observed set (see engineThread.ts). Mapped to `ErrorCodes.RequestCancelled` there. */
@@ -303,6 +304,23 @@ export class EngineSession {
     this.pinFirstEvent();
     this.repinLastEvent();
     return this.getSummary();
+  }
+
+  /**
+   * `elog/releaseMemory`'s handler -- see `elogProtocol.ts`'s `ElogMethods.
+   * releaseMemory`/`ReleaseMemoryResult` doc comments for the exact Java precedent and
+   * what is/isn't reported. Reuses the SAME reset path an actually-detected OVERWRITTEN
+   * file change runs (`synchronizeToCurrentFileState()`) -- the only difference is that
+   * nothing on disk actually changed, so `FileReader`'s own tail-compare would report
+   * UNCHANGED if asked; this action forces the reset unconditionally instead of asking.
+   */
+  releaseMemory(): ReleaseMemoryResult {
+    if (this.eventLog === null) throw new Error('EngineSession.releaseMemory: no file open');
+    const eventCacheLimit = this.eventLog.getEventCacheLimit();
+    const eventCacheSizeBefore = this.eventLog.getEventCacheSize();
+    const { summary } = this.synchronizeToCurrentFileState(FileChange.OVERWRITTEN);
+    const eventCacheSizeAfter = this.eventLog.getEventCacheSize();
+    return { summary, eventCacheSizeBefore, eventCacheSizeAfter, eventCacheLimit };
   }
 
   getSummary(): LogSummary {

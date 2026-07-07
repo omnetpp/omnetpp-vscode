@@ -35,6 +35,7 @@ import {
   type GotoSimTimeParams,
   type LogSummary,
   type MapCoordsParams,
+  type ReleaseMemoryResult,
   type RowWindowParams,
   type ScRelocateOriginParams,
   type ScSetTimelineModeParams,
@@ -235,6 +236,20 @@ export class EventLogSession {
     return result;
   }
 
+  /**
+   * "Release Memory" command/context-menu item (phase U9): forces the engine to drop
+   * its parsed-event cache (keeping pins -- first/last/origin/current viewport, see
+   * `EngineSession.releaseMemory()`) and broadcasts the result to every attached
+   * webview as `elog/memoryReleased`, so both the chart and table refetch their
+   * current windows against the (now cache-cold, but content-identical) engine state.
+   */
+  async releaseMemory(token?: CancellationToken): Promise<ReleaseMemoryResult> {
+    const result = await this.workerClientInstance.releaseMemory(token);
+    this.lastSummary = result.summary;
+    this.broadcast({ type: 'engineNotify', event: 'elog/memoryReleased', payload: result });
+    return result;
+  }
+
   // ---- selection (U6: canonical, session-mediated chart<->table sync) -----------------
 
   /** The session's current canonical selection (empty `{eventNumbers: []}` before anything has ever been selected) -- also pushed in every `init` message (`sequenceChartEditor.ts`/`eventLogTableView.ts`) so a freshly (re)attached webview (a reload, or a pinned table rebinding to a different session) picks it up immediately without waiting on the other view to re-broadcast. */
@@ -347,6 +362,8 @@ export class EventLogSession {
         return wc.getEventDetail(params as EventDetailParams, token);
       case ElogMethods.close:
         return wc.close(token);
+      case ElogMethods.releaseMemory:
+        return this.releaseMemory(token);
       default:
         throw new Error(`EventLogSession: unknown engine method "${method}"`);
     }

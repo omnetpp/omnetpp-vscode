@@ -64,6 +64,8 @@ function dispatch(session: EngineSession, method: string, params: unknown): unkn
     case ElogMethods.close:
       session.close();
       return null;
+    case ElogMethods.releaseMemory:
+      return session.releaseMemory();
     default:
       throw new Error(`handleElogRequest: unknown method '${method}'`);
   }

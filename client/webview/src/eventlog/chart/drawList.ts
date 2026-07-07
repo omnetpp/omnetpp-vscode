@@ -188,6 +188,24 @@ export const SELECTION_MARK_COLOR = '#ff3b30';
 export const BOOKMARK_MARK_COLOR = '#4a90d9';
 
 /**
+ * Phase U9 (high-contrast pass): under `theme.isHighContrast`, canvas-drawn selection
+ * rings switch from the fixed `SELECTION_MARK_COLOR` literal to `theme.focusBorder` --
+ * a color VS Code itself guarantees stays visible against every other high-contrast
+ * chrome color, unlike an arbitrary literal red (which an HC theme author could
+ * legitimately also use for something else, or which could sit too close to the HC
+ * background/foreground pair to read as a distinct accent). Non-HC themes are
+ * unaffected (still the literal, matching every prior phase's rendering exactly).
+ */
+export function selectionMarkColor(theme: EventLogPalette): string {
+  return theme.isHighContrast ? theme.focusBorder : SELECTION_MARK_COLOR;
+}
+
+/** Phase U9 (high-contrast pass) -- same rationale as `selectionMarkColor()` above, for the bookmark flag glyph. */
+export function bookmarkMarkColor(theme: EventLogPalette): string {
+  return theme.isHighContrast ? theme.focusBorder : BOOKMARK_MARK_COLOR;
+}
+
+/**
  * Identity key for a `MessageDependency`-kind bookmark, matching `bookmarkStore.ts`'s
  * `bookmarkMatches()` field set exactly `(eventNumber [= cause], consequenceEventNumber,
  * messageId)` -- NOT `dependencyKey()` from `selection.ts` (which keys on `kind` instead
@@ -270,7 +288,7 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       const x0 = contentX(region.tcBegin, viewport);
       const x1 = contentX(region.tcEnd, viewport);
       if (x1 < GUTTER_LEFT_WIDTH || x0 > viewport.canvasWidth) continue;
-      primitives.push({ kind: 'regionBand', x: Math.max(GUTTER_LEFT_WIDTH, x0), y: GUTTER_TOP_HEIGHT, w: Math.max(0, Math.min(viewport.canvasWidth, x1) - Math.max(GUTTER_LEFT_WIDTH, x0)), h: viewport.canvasHeight - GUTTER_TOP_HEIGHT, color: theme.isDark ? '#2a2a2a' : '#f0f0f0' });
+      primitives.push({ kind: 'regionBand', x: Math.max(GUTTER_LEFT_WIDTH, x0), y: GUTTER_TOP_HEIGHT, w: Math.max(0, Math.min(viewport.canvasWidth, x1) - Math.max(GUTTER_LEFT_WIDTH, x0)), h: viewport.canvasHeight - GUTTER_TOP_HEIGHT, color: theme.regionBandColor });
     }
   }
 
@@ -297,7 +315,7 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       if (y < GUTTER_TOP_HEIGHT - axis.lineHeight || y > viewport.canvasHeight + axis.lineHeight) continue;
       primitives.push({ kind: 'axisLine', moduleId: axis.moduleId, x1: GUTTER_LEFT_WIDTH, x2: viewport.canvasWidth, y, lineHeight: axis.lineHeight, color: theme.foreground });
       if (flags.showAxisLabels) primitives.push({ kind: 'axisLabel', moduleId: axis.moduleId, x: 4 + labelIndent, y, text: axis.label, color: theme.foreground });
-      if (bookmarkedModuleIds?.has(axis.moduleId)) primitives.push({ kind: 'bookmarkMark', x: GUTTER_LEFT_WIDTH - 6, y, color: BOOKMARK_MARK_COLOR });
+      if (bookmarkedModuleIds?.has(axis.moduleId)) primitives.push({ kind: 'bookmarkMark', x: GUTTER_LEFT_WIDTH - 6, y, color: bookmarkMarkColor(theme) });
       // Phase U8 -- per-axis expand/collapse/close glyphs (Java `layoutAxis()`'s
       // ModuleActions). Right-aligned inside the left gutter (Java lays them out just
       // right of the measured label text; this port has no synchronous text metrics in
@@ -377,8 +395,8 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
             : { kind: 'eventMark', eventNumber: event.eventNumber, moduleId: event.moduleId, x, y, radius: EVENT_RADIUS, color: theme.eventColor },
         );
         if (flags.showEventNumbers && showLabels) primitives.push({ kind: 'label', x: x + 2, y: y + 10, text: `#${event.eventNumber}`, color: theme.descriptionForeground, align: 'left' });
-        if (selectedEventNumbers?.has(event.eventNumber)) primitives.push({ kind: 'selectionMark', x, y, radius: EVENT_RADIUS + 3, color: SELECTION_MARK_COLOR });
-        if (bookmarkedEventNumbers?.has(event.eventNumber)) primitives.push({ kind: 'bookmarkMark', x: x - EVENT_RADIUS - 3, y: y - EVENT_RADIUS - 3, color: BOOKMARK_MARK_COLOR });
+        if (selectedEventNumbers?.has(event.eventNumber)) primitives.push({ kind: 'selectionMark', x, y, radius: EVENT_RADIUS + 3, color: selectionMarkColor(theme) });
+        if (bookmarkedEventNumbers?.has(event.eventNumber)) primitives.push({ kind: 'bookmarkMark', x: x - EVENT_RADIUS - 3, y: y - EVENT_RADIUS - 3, color: bookmarkMarkColor(theme) });
       }
     }
     for (const [xKey, col] of columnDensity) {
@@ -435,11 +453,11 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       const y1 = axisRowY(prevAxis.y, viewport);
       const x2 = contentX(cur.tc, viewport);
       const y2 = axisRowY(curAxis.y, viewport);
-      primitives.push({ kind: 'arrow', arrowKind: 'send', x1, y1, x2, y2, color: SELECTION_MARK_COLOR, dash: [3, 2] });
+      primitives.push({ kind: 'arrow', arrowKind: 'send', x1, y1, x2, y2, color: selectionMarkColor(theme), dash: [3, 2] });
       if (showLabels) {
         const delta = subtractDecimalStrings(cur.simulationTime, prev.simulationTime);
         const text = (isNegativeDecimal(delta) ? '-' : '') + formatSimulationTime(delta.replace(/^-/, ''));
-        primitives.push({ kind: 'timeDifferenceLabel', x: (x1 + x2) / 2, y: (y1 + y2) / 2 - 12, text, color: SELECTION_MARK_COLOR });
+        primitives.push({ kind: 'timeDifferenceLabel', x: (x1 + x2) / 2, y: (y1 + y2) / 2 - 12, text, color: selectionMarkColor(theme) });
       }
     }
   }
@@ -533,7 +551,7 @@ function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx:
     if (geom.arrowhead) primitives.push({ kind: 'arrowHead', x: geom.arrowhead.x, y: geom.arrowhead.y, angle: geom.arrowhead.angle, color: geom.arrowhead.long ? LONG_ARROWHEAD_COLOR : color, length: geom.arrowhead.length, width: geom.arrowhead.width });
     if (isFiltered && geom.signAnchor) primitives.push({ kind: 'zigzag', segments: buildFilteredSignSegments(geom.signAnchor), color });
     if (flags.showMessageNames && showLabels && dep.messageName) primitives.push({ kind: 'label', x: geom.labelAnchor.x + (isFiltered ? 7 : 0), y: geom.labelAnchor.y, text: dep.messageName, color, align: 'left' });
-    if (isBookmarked) primitives.push({ kind: 'bookmarkMark', x: geom.labelAnchor.x, y: geom.labelAnchor.y, color: BOOKMARK_MARK_COLOR });
+    if (isBookmarked) primitives.push({ kind: 'bookmarkMark', x: geom.labelAnchor.x, y: geom.labelAnchor.y, color: bookmarkMarkColor(theme) });
     return;
   }
 
@@ -559,5 +577,5 @@ function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx:
   if (geom.arrowhead) primitives.push({ kind: 'arrowHead', x: geom.arrowhead.x, y: geom.arrowhead.y, angle: geom.arrowhead.angle, color: geom.arrowhead.long ? LONG_ARROWHEAD_COLOR : color, length: geom.arrowhead.length, width: geom.arrowhead.width });
   if (isFiltered && geom.signAnchor) primitives.push({ kind: 'zigzag', segments: buildFilteredSignSegments(geom.signAnchor), color });
   if (flags.showMessageNames && showLabels && dep.messageName) primitives.push({ kind: 'label', x: geom.labelAnchor.x + (isFiltered ? 7 : 0), y: geom.labelAnchor.y, text: dep.messageName, color, align: 'left' });
-  if (isBookmarked) primitives.push({ kind: 'bookmarkMark', x: geom.labelAnchor.x, y: geom.labelAnchor.y, color: BOOKMARK_MARK_COLOR });
+  if (isBookmarked) primitives.push({ kind: 'bookmarkMark', x: geom.labelAnchor.x, y: geom.labelAnchor.y, color: bookmarkMarkColor(theme) });
 }

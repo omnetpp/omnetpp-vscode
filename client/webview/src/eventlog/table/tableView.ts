@@ -71,6 +71,14 @@ export interface TableViewOptions {
   persistedState: unknown;
   /** Phase U6 -- the session's bookmark list as of when this table view was (re)mounted (see `tableMain.ts`'s `init`/`bookmarksChanged` handling). */
   initialBookmarks?: Bookmark[];
+  /**
+   * ADDITIVE (phase U9): called when `reload()` (the table's primary data-fetch path)
+   * fails for a reason other than being superseded by a newer reload (see `reload()`'s
+   * own `mySeq` staleness check) -- `tableMain.ts` feeds this through
+   * `common/notificationOverlay.ts`'s `classifyEngineError()` to decide whether/how to
+   * show the shared overlay.
+   */
+  onError?: (err: unknown) => void;
 }
 
 export interface TableViewHandle {
@@ -93,6 +101,13 @@ export interface TableViewHandle {
   applySetSelection(selection: EventLogSelection): void;
   /** Phase U6 -- replaces the bookmark set this view tints rows for (`bookmarksChanged`/fresh `init`). */
   setBookmarks(bookmarks: Bookmark[]): void;
+  /**
+   * ADDITIVE (phase U9): the notification overlay's "Refresh" action -- re-resolves
+   * the SAME anchor the table was last showing (same re-anchor logic `onFilterChanged()`
+   * uses; see that method's doc comment), so a Refresh after a genuine fetch failure
+   * retries in place rather than jumping back to the first row.
+   */
+  refreshCurrentWindow(): void;
   dispose(): void;
 }
 
@@ -130,6 +145,10 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
   findInputEl.type = 'text';
   findInputEl.placeholder = 'Find text in event log… (Enter = next, Esc = close)';
   findBarEl.appendChild(findInputEl);
+  /** Phase U9 (loose end, U2's find was minimal) -- a miss used to be entirely silent; a small inline status word now confirms the search actually ran and simply found nothing. */
+  const findStatusEl = document.createElement('span');
+  findStatusEl.className = 'elog-findbar-status';
+  findBarEl.appendChild(findStatusEl);
 
   tableEl.append(headerEl, rowsWrapperEl, scrollbarEl);
   root.append(findBarEl, tableEl);
@@ -164,6 +183,23 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
   let requestSeq = 0;
   let viewportRowCount = 1;
   let disposed = false;
+  /**
+   * Phase U9 (loose end, noted in the U6 report): `start()` kicks off its own
+   * `reload({kind:'first'}, 0)` fire-and-forget; `tableMain.ts`'s `init` handler
+   * immediately calls `applySetSelection()` right after `start()` returns (both on the
+   * SAME synchronous tick, for a freshly-mounted table attaching to an
+   * already-selected session -- a pinned table rebind, or this very table reloading).
+   * Without serializing them, both `reload()` calls race the engine round trip:
+   * whichever response lands LAST wins, so a slow "first row" response arriving after
+   * the selection's own reload would silently override it back to the first row.
+   * `start()` now remembers its own in-flight promise here; `applySetSelection()`
+   * (below) waits for it before running its own reload, so the selection's reload
+   * always runs (and therefore lands) strictly after the initial one, never racing it.
+   * `null` once consumed (or if `start()` was never called) -- every LATER
+   * `applySetSelection()` call (an ordinary cross-view sync, not the first-mount case)
+   * runs immediately, unaffected.
+   */
+  let initialLoadPromise: Promise<void> | null = null;
 
   const resizeObserver = new ResizeObserver(() => {
     const newCount = computeViewportRowCount();
@@ -201,6 +237,7 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
     if (e.key === 'Enter') void doFind(true);
     else if (e.key === 'Escape') closeFindBar();
   });
+  findInputEl.addEventListener('input', () => (findStatusEl.textContent = ''));
 
   // ---- viewport sizing -----------------------------------------------------------------
 
@@ -233,6 +270,12 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
 
   // ---- data loading ---------------------------------------------------------------------
 
+  /** Shared by `onFilterChanged()` and the notification overlay's "Refresh" (`refreshCurrentWindow()`): re-resolves the SAME event the table was last anchored to (falling back to the first row if nothing was anchored yet). */
+  function reanchorCurrent(): void {
+    const anchor: RowAnchor = lastAnchorRef ? { kind: 'event', eventNumber: lastAnchorRef.eventNumber } : { kind: 'first' };
+    void reload(anchor, 0);
+  }
+
   async function reload(anchor: RowAnchor, desiredDistance: number): Promise<void> {
     const mySeq = ++requestSeq;
     const before = Math.max(0, desiredDistance) + viewportRowCount;
@@ -241,7 +284,12 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
     let win;
     try {
       win = await rpc.request<RowWindow>(ElogMethods.tableGetRows, params);
-    } catch {
+    } catch (err) {
+      // Phase U9: only report a genuine (non-superseded) failure -- a NEWER reload
+      // already in flight by the time this one's rejection lands means this
+      // particular attempt is stale/irrelevant (matches the same `mySeq` staleness
+      // check the success path below applies), not a real user-facing problem.
+      if (mySeq === requestSeq) options.onError?.(err);
       return;
     }
     if (mySeq !== requestSeq || disposed) return;
@@ -610,7 +658,11 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
     } catch {
       return;
     }
-    if (!result.found || !result.ref) return;
+    if (!result.found || !result.ref) {
+      findStatusEl.textContent = 'Not found';
+      return;
+    }
+    findStatusEl.textContent = '';
     selection = gotoElement(result.ref);
     await revealRef(result.ref);
     repaint();
@@ -808,7 +860,7 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
 
   return {
     start(): void {
-      void reload({ kind: 'first' }, 0);
+      initialLoadPromise = reload({ kind: 'first' }, 0);
     },
     onEngineChanged(change): void {
       if (change === 'overwritten') {
@@ -819,8 +871,7 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
       if (scrolledToEnd) void reload({ kind: 'last' }, viewportRowCount - 1);
     },
     onFilterChanged(): void {
-      const anchor: RowAnchor = lastAnchorRef ? { kind: 'event', eventNumber: lastAnchorRef.eventNumber } : { kind: 'first' };
-      void reload(anchor, 0);
+      reanchorCurrent();
     },
     applyReveal(target): void {
       if (target.ref === null) return;
@@ -831,7 +882,16 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
       });
     },
     applySetSelection(sel): void {
-      void applySetSelectionImpl(sel);
+      // Phase U9 -- see `initialLoadPromise`'s own doc comment: serialize behind
+      // `start()`'s own in-flight first-row reload (if any is still outstanding) so a
+      // fresh mount's selection-seeding call never races it.
+      const pending = initialLoadPromise;
+      initialLoadPromise = null;
+      if (pending) void pending.then(() => applySetSelectionImpl(sel));
+      else void applySetSelectionImpl(sel);
+    },
+    refreshCurrentWindow(): void {
+      reanchorCurrent();
     },
     setBookmarks(bookmarks): void {
       bookmarkedEventNumbers = new Set(bookmarks.filter((b) => b.kind === 'Event').map((b) => b.eventNumber!));

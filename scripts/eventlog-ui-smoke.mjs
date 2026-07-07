@@ -41,6 +41,7 @@ const ElogMethods = {
   getEventDetail: 'elog/getEventDetail',
   getFilterHints: 'elog/getFilterHints',
   setFilter: 'elog/setFilter',
+  releaseMemory: 'elog/releaseMemory',
 };
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -111,6 +112,9 @@ async function main() {
 
   // ---- U8: axis management -- adjacency matrix round trip (minimize crossings) ------
   await smokeAxisU8(session, summary);
+
+  // ---- U9: "Release Memory" round trip (elog/releaseMemory) through the real worker --
+  await smokeReleaseMemoryU9(session, summary, messages);
 
   // ---- U4: real RPC cancellation end-to-end through the actual worker ---------------
   await smokeCancellationU4(bundlePath);
@@ -420,3 +424,29 @@ async function smokeAxisU8(session, summary) {
   assert(approx.numberOfAxes === childIds.length && approx.matrix.length === childIds.length * childIds.length, 'smokeAxisU8: sampled matrix has the right shape');
   assert(approx.matrix.reduce((sum, w) => sum + w, 0) > 0, 'smokeAxisU8: 1000 samples over the small fixture find dependencies');
 }
+
+// ---------------------------------------------------------------------------------
+// U9 (export + polish): "Release Memory" (elog/releaseMemory) round trip through the
+// real bundled worker/session -- asserts the request resolves with a sane
+// {eventCacheSizeBefore, eventCacheSizeAfter, eventCacheLimit} shape, that the log's
+// actual content is unaffected (same lastEventNumber), that it bumps the
+// stale-response guard (coordinateSystemVersion) like every other reset, that it
+// broadcasts an `elog/memoryReleased` engineNotify to attached sinks (mirrors
+// `refresh()`'s own `elog/refreshed` broadcast, asserted above), and that the engine
+// keeps answering correctly afterwards (an oracle spot check on the first event).
+// ---------------------------------------------------------------------------------
+async function smokeReleaseMemoryU9(session, summary, messages) {
+  const released = await session.handleEngineRequest(ElogMethods.releaseMemory, undefined);
+  assert(typeof released.eventCacheSizeBefore === 'number' && typeof released.eventCacheSizeAfter === 'number', 'smokeReleaseMemoryU9: returns numeric before/after cache sizes');
+  assert(typeof released.eventCacheLimit === 'number' && released.eventCacheLimit > 0, 'smokeReleaseMemoryU9: returns a positive eventCacheLimit');
+  assert(released.summary.isEmpty === false, 'smokeReleaseMemoryU9: the log is still non-empty after releasing memory');
+  assert(released.summary.lastEventNumber === summary.lastEventNumber, "smokeReleaseMemoryU9: releasing memory doesn't change the log's actual content");
+  assert(released.summary.coordinateSystemVersion !== summary.coordinateSystemVersion, 'smokeReleaseMemoryU9: release bumps the stale-response guard, same as any other reset');
+
+  assert(messages.some((m) => m.type === 'engineNotify' && m.event === 'elog/memoryReleased'), 'smokeReleaseMemoryU9: broadcasts an elog/memoryReleased engineNotify to attached sinks');
+
+  // the engine keeps answering correctly afterwards (oracle spot check on the first event)
+  const gotoFirst = await session.gotoEvent({ eventNumber: summary.firstEventNumber });
+  assert(gotoFirst.found === true, 'smokeReleaseMemoryU9: the engine still finds the first event after releasing memory');
+}
+

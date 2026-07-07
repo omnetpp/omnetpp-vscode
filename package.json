@@ -329,6 +329,21 @@
         "title": "Unpin",
         "category": "OMNeT++",
         "icon": "$(pinned)"
+      },
+      {
+        "command": "omnetpp.eventlog.exportSvg",
+        "title": "Export to SVG...",
+        "category": "OMNeT++"
+      },
+      {
+        "command": "omnetpp.eventlog.copyImage",
+        "title": "Copy Image to Clipboard",
+        "category": "OMNeT++"
+      },
+      {
+        "command": "omnetpp.eventlog.releaseMemory",
+        "title": "Release Memory",
+        "category": "OMNeT++"
       }
     ],
     "menus": {
@@ -485,6 +500,21 @@
           "command": "omnetpp.eventlog.showBookmarks",
           "when": "activeCustomEditorId == 'omnetpp.sequenceChart'",
           "group": "navigation@4"
+        },
+        {
+          "command": "omnetpp.eventlog.exportSvg",
+          "when": "activeCustomEditorId == 'omnetpp.sequenceChart'",
+          "group": "1_export@1"
+        },
+        {
+          "command": "omnetpp.eventlog.copyImage",
+          "when": "activeCustomEditorId == 'omnetpp.sequenceChart'",
+          "group": "1_export@2"
+        },
+        {
+          "command": "omnetpp.eventlog.releaseMemory",
+          "when": "activeCustomEditorId == 'omnetpp.sequenceChart'",
+          "group": "2_memory@1"
         }
       ],
       "view/title": [
@@ -557,6 +587,11 @@
           "command": "omnetpp.eventlog.unpinEventLogTable",
           "when": "view == omnetppEventLogTable && omnetpp.eventlogTablePinned",
           "group": "navigation@4"
+        },
+        {
+          "command": "omnetpp.eventlog.releaseMemory",
+          "when": "view == omnetppEventLogTable",
+          "group": "2_memory@1"
         }
       ],
       "view/item/context": [

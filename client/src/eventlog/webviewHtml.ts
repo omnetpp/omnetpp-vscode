@@ -30,7 +30,13 @@ export function buildEventLogWebviewHtml(webview: vscode.Webview, extensionUri: 
   body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); font-size: var(--vscode-font-size); }
   #root { display: flex; flex-direction: column; height: 100%; }
   .elog-toolbar { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; padding: 2px 6px;
-    background: var(--vscode-editorWidget-background); border-bottom: 1px solid var(--vscode-editorWidget-border, transparent); }
+    background: var(--vscode-editorWidget-background); border-bottom: 1px solid var(--vscode-editorWidget-border, transparent);
+    /* Phase U9 (loose end): a narrow editor/panel can no longer fit every toolbar
+       button/dropdown -- rather than silently clipping (the pre-existing behavior:
+       overflow was unset, so items past the container edge were just invisible),
+       let the bar scroll horizontally. Cheap CSS-only fix; a dedicated "..." overflow
+       menu is not built here (not worth the added complexity for a toolbar this size). */
+    overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
   .elog-toolbar button { display: flex; align-items: center; justify-content: center; gap: 4px;
     height: 22px; padding: 0 4px; background: transparent; color: var(--vscode-foreground);
     border: none; border-radius: 3px; cursor: pointer; }
@@ -84,6 +90,7 @@ export function buildEventLogWebviewHtml(webview: vscode.Webview, extensionUri: 
   .elog-findbar { display: none; flex: 0 0 auto; align-items: center; gap: 4px; padding: 2px 6px;
     background: var(--vscode-editorWidget-background); border-bottom: 1px solid var(--vscode-editorWidget-border, transparent); }
   .elog-findbar.open { display: flex; }
+  .elog-findbar-status { flex: 0 0 auto; font-size: 11px; color: var(--vscode-errorForeground, #f14c4c); min-width: 60px; }
   .elog-findbar input { flex: 1 1 auto; background: var(--vscode-input-background); color: var(--vscode-input-foreground);
     border: 1px solid var(--vscode-input-border, transparent); border-radius: 3px; padding: 2px 4px; font: inherit; }
 
@@ -183,6 +190,44 @@ export function buildEventLogWebviewHtml(webview: vscode.Webview, extensionUri: 
     background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); cursor: pointer; }
   .elog-filter-panel-footer button.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
   .elog-filter-panel-footer button:disabled { opacity: 0.5; cursor: default; }
+
+  /* Notification overlay (phase U9, common/notificationOverlay.ts) -- the shared
+     canceled/out-of-sync/error screen both the chart and table mount over their own
+     .elog-body. */
+  .elog-notification-overlay { position: absolute; inset: 0; z-index: 70; display: none;
+    flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+    padding: 16px; text-align: center; background: var(--vscode-editor-background);
+    color: var(--vscode-foreground); }
+  .elog-notification-icon { font-size: 32px; color: var(--vscode-descriptionForeground); }
+  .elog-notification-icon.codicon-error { color: var(--vscode-errorForeground, #f14c4c); }
+  .elog-notification-icon.codicon-warning { color: var(--vscode-editorWarning-foreground, #cca700); }
+  .elog-notification-message { max-width: 480px; font-size: 13px; }
+  .elog-notification-refresh { padding: 4px 14px; border-radius: 3px; border: 1px solid var(--vscode-button-border, transparent);
+    background: var(--vscode-button-background); color: var(--vscode-button-foreground); cursor: pointer; }
+  .elog-notification-refresh:hover { background: var(--vscode-button-hoverBackground); }
+  .elog-notification-details { max-width: 560px; font-size: 12px; color: var(--vscode-descriptionForeground); }
+  .elog-notification-details pre { white-space: pre-wrap; word-break: break-word; text-align: left;
+    background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.1)); padding: 6px 8px; border-radius: 3px; }
+
+  /* High-contrast pass (phase U9): VS Code's high-contrast themes guarantee
+     --vscode-contrastBorder stays visible against every other chrome color --
+     strengthen borders that otherwise rely on a (possibly near-invisible-under-HC)
+     widget-specific border color, and widen the chart's own keyboard focus ring. */
+  body.vscode-high-contrast .elog-tooltip,
+  body.vscode-high-contrast .elog-menu,
+  body.vscode-high-contrast .elog-dialog,
+  body.vscode-high-contrast .elog-filter-panel,
+  body.vscode-high-contrast-light .elog-tooltip,
+  body.vscode-high-contrast-light .elog-menu,
+  body.vscode-high-contrast-light .elog-dialog,
+  body.vscode-high-contrast-light .elog-filter-panel {
+    border-color: var(--vscode-contrastBorder, currentColor) !important;
+  }
+  body.vscode-high-contrast #chartCanvasContainer:focus-visible,
+  body.vscode-high-contrast-light #chartCanvasContainer:focus-visible {
+    outline-width: 2px;
+    outline-color: var(--vscode-focusBorder, #007fd4);
+  }
 </style>
 </head>
 <body>

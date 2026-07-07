@@ -44,10 +44,14 @@
  *    Network Interface / separator / Full Detail / Default / Empty), Axis Ordering
  *    Mode (Module Id / Module Path / Minimize Crossings / Manual... radios), Spacing
  *    (Balanced Axes / Dense Axes / Increase Spacing / Decrease Spacing).
+ *  - Phase U9 ADDS (port plan's "U9: Export + polish" row): Release Memory, Copy
+ *    Image to Clipboard, Export to SVG... -- in the same relative order as Java's
+ *    `menuManager` (`SequenceChartContributor.java` lines ~718-727).
  *  - STILL OMITTED (not even as disabled placeholders — genuinely later-phase
- *    ownership per the port plan's phase table): Filter (dropdown), Configure Style,
- *    Change Font..., Pin, Release Memory, Self Test, Copy to Clipboard, Export to
- *    SVG..., Show In.
+ *    ownership, or out of this port's scope entirely per the port plan's phase
+ *    table): Filter (dropdown -- superseded by the in-webview filter panel, U7),
+ *    Configure Style, Change Font..., Pin, Self Test (an Eclipse-internal
+ *    correctness self-check, not a user-facing feature), Show In.
  */
 
 import { TimelineMode } from '@omnetpp/shared/elog-protocol';
@@ -125,6 +129,12 @@ export interface ChartMenuActions {
   refresh(): void;
   /** Phase U5 — flips one `ChartDisplayFlags` key (`displayFlags.ts`'s `toggleFlag()`); the caller re-renders and persists. */
   toggleDisplayFlag(key: keyof ChartDisplayFlags): void;
+  /** Phase U9 -- "Release Memory" (`SequenceChartContributor.createReleaseMemoryAction()`). */
+  releaseMemory(): void;
+  /** Phase U9 -- "Copy Image to Clipboard" (`SequenceChartContributor.createCopyToClipboardAction()` / `CachingCanvas.copyImageToClipboard()`). */
+  copyImage(): void;
+  /** Phase U9 -- "Export to SVG..." (`SequenceChartContributor.createExportToSVGAction()`). */
+  exportSvg(): void;
 }
 
 export interface ChartMenuBuildParams {
@@ -318,6 +328,13 @@ export function buildChartContextMenu(params: ChartMenuBuildParams): MenuEntry[]
 
   entries.push({ separator: true });
   entries.push({ id: 'refresh', label: 'Refresh', icon: 'refresh', onSelect: actions.refresh });
+  // Phase U9 -- "Release Memory"/"Copy Image to Clipboard"/"Export to SVG..." (Java's
+  // `menuManager` order: refresh, releaseMemory, [selfTest -- out of scope], separator,
+  // copyToClipboard, exportToSVG, separator, [showIn -- out of scope]).
+  entries.push({ id: 'releaseMemory', label: 'Release Memory', onSelect: actions.releaseMemory });
+  entries.push({ separator: true });
+  entries.push({ id: 'copyImage', label: 'Copy Image to Clipboard', onSelect: actions.copyImage });
+  entries.push({ id: 'exportSvg', label: 'Export to SVG...', onSelect: actions.exportSvg });
 
   return entries;
 }

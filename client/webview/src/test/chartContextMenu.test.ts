@@ -67,6 +67,9 @@ function fakeActions(): ChartMenuActions & Record<string, unknown> {
     spacingDense: record('spacingDense'),
     spacingIncrease: record('spacingIncrease'),
     spacingDecrease: record('spacingDecrease'),
+    releaseMemory: record('releaseMemory'),
+    copyImage: record('copyImage'),
+    exportSvg: record('exportSvg'),
   } as unknown as ChartMenuActions & Record<string, unknown>;
 }
 
@@ -272,9 +275,20 @@ test('buildChartContextMenu: still-deferred static items (Filter dropdown, Confi
   const actions = fakeActions();
   const entries = buildChartContextMenu(makeParams(actions));
   const ids = entries.filter((e): e is Extract<MenuEntry, { id: string }> => 'id' in e).map((e) => e.id);
-  for (const deferred of ['filter', 'configureStyle', 'changeFont', 'bookmark', 'pin', 'releaseMemory', 'selfTest', 'copyToClipboard', 'exportToSvg', 'showIn']) {
-    assert.ok(!ids.includes(deferred), `"${deferred}" must not appear (deferred to a later phase)`);
+  for (const deferred of ['filter', 'configureStyle', 'changeFont', 'bookmark', 'pin', 'selfTest', 'showIn']) {
+    assert.ok(!ids.includes(deferred), `"${deferred}" must not appear (deferred to a later phase, or out of this port's scope)`);
   }
+});
+
+test('buildChartContextMenu: Release Memory/Copy Image to Clipboard/Export to SVG wired at the top level (phase U9)', () => {
+  const actions = fakeActions();
+  const entries = buildChartContextMenu(makeParams(actions));
+  (findEntry(entries, 'releaseMemory') as { onSelect: () => void }).onSelect();
+  assert.ok(actions.calls.releaseMemory);
+  (findEntry(entries, 'copyImage') as { onSelect: () => void }).onSelect();
+  assert.ok(actions.calls.copyImage);
+  (findEntry(entries, 'exportSvg') as { onSelect: () => void }).onSelect();
+  assert.ok(actions.calls.exportSvg);
 });
 
 // ---------------------------------------------------------------------------------

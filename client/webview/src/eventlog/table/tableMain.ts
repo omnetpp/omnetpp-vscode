@@ -1,6 +1,7 @@
 import { ElogMethods, type ElogChangedParams, type CheckChangesResult, type LogSummary } from '@omnetpp/shared/elog-protocol';
 import type { Bookmark, HostToWebviewMessage, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
 import { EngineRpc } from '../common/rpc';
+import { classifyEngineError, mountNotificationOverlay } from '../common/notificationOverlay';
 import { renderSummaryStrip } from '../common/summary';
 import { readPalette, watchThemeChange } from '../common/theme';
 import { createTableView, type TableViewHandle } from './tableView';
@@ -37,8 +38,20 @@ document.getElementById('root')!.innerHTML = `
   <div class="elog-body" id="body">
     <div id="rows"></div>
     <div class="elog-empty" id="empty">No event log open. Open an .elog file's Sequence Chart to populate this view, or pin it to a specific file.</div>
+    <div id="notificationHost"></div>
   </div>
 `;
+
+/**
+ * Phase U9 -- the shared error/canceled/out-of-sync overlay (`common/
+ * notificationOverlay.ts`). "Refresh" forces an immediate file-change check AND
+ * unconditionally retries the table's current window (`refreshCurrentWindow()`),
+ * exactly like `chartMain.ts`'s own `refreshFromOverlay()`.
+ */
+const notificationOverlay = mountNotificationOverlay(document.getElementById('notificationHost')!, () => {
+  void rpc.request(ElogMethods.checkChanges, undefined);
+  table?.refreshCurrentWindow();
+});
 
 function fileName(): string {
   if (!fileUri) return '';
@@ -63,7 +76,14 @@ function mountTableIfNeeded(): void {
   if (!summary || summary.isEmpty) return;
   if (table) return;
   const root = document.getElementById('rows')!;
-  table = createTableView({ root, rpc, postToHost: (m) => vscode.postMessage(m), persistedState, initialBookmarks: latestBookmarks });
+  table = createTableView({
+    root,
+    rpc,
+    postToHost: (m) => vscode.postMessage(m),
+    persistedState,
+    initialBookmarks: latestBookmarks,
+    onError: (err) => notificationOverlay.show(classifyEngineError(err)!),
+  });
   table.start();
 }
 
@@ -140,6 +160,16 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
         // ADDITIVE (phase U7): always triggered by the Sequence Chart's filter panel
         // (the table has no filter panel of its own) -- see `tableView.ts`'s
         // `onFilterChanged()` doc comment for the re-anchor semantics this ports.
+        const payload = message.payload as { summary: LogSummary };
+        summary = payload.summary;
+        render();
+        table?.onFilterChanged();
+      } else if (message.event === 'elog/memoryReleased') {
+        // ADDITIVE (phase U9) -- "Release Memory" (triggered from the Sequence Chart,
+        // the native command, or this table itself has no menu item of its own): the
+        // engine's parsed-event cache was dropped, so re-resolve the SAME window this
+        // table was showing (content is unchanged, only re-parsed) -- same re-anchor
+        // semantics as `onFilterChanged()`, not a reset to the first row.
         const payload = message.payload as { summary: LogSummary };
         summary = payload.summary;
         render();
