@@ -233,3 +233,122 @@ test('EventLogSession: reveal() round-trips to both a chart and a table sink att
     session.dispose();
   }
 });
+
+// ---------------------------------------------------------------------------------
+// Phase U7: session-mediated filtering -- setFilter() broadcasts to every attached
+// sink (chart AND table, origin included -- unlike selection there is no echo/re-entry
+// concern), and persisted-filter rehydration (`initialFilterParams`/`onFilterChanged`,
+// the options a real `EventLogController` would wire against its own `workspaceState`).
+// ---------------------------------------------------------------------------------
+
+test('EventLogSession: setFilter() applies the filter, updates getCurrentFilterParams(), and broadcasts elog/filterChanged to every attached sink', async () => {
+  const session = new EventLogSession('elog:test-12', fixturePath, bundlePath);
+  try {
+    const summary = await session.initialize();
+    assert.equal(summary.filtered, false);
+    assert.equal(session.getCurrentFilterParams(), null);
+
+    const chartSink = fakeSink();
+    const tableSink = fakeSink();
+    session.attach('chart', chartSink);
+    session.attach('table', tableSink);
+
+    const params = { moduleIds: [1] };
+    const filteredSummary = await session.setFilter(params);
+    assert.equal(filteredSummary.filtered, true);
+    assert.deepEqual(session.getCurrentFilterParams(), params);
+
+    for (const sink of [chartSink, tableSink]) {
+      const notify = sink.messages.find((m) => m.type === 'engineNotify' && m.event === 'elog/filterChanged');
+      assert.ok(notify, 'expected an elog/filterChanged engineNotify on every attached sink, including the one that triggered it');
+      const payload = (notify as { payload: { summary: { filtered: boolean }; params: unknown } }).payload;
+      assert.equal(payload.summary.filtered, true);
+      assert.deepEqual(payload.params, params);
+    }
+  } finally {
+    session.dispose();
+  }
+});
+
+test('EventLogSession: setFilter(null) removes the filter and broadcasts the unfiltered summary', async () => {
+  const session = new EventLogSession('elog:test-13', fixturePath, bundlePath);
+  try {
+    await session.initialize();
+    await session.setFilter({ moduleIds: [1] });
+    assert.equal(session.getCurrentFilterParams() !== null, true);
+
+    const sink = fakeSink();
+    session.attach('chart', sink);
+    const summary = await session.setFilter(null);
+    assert.equal(summary.filtered, false);
+    assert.equal(session.getCurrentFilterParams(), null);
+    const notify = sink.messages.find((m) => m.type === 'engineNotify' && m.event === 'elog/filterChanged');
+    assert.deepEqual((notify as { payload: { params: unknown } }).payload.params, null);
+  } finally {
+    session.dispose();
+  }
+});
+
+test('EventLogSession: a persisted filter (initialFilterParams) is re-applied by initialize(), before any webview ever attaches', async () => {
+  // Simulates EventLogController's rehydrate-on-reopen: a PREVIOUS session applied a
+  // filter, the controller captured it via onFilterChanged (its workspaceState-writing
+  // hook), and a brand new session for the SAME file is constructed with that captured
+  // value as initialFilterParams (a fresh window/session, "same memento stub").
+  let captured: unknown;
+  const firstSession = new EventLogSession('elog:test-14a', fixturePath, bundlePath, {
+    onFilterChanged: (params) => {
+      captured = params;
+    },
+  });
+  const appliedParams = { moduleIds: [2] };
+  try {
+    await firstSession.initialize();
+    await firstSession.setFilter(appliedParams);
+    assert.deepEqual(captured, appliedParams);
+  } finally {
+    firstSession.dispose();
+  }
+
+  const secondSession = new EventLogSession('elog:test-14b', fixturePath, bundlePath, {
+    initialFilterParams: captured as typeof appliedParams,
+  });
+  try {
+    const summary = await secondSession.initialize();
+    assert.equal(summary.filtered, true, 'the persisted filter must already be applied by the time initialize() resolves');
+    assert.deepEqual(secondSession.getCurrentFilterParams(), appliedParams);
+  } finally {
+    secondSession.dispose();
+  }
+});
+
+test('EventLogSession: onFilterChanged is NOT called for the initial rehydrate itself (no redundant re-persist of a value that just came FROM the store)', async () => {
+  let onFilterChangedCalls = 0;
+  const session = new EventLogSession('elog:test-15', fixturePath, bundlePath, {
+    initialFilterParams: { moduleIds: [1] },
+    onFilterChanged: () => onFilterChangedCalls++,
+  });
+  try {
+    await session.initialize();
+    assert.equal(onFilterChangedCalls, 0);
+  } finally {
+    session.dispose();
+  }
+});
+
+test('EventLogSession: an invalid persisted filter does not fail the whole open (best-effort rehydrate)', async () => {
+  // A malformed MatchExpression (unbalanced parens) throws when the engine parses it
+  // (`setModuleExpression()` -> `MatchExpression.setPattern()`) -- exercises the
+  // genuinely-best-effort catch in `initialize()`: the open itself must still succeed
+  // (with an unfiltered summary), matching `WorkerClient`'s own "keep it simple"
+  // crash-restart philosophy this method's doc comment cites.
+  const session = new EventLogSession('elog:test-17', fixturePath, bundlePath, {
+    initialFilterParams: { enableModuleFilter: true, moduleExpression: '((' },
+  });
+  try {
+    const summary = await session.initialize();
+    assert.equal(summary.isEmpty, false);
+    assert.equal(summary.filtered, false, 'the malformed filter must not have been left installed');
+  } finally {
+    session.dispose();
+  }
+});

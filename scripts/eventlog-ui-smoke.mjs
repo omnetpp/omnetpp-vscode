@@ -38,6 +38,8 @@ const ElogMethods = {
   tableGotoRelated: 'elog/table/gotoRelated',
   findText: 'elog/findText',
   getEventDetail: 'elog/getEventDetail',
+  getFilterHints: 'elog/getFilterHints',
+  setFilter: 'elog/setFilter',
 };
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -102,6 +104,9 @@ async function main() {
 
   // ---- U6: table "Go To" family (elog/table/gotoRelated) against the real worker -----
   await smokeSyncU6(session, summary);
+
+  // ---- U7: filter panel plumbing (elog/getFilterHints, elog/setFilter apply/remove) --
+  await smokeFilterU7(session, summary);
 
   // ---- U4: real RPC cancellation end-to-end through the actual worker ---------------
   await smokeCancellationU4(bundlePath);
@@ -255,6 +260,30 @@ async function smokeSyncU6(session, summary) {
   // unresolvable `from` -> null, never throws
   const notFound = await session.handleEngineRequest(ElogMethods.tableGotoRelated, { from: { eventNumber: summary.lastEventNumber + 1, entryIndex: 0 }, relation: 'cause' });
   assert(notFound === null, 'smokeSyncU6: gotoRelated() with an unresolvable `from` returns null rather than throwing');
+}
+
+// ---------------------------------------------------------------------------------
+// U7 (filter panel): elog/getFilterHints (autocompletion data) + a real elog/setFilter
+// apply/remove round trip through the actual bundled worker/session (module filter on
+// Fifo1's "fifo" module, id 3 -- same module id `client/worker/src/test/handlers.
+// test.ts`'s own `elog/setFilter` test uses). Appended per this phase's plan
+// (additive; the file's existing structure/tests above are untouched).
+// ---------------------------------------------------------------------------------
+async function smokeFilterU7(session, summary) {
+  const hints = await session.handleEngineRequest(ElogMethods.getFilterHints, undefined);
+  assert(Array.isArray(hints.moduleNames) && hints.moduleNames.length > 0, 'smokeFilterU7: getFilterHints returns a non-empty moduleNames list');
+  assert(Array.isArray(hints.moduleNedTypeNames) && hints.moduleNedTypeNames.length > 0, 'smokeFilterU7: getFilterHints returns a non-empty moduleNedTypeNames list');
+  assert(hints.truncated === false, 'smokeFilterU7: getFilterHints is not truncated for this small fixture');
+
+  const filteredSummary = await session.handleEngineRequest(ElogMethods.setFilter, { enableModuleFilter: true, moduleIds: [3] });
+  assert(filteredSummary.filtered === true, 'smokeFilterU7: setFilter() with a module filter reports filtered=true');
+  assert(filteredSummary.approximateNumberOfEvents <= summary.approximateNumberOfEvents, 'smokeFilterU7: the filtered viewport/summary shrinks (or stays equal) vs. the unfiltered one');
+  assert(filteredSummary.coordinateSystemVersion !== summary.coordinateSystemVersion, 'smokeFilterU7: filtering bumps the coordinate-system version (stale-response guard)');
+
+  const restoredSummary = await session.handleEngineRequest(ElogMethods.setFilter, null);
+  assert(restoredSummary.filtered === false, 'smokeFilterU7: setFilter(null) removes the filter (filtered=false)');
+  assert(restoredSummary.lastEventNumber === summary.lastEventNumber, 'smokeFilterU7: removing the filter restores the original last event number');
+  assert(restoredSummary.approximateNumberOfEvents === summary.approximateNumberOfEvents, 'smokeFilterU7: removing the filter restores the original approximate event count');
 }
 
 /** Streams a large, plain synthetic .elog -- same shape as scripts/elog-worker-smoke.mjs's own fixture generator -- so a findText miss forces a genuinely long full-file scan (needed to measure cancellation latency meaningfully; a tiny fixture like Fifo1 finishes before a cancelRequest notification could ever land, which is exactly why this needs its own big file + its own session/worker rather than reusing the one above). */

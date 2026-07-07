@@ -29,6 +29,7 @@
 import {
   BeginSendEntry,
   BigDecimal,
+  buildFilterHints,
   buildModuleTree,
   EventLog,
   type EventLogEntry,
@@ -58,6 +59,7 @@ import type {
   ElogOpenOptions,
   EventDetail,
   EventDetailParams,
+  FilterHints,
   FilterParams,
   FindTextParams,
   FindTextResult,
@@ -350,6 +352,11 @@ export class EngineSession {
 
   getModuleTree(): ElogModule | null {
     return buildModuleTree(this.log);
+  }
+
+  /** ADDITIVE (phase U7): filter-panel autocompletion data -- see `filterHints.ts`'s header. Cheap (bounded scan), not routed through `runJob()`/progress like `setFilter`. */
+  getFilterHints(): FilterHints {
+    return buildFilterHints(this.log);
   }
 
   // ---- elog/setFilter ------------------------------------------------------------------

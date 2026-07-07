@@ -77,6 +77,18 @@ export interface TableViewHandle {
   /** Call once the log is known non-empty, or after a full reset (e.g. overwritten). */
   start(): void;
   onEngineChanged(change: 'appended' | 'overwritten'): void;
+  /**
+   * ADDITIVE (phase U7): the session's `elog/setFilter` just changed (always triggered
+   * by the Sequence Chart's filter panel -- the table has none of its own, see
+   * `uiProtocol.ts`'s `requestFilterPanel` doc comment). Port of `EventLogTable.
+   * eventLogFiltered()` (`EventLogTable.java`, verified by reading the source):
+   * re-resolves the SAME event number the table was last anchored to (via the `RowAnchor`
+   * `'event'` variant, phase U6 -- `elog/table/getRows` finds the nearest still-matching
+   * row for it under the NEW filter, exactly like `getMatchingEventInDirection()`'s
+   * backward-then-forward search), falling back to the very first row if nothing was
+   * anchored yet (an empty/never-scrolled table).
+   */
+  onFilterChanged(): void;
   applyReveal(target: RevealTarget): void;
   applySetSelection(selection: EventLogSelection): void;
   /** Phase U6 -- replaces the bookmark set this view tints rows for (`bookmarksChanged`/fresh `init`). */
@@ -670,6 +682,7 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
       copySelection,
       openFindBar,
       refresh: () => void rpc.request(ElogMethods.checkChanges, undefined),
+      openFilter: () => postToHost({ type: 'requestFilterPanel' }),
     };
     const entries = buildTableContextMenu({ hasFocus: selection.focus !== null, hasSelection: rows.some((r) => isSelected(selection, r.ref)), actions });
     showContextMenu(e.clientX, e.clientY, entries);
@@ -687,6 +700,11 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
   function buildTableToolbar(container: HTMLElement, onRefresh: () => void): ToolbarHandle {
     const handle = buildToolbar(container, [
       { kind: 'button', button: { id: 'refresh', icon: 'refresh', title: 'Refresh', onClick: onRefresh } },
+      // Phase U7: the table has no filter panel of its own -- opens/focuses the
+      // Sequence Chart's (see `uiProtocol.ts`'s `requestFilterPanel` doc comment). Kept
+      // clearly distinct from the "Line Filter" dropdown below (a per-row TABLE-side
+      // rendering filter, unrelated to `elog/setFilter`'s event-level filtering).
+      { kind: 'button', button: { id: 'openFilter', icon: 'filter', title: 'Filter Event Log… (event-level filter, shared with the Sequence Chart)', onClick: () => postToHost({ type: 'requestFilterPanel' }) } },
       { kind: 'separator' },
       {
         kind: 'dropdown',
@@ -799,6 +817,10 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
         return;
       }
       if (scrolledToEnd) void reload({ kind: 'last' }, viewportRowCount - 1);
+    },
+    onFilterChanged(): void {
+      const anchor: RowAnchor = lastAnchorRef ? { kind: 'event', eventNumber: lastAnchorRef.eventNumber } : { kind: 'first' };
+      void reload(anchor, 0);
     },
     applyReveal(target): void {
       if (target.ref === null) return;

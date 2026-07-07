@@ -24,6 +24,7 @@ function fakeActions(): TableMenuActions & { calls: Record<string, unknown[]> } 
     copySelection: record('copySelection'),
     openFindBar: record('openFindBar'),
     refresh: record('refresh'),
+    openFilter: record('openFilter'),
   };
 }
 
@@ -34,9 +35,18 @@ function findEntry(entries: MenuEntry[], id: string): MenuEntry | undefined {
 test('buildTableContextMenu: includes the full Go To family plus bookmark/copy/find/refresh', () => {
   const actions = fakeActions();
   const entries = buildTableContextMenu({ hasFocus: true, hasSelection: true, actions });
-  for (const id of ['gotoCause', 'gotoArrival', 'gotoOrigin', 'gotoReuse', 'gotoPrevEvent', 'gotoNextEvent', 'gotoPrevModuleEvent', 'gotoNextModuleEvent', 'toggleBookmark', 'copy', 'findText', 'refresh']) {
+  for (const id of ['gotoCause', 'gotoArrival', 'gotoOrigin', 'gotoReuse', 'gotoPrevEvent', 'gotoNextEvent', 'gotoPrevModuleEvent', 'gotoNextModuleEvent', 'toggleBookmark', 'copy', 'findText', 'filter', 'refresh']) {
     assert.ok(findEntry(entries, id), `expected menu entry "${id}"`);
   }
+});
+
+test('buildTableContextMenu: "Filter Event Log..." is always available and calls openFilter', () => {
+  const actions = fakeActions();
+  const entries = buildTableContextMenu({ hasFocus: false, hasSelection: false, actions });
+  const entry = findEntry(entries, 'filter')! as { onSelect: () => void; disabled?: boolean };
+  assert.ok(!entry.disabled);
+  entry.onSelect();
+  assert.ok(actions.calls.openFilter);
 });
 
 test('buildTableContextMenu: "Go To" family items invoke their wired action', () => {

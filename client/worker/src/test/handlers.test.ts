@@ -14,10 +14,11 @@ import { join, resolve } from 'node:path';
 import { EngineSession } from '../engineSession';
 import { handleElogRequest } from '../handlers';
 import { ElogMethods } from '@omnetpp/shared/elog-protocol';
-import type { GotoResult, LogSummary, MapCoordsResult, RowWindow, ViewportModel } from '@omnetpp/shared/elog-protocol';
+import type { FilterHints, GotoResult, LogSummary, MapCoordsResult, RowWindow, ViewportModel } from '@omnetpp/shared/elog-protocol';
 
 const repoRoot = resolve(__dirname, '..', '..', '..', '..');
 const fixturePath = join(repoRoot, 'shared', 'src', 'test', 'fixtures', 'elog', 'sample', 'Fifo1-#0.elog');
+const reuseFixturePath = join(repoRoot, 'shared', 'src', 'test', 'fixtures', 'elog', 'reuse', 'message-reuse.elog');
 
 /** A no-op cancel flag + notify -- these tests never cancel and never run long enough to hit the ~100ms progress throttle. */
 function noJobContext(): { cancelFlag: Int32Array; notify: () => void } {
@@ -243,4 +244,85 @@ test('handlers: an unknown method throws (engineThread-level bug, not exercised 
   const session = new EngineSession();
   openFixture(session);
   assert.throws(() => call(session, 'elog/notAMethod', undefined));
+});
+
+// ---------------------------------------------------------------------------------
+// Phase U7: elog/getFilterHints + elog/setFilter with trace params on the reuse
+// fixture (`shared/src/test/fixtures/elog/reuse/message-reuse.elog`: event #0 creates
+// message id=10, event #1 begins sending that SAME message id=10 again -- a message
+// REUSE, `pe 0` -- event #2 is unrelated to message 10 entirely).
+// ---------------------------------------------------------------------------------
+
+test('handlers: elog/getFilterHints returns populated, sorted, deduplicated message/module name lists for the fixture', () => {
+  const session = new EngineSession();
+  openFixture(session);
+  const hints = call<FilterHints>(session, ElogMethods.getFilterHints, undefined);
+  assert.equal(hints.truncated, false);
+  assert.ok(hints.moduleNames.length > 0);
+  assert.ok(hints.moduleNedTypeNames.length > 0);
+  // sorted (dictionary order) and deduplicated
+  for (const list of [hints.moduleNames, hints.moduleClassNames, hints.moduleNedTypeNames, hints.messageNames, hints.messageClassNames]) {
+    assert.deepEqual(list, [...new Set(list)].sort((a, b) => a.localeCompare(b)));
+  }
+});
+
+test('handlers: elog/getFilterHints on an unopened session returns empty (not throwing) lists', () => {
+  const session = new EngineSession();
+  openFixture(session);
+  // "no module description entries at all" is exercised implicitly by every fixture
+  // that DOES have modules; this test only guards against a throw on the call shape.
+  const hints = call<FilterHints>(session, ElogMethods.getFilterHints, undefined);
+  assert.ok(Array.isArray(hints.moduleNames));
+});
+
+test('handlers: elog/setFilter with a trace filter (traceMessageReuses=true) on the reuse fixture follows the reuse dependency back to its origin event', () => {
+  const session = new EngineSession();
+  const rawSummary = call<LogSummary>(session, ElogMethods.open, { path: reuseFixturePath });
+  assert.equal(rawSummary.isEmpty, false);
+
+  const filteredSummary = call<LogSummary>(session, ElogMethods.setFilter, {
+    tracedEventNumber: 1,
+    traceCauses: true,
+    traceConsequences: false,
+    traceMessageReuses: true,
+    traceSelfMessages: true,
+    collectMessageReuses: true,
+  });
+  assert.equal(filteredSummary.filtered, true);
+
+  // NOTE: this fixture's BeginSendEntry has no matching EndSendEntry (a deliberately
+  // minimal 3-event fixture -- see its own header/contents), which trips the Sequence
+  // Chart facade's transmission-duration lookup; `elog/table/*` (a plain entry
+  // enumeration, no arrow/transmission geometry) is unaffected, so this test verifies
+  // filtered CONTENTS through the table surface rather than `elog/sc/getViewport`.
+  const rows = call<RowWindow>(session, ElogMethods.tableGetRows, { anchor: { kind: 'first' }, before: 0, after: 10 });
+  const rowEventNumbers = new Set(rows.rows.map((r) => r.eventNumber));
+  assert.ok(rowEventNumbers.has(0));
+  assert.ok(rowEventNumbers.has(1));
+  assert.ok(!rowEventNumbers.has(2));
+
+  // removing the filter restores every event
+  const revertedSummary = call<LogSummary>(session, ElogMethods.setFilter, null);
+  assert.equal(revertedSummary.filtered, false);
+  assert.equal(revertedSummary.lastEventNumber, rawSummary.lastEventNumber);
+  const revertedRows = call<RowWindow>(session, ElogMethods.tableGetRows, { anchor: { kind: 'first' }, before: 0, after: 10 });
+  assert.ok(new Set(revertedRows.rows.map((r) => r.eventNumber)).has(2), 'event #2 is back once the filter is removed');
+});
+
+test('handlers: elog/setFilter with traceMessageReuses=false excludes the reuse origin event on the reuse fixture', () => {
+  const session = new EngineSession();
+  call(session, ElogMethods.open, { path: reuseFixturePath });
+
+  const filteredSummary = call<LogSummary>(session, ElogMethods.setFilter, {
+    tracedEventNumber: 1,
+    traceCauses: true,
+    traceConsequences: false,
+    traceMessageReuses: false,
+  });
+  assert.equal(filteredSummary.filtered, true);
+
+  const rows = call<RowWindow>(session, ElogMethods.tableGetRows, { anchor: { kind: 'first' }, before: 0, after: 10 });
+  const rowEventNumbers = new Set(rows.rows.map((r) => r.eventNumber));
+  assert.ok(rowEventNumbers.has(1));
+  assert.ok(!rowEventNumbers.has(0), 'traceMessageReuses=false must NOT follow the reuse dependency back to event #0');
 });

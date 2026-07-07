@@ -10,12 +10,24 @@
  */
 
 import * as vscode from 'vscode';
-import type { LogSummary } from '@omnetpp/shared/elog-protocol';
+import type { FilterParams, LogSummary } from '@omnetpp/shared/elog-protocol';
 import { BookmarkStore } from './bookmarks';
 import { EventLogSession, eventlogWorkerBundlePath, type AttachmentKind, type MessageSink } from './eventLogSession';
 
 /** Context key kept true while at least one `.elog` session is open -- gates the panel's webview view (`when: omnetpp.eventlogOpen`, package.json). */
 const CONTEXT_EVENTLOG_OPEN = 'omnetpp.eventlogOpen';
+
+/**
+ * Phase U7: `workspaceState` key for each file's persisted `elog/setFilter` params
+ * (`null` = explicitly unfiltered; ABSENT key = "never touched, nothing to rehydrate"),
+ * keyed by file URI string -- same per-uri blob pattern as `sequenceChartEditor.ts`'s
+ * `CHART_STATE_KEY`/`eventLogTableView.ts`'s `TABLE_STATE_KEY`, but held at the
+ * CONTROLLER layer (like `bookmarkStores`) rather than by either webview provider,
+ * since the filter is `EventLogSession`-owned state shared by chart AND table, not a
+ * per-webview-kind UI preference (port plan decision record: "filter state persisted
+ * per file and re-applied on reopen").
+ */
+const FILTER_PARAMS_KEY = 'omnetpp.eventlog.filterParams';
 
 export class EventLogController {
   private readonly sessions = new Map<string, EventLogSession>();
@@ -70,6 +82,8 @@ export class EventLogController {
     const bundlePath = eventlogWorkerBundlePath(this.context.extensionUri.fsPath);
     const session = new EventLogSession(key, uri.fsPath, bundlePath, {
       onIdle: () => this.removeSession(key),
+      initialFilterParams: this.getPersistedFilterParams(key),
+      onFilterChanged: (params) => void this.setPersistedFilterParams(key, params),
     });
     this.sessions.set(key, session);
     this.syncOpenContext();
@@ -123,6 +137,18 @@ export class EventLogController {
       this.bookmarkStores.set(key, store);
     }
     return store;
+  }
+
+  // ---- persisted filter (phase U7) -----------------------------------------------------
+
+  /** `undefined` key entry (never persisted before) reads back as `null` (same as "explicitly unfiltered") -- harmless: `EventLogSession.initialize()` only re-applies a filter when this is a real (non-null) `FilterParams` object, so an absent/`null` entry both mean "nothing to rehydrate". */
+  private getPersistedFilterParams(key: string): FilterParams | null {
+    return this.context.workspaceState.get<Record<string, FilterParams | null>>(FILTER_PARAMS_KEY, {})[key] ?? null;
+  }
+
+  private async setPersistedFilterParams(key: string, params: FilterParams | null): Promise<void> {
+    const all = this.context.workspaceState.get<Record<string, FilterParams | null>>(FILTER_PARAMS_KEY, {});
+    await this.context.workspaceState.update(FILTER_PARAMS_KEY, { ...all, [key]: params });
   }
 
   async refreshActive(): Promise<LogSummary | undefined> {

@@ -8,11 +8,16 @@
  * SCOPE (per this phase's own brief: "wire everything the engine already supports";
  * everything else explicitly deferred, listed below and in the phase report):
  *  - Per-event section (one submenu per distinct hit event, title `"Event #<n>"`):
- *    Select, Center. "Filter Causes/Consequences..." shown DISABLED (needs the
- *    Filter UI, phase U7).
+ *    Select, Center. "Filter Causes/Consequences..." (phase U7): opens the filter
+ *    panel pre-filled with a trace section for this event (both directions) --
+ *    `chartMain.ts`'s `filterCausesConsequencesFor()`.
  *  - Per-dependency section (one submenu per distinct hit dependency, title = the
  *    message name via `buildDependencyLabel`): Go to Cause Event, Go to Consequence
- *    Event, Zoom to Message. "Filter Message..." DISABLED (U7).
+ *    Event, Zoom to Message. "Filter Message..." (phase U7): opens the filter panel
+ *    pre-filled with this dependency's message ID + a narrow event-number range --
+ *    `chartMain.ts`'s `filterMessageFor()`; DISABLED when the dependency has no
+ *    `messageId` (e.g. a `'filtered'`-kind gap arrow, which represents zero or more
+ *    already-collapsed dependencies, not one real message).
  *  - Per-axis section (one submenu per distinct hit axis): Center. "Open Module"
  *    DISABLED (U8 -- module-open navigation isn't built yet, matches this phase's
  *    "double-click axis stub" decision) and a single DISABLED placeholder summarizing
@@ -57,6 +62,10 @@ export interface ChartMenuActions {
   toggleDependencyBookmark(hit: Extract<HitObject, { kind: 'dependency' }>): void;
   toggleAxisBookmark(moduleId: number): void;
   centerOnAxis(moduleId: number): void;
+  /** Phase U7 -- "Filter Causes/Consequences..." (per-event section). */
+  filterCausesConsequences(eventNumber: number): void;
+  /** Phase U7 -- "Filter Message..." (per-dependency section); only invoked when the hit resolves to a `RenderDependency` with a non-null `messageId` (see `resolveDependencyLabel`'s sibling `resolveDependencyMessageId` below). */
+  filterMessage(hit: Extract<HitObject, { kind: 'dependency' }>): void;
   setTimelineMode(mode: TimelineMode): void;
   zoomIn(): void;
   zoomOut(): void;
@@ -78,6 +87,8 @@ export interface ChartMenuBuildParams {
   hits: HitObject[];
   /** Resolves a dependency hit's message name for its submenu title; `null` if not resolvable (falls back to a generic title). */
   resolveDependencyLabel(hit: Extract<HitObject, { kind: 'dependency' }>): string | null;
+  /** Phase U7 -- resolves a dependency hit's `messageId` (`RenderDependency.messageId`), for gating "Filter Message..."; `null` if unresolvable/absent (disables the item -- see `ChartMenuActions.filterMessage`'s doc comment). */
+  resolveDependencyMessageId(hit: Extract<HitObject, { kind: 'dependency' }>): number | null;
   currentTimelineMode: TimelineMode;
   actions: ChartMenuActions;
   /** Phase U5 — current toggle state, for the Show/Hide submenu's checkmarks. */
@@ -100,12 +111,12 @@ function eventSection(hit: Extract<HitObject, { kind: 'event' }>, actions: Chart
       { id: 'center', label: 'Center', onSelect: () => actions.centerOnEvent(hit.eventNumber) },
       { id: 'selectInTable', label: 'Select in Event Log Table', onSelect: () => actions.selectInTable(hit.eventNumber) },
       { id: 'toggleBookmark', label: 'Toggle Bookmark', onSelect: () => actions.toggleEventBookmark(hit.eventNumber) },
-      { id: 'filter', label: 'Filter Causes/Consequences...', disabled: true },
+      { id: 'filter', label: 'Filter Causes/Consequences...', onSelect: () => actions.filterCausesConsequences(hit.eventNumber) },
     ],
   };
 }
 
-function dependencySection(hit: Extract<HitObject, { kind: 'dependency' }>, label: string, actions: ChartMenuActions): MenuEntry {
+function dependencySection(hit: Extract<HitObject, { kind: 'dependency' }>, label: string, messageId: number | null, actions: ChartMenuActions): MenuEntry {
   return {
     id: `dep-${hit.causeEventNumber}-${hit.consequenceEventNumber}`,
     label,
@@ -114,7 +125,7 @@ function dependencySection(hit: Extract<HitObject, { kind: 'dependency' }>, labe
       { id: 'gotoConsequence', label: 'Go to Consequence Event', onSelect: () => actions.goToConsequenceEvent(hit.consequenceEventNumber) },
       { id: 'zoomToMessage', label: 'Zoom to Message', onSelect: () => actions.zoomToDependency(hit.causeTc, hit.consequenceTc) },
       { id: 'toggleBookmark', label: 'Toggle Bookmark', onSelect: () => actions.toggleDependencyBookmark(hit) },
-      { id: 'filterMessage', label: 'Filter Message...', disabled: true },
+      { id: 'filterMessage', label: 'Filter Message...', disabled: messageId === null, onSelect: () => actions.filterMessage(hit) },
     ],
   };
 }
@@ -142,7 +153,7 @@ function showHideSection(displayFlags: ChartDisplayFlags, actions: ChartMenuActi
 }
 
 export function buildChartContextMenu(params: ChartMenuBuildParams): MenuEntry[] {
-  const { hits, resolveDependencyLabel, currentTimelineMode, actions, displayFlags } = params;
+  const { hits, resolveDependencyLabel, resolveDependencyMessageId, currentTimelineMode, actions, displayFlags } = params;
   const entries: MenuEntry[] = [];
 
   const events = hits.filter((h): h is Extract<HitObject, { kind: 'event' }> => h.kind === 'event');
@@ -152,7 +163,7 @@ export function buildChartContextMenu(params: ChartMenuBuildParams): MenuEntry[]
   for (const hit of events) entries.push(eventSection(hit, actions));
   if (events.length > 0) entries.push({ separator: true });
 
-  for (const hit of dependencies) entries.push(dependencySection(hit, resolveDependencyLabel(hit) ?? '(message)', actions));
+  for (const hit of dependencies) entries.push(dependencySection(hit, resolveDependencyLabel(hit) ?? '(message)', resolveDependencyMessageId(hit), actions));
   if (dependencies.length > 0) entries.push({ separator: true });
 
   for (const hit of axes) entries.push(axisSection(hit, actions));

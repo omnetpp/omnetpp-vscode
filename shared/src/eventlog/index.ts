@@ -65,6 +65,9 @@ export { SequenceChartFacade } from './sequenceChartFacade';
 export { EventLogTableFacade } from './eventLogTableFacade';
 export { buildModuleTree, type ElogModule } from './moduleTree';
 
+// phase U7: filter-panel autocompletion data (see filterHints.ts's header).
+export { buildFilterHints } from './filterHints';
+
 // phase U2: the Event Log table's row DTO builder (pure: EventLogEntry + modes ->
 // styled spans, ported from EventLogTableRowRenderer.java).
 export { renderTableRow, secondsToTimeString, UnsupportedTableEntryError, type TableRowRenderContext } from './tableRowRenderer';

@@ -36,7 +36,7 @@
  *    persist, opaquely, back into `workspaceState`.
  */
 
-import type { LogSummary, RowRef } from './elogProtocol';
+import type { FilterParams, LogSummary, RowRef } from './elogProtocol';
 
 // ---------------------------------------------------------------------------------
 // Shared payload shapes
@@ -194,7 +194,19 @@ export type WebviewToHostMessage =
    * (including the originator -- unlike selection, there is no echo/re-entry concern,
    * since toggling is a one-shot action, not a continuously-driven state).
    */
-  | { type: 'toggleBookmark'; candidate: BookmarkCandidate };
+  | { type: 'toggleBookmark'; candidate: BookmarkCandidate }
+  /**
+   * ADDITIVE (phase U7): the Event Log table has no filter panel of its own (only the
+   * Sequence Chart hosts one, `client/webview/src/eventlog/chart/filterPanel.ts`) --
+   * its "Filter…" toolbar button/context-menu item sends this instead, and the HOST
+   * (`eventLogTableView.ts`) opens/focuses the chart editor for the table's current
+   * session (spawning one via `vscode.openWith` if none is visible yet) and forwards a
+   * `{type:'command', command:'toggleFilterPanel'}` to it once attached. Mirrors
+   * `omnetpp.eventlog.openFilter`'s own native-command wiring
+   * (`client/src/eventlog/eventLogDialogs.ts`) for the "table only, no chart open yet"
+   * case.
+   */
+  | { type: 'requestFilterPanel' };
 
 // ---------------------------------------------------------------------------------
 // host -> webview
@@ -229,6 +241,16 @@ export type HostToWebviewMessage =
        * `selection` above.
        */
       bookmarks: Bookmark[];
+      /**
+       * ADDITIVE (phase U7): the session's currently-active filter (`null` =
+       * unfiltered, `EventLogSession.getCurrentFilterParams()`) -- so the Sequence
+       * Chart's filter panel/Del-exclude merge logic has the real params to build on
+       * top of immediately, without waiting on a round trip, even when the filter was
+       * applied by a PREVIOUS session for this file (persisted + rehydrated on open,
+       * see `eventLogController.ts`'s `FILTER_PARAMS_KEY`) rather than by this
+       * webview itself.
+       */
+      filterParams: FilterParams | null;
     }
   /** Reply to a proxied `engineRequest` with the same `id`. Exactly one of `result`/`error` is set. */
   | { type: 'engineResponse'; id: number; result?: unknown; error?: { message: string; code?: number; data?: unknown } }

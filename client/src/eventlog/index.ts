@@ -36,7 +36,7 @@ export function registerEventLog(context: vscode.ExtensionContext): void {
       if (controller.getActiveSession()) await controller.refreshActive();
       else await tableView.refresh();
     }),
-    vscode.commands.registerCommand('omnetpp.eventlog.openFilter', () => openFilterCommand()),
+    vscode.commands.registerCommand('omnetpp.eventlog.openFilter', () => void openFilterCommand(controller, tableView)),
     vscode.commands.registerCommand('omnetpp.eventlog.gotoEvent', () => gotoEventCommand(controller)),
     vscode.commands.registerCommand('omnetpp.eventlog.gotoSimulationTime', () => gotoSimulationTimeCommand(controller)),
     vscode.commands.registerCommand('omnetpp.eventlog.findText', () => findTextCommand(controller)),

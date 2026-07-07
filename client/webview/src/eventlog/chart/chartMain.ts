@@ -4,6 +4,8 @@ import {
   TimelineMode,
   type ElogModule,
   type EventDetail,
+  type FilterHints,
+  type FilterParams,
   type FindTextParams,
   type FindTextResult,
   type GotoResult,
@@ -19,7 +21,7 @@ import {
   type ViewportParams,
 } from '@omnetpp/shared/elog-protocol';
 import type { Bookmark, BookmarkCandidate, HostToWebviewMessage, RevealTarget, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
-import { EngineRpc } from '../common/rpc';
+import { EngineRpc, RequestCancelledError } from '../common/rpc';
 import { buildToolbar, type ToolbarHandle } from '../common/toolbar';
 import { renderSummaryStrip } from '../common/summary';
 import { readPalette, watchThemeChange, type EventLogPalette } from '../common/theme';
@@ -33,6 +35,16 @@ import { mergeDisplayFlags, toggleFlag, type ChartDisplayFlags } from './display
 import { bookmarkDependencyKey, buildDrawList, type DrawPrimitive, type InfoPanelText } from './drawList';
 import { calculateTicks, formatTickLabel } from './ticks';
 import { ANTIALIAS_TURN_OFF_AT_MSEC, ANTIALIAS_TURN_ON_AT_MSEC, createCanvasStack, type CanvasStackHandle } from './canvasStack';
+import { buildFilterPanel, type FilterPanelHandle } from './filterPanel';
+import {
+  applyExcludedEventNumbersToState,
+  buildFilterParams,
+  mergeExcludedEventNumbers,
+  mergeFilterPanelState,
+  prefillCauseConsequenceFilter,
+  prefillMessageFilter,
+  type FilterPanelState,
+} from './filterPanelState';
 import { hitTest, pickDoubleClickTarget, pickPrimary, pickPrimaryGroup, type HitObject } from './hitTest';
 import { attachInteractions } from './interactions';
 import { buildDependencyLabel, buildTooltipHtml, findNeighborEvents, type LabelProviderContext, type ResolvedHit } from './labelProvider';
@@ -78,6 +90,18 @@ interface PersistedChartState {
   timelineMode?: string;
   /** Phase U5 -- the ~25 Show/Hide toggles (`displayFlags.ts`), persisted both locally (`vscode.setState`, survives a webview reload) AND host-side (`stateChanged`/`persistedState`, survives a full window reload -- see `sequenceChartEditor.ts`'s per-uri `workspaceState` blob). Partial (not all 25 keys) so an older/newer persisted blob still round-trips via `mergeDisplayFlags()`. */
   displayFlags?: Partial<ChartDisplayFlags>;
+  /**
+   * Phase U7 -- the filter PANEL's own UI state (every field + section-enabled flag,
+   * `filterPanelState.ts`), persisted the same way `displayFlags` is above. NOTE this
+   * is distinct from the session's actually-APPLIED `FilterParams` (persisted
+   * separately, host-side, keyed by file uri -- `eventLogController.ts`'s
+   * `FILTER_PARAMS_KEY` -- so it survives even while no webview is open at all): this
+   * blob only remembers what the PANEL WIDGETS were showing, so reopening the panel
+   * looks the same as when the user last left it, independent of whether "Apply" was
+   * ever clicked (Java's dialog is modal and always starts from the last-applied
+   * params; this port's panel is a persistent sidebar, so it gets to remember more).
+   */
+  filterPanel?: Partial<FilterPanelState>;
 }
 
 const vscode = acquireVsCodeApi();
@@ -120,6 +144,10 @@ let bookmarks: Bookmark[] = [];
 let bookmarkedEventNumbers = new Set<number>();
 let bookmarkedDependencyKeys = new Set<string>();
 let bookmarkedModuleIds = new Set<number>();
+/** Phase U7 -- the session's currently-applied filter (`null` = unfiltered), seeded from `init`'s `filterParams` and kept in sync by every successful `elog/setFilter` call THIS webview makes (the chart is always the sole initiator of filter changes -- see `applyFilterParamsAndReanchor()`'s own doc comment for why: `sequenceChartEditor.ts`'s `supportsMultipleEditorsPerDocument: false` guarantees at most one chart webview per session). Read by the Del-exclude merge (`mergeExcludedEventNumbers()`) so it can build on top of whatever is ALREADY active, even a filter this webview never itself applied (rehydrated from a previous session). */
+let currentFilterParams: FilterParams | null = null;
+let filterPanel: FilterPanelHandle;
+let filterHintsLoaded = false;
 
 /** Re-derives the three render-ready bookmark index sets `drawList.ts` consumes from `bookmarks`/`moduleTree` -- call after either changes (a fresh `init`/`bookmarksChanged`, or the module tree finishing its first `elog/getModuleTree` load). Does NOT itself schedule a render (callers already do, alongside whatever else they're updating). */
 function recomputeBookmarkIndexes(): void {
@@ -176,6 +204,7 @@ document.getElementById('root')!.innerHTML = `
   <div class="elog-body" id="body">
     <div id="chartCanvasContainer" role="application" aria-label="Sequence Chart" style="position:absolute;inset:0;overflow:hidden;"></div>
     <div class="elog-empty" id="empty">Open a Sequence Chart to see events here.</div>
+    <div id="filterPanelHost"></div>
   </div>
   <div id="hscroll"></div>
 `;
@@ -760,6 +789,11 @@ function openChartContextMenu(clientX: number, clientY: number, hits: HitObject[
     },
     toggleAxisBookmark,
     centerOnAxis,
+    filterCausesConsequences: filterCausesConsequencesFor,
+    filterMessage: (hit) => {
+      const dep = findDependency(hit);
+      if (dep) filterMessageFor(dep);
+    },
     setTimelineMode: (mode) => void applyTimelineMode(mode, false),
     zoomIn: () => {
       viewport = zoomAtCenter(viewport, 1.5);
@@ -793,6 +827,10 @@ function openChartContextMenu(clientX: number, clientY: number, hits: HitObject[
     resolveDependencyLabel: (hit) => {
       const dep = findDependency(hit);
       return dep ? buildDependencyLabel(dep) : null;
+    },
+    resolveDependencyMessageId: (hit) => {
+      const dep = findDependency(hit);
+      return dep?.messageId ?? null;
     },
     currentTimelineMode,
     actions,
@@ -872,6 +910,8 @@ toolbar = buildToolbar(document.getElementById('toolbar')!, [
     },
   },
   { kind: 'button', button: { id: 'refresh', icon: 'refresh', title: 'Refresh', onClick: refresh } },
+  { kind: 'separator' },
+  { kind: 'button', button: { id: 'filterPanel', icon: 'filter', title: 'Filter Event Log…', toggled: false, onClick: () => toggleFilterPanel() } },
   { kind: 'spacer' },
   { kind: 'dropdown', dropdown: { id: 'timelineMode', title: 'Timeline Mode', options: TIMELINE_MODE_OPTIONS, value: currentTimelineMode, onChange: (v) => void applyTimelineMode(v, false) } },
 ]);
@@ -898,16 +938,23 @@ attachInteractions(canvasContainer, {
   onDoubleClick: handleDoubleClick,
   onContextMenu: openChartContextMenu,
   onEscape: () => {
+    // Phase U7: closing an open filter panel takes priority over clearing the
+    // selection (the panel brief's own "Keyboard: Esc closes" -- the panel's own
+    // keydown listener only fires while focus is inside it, e.g. a text field; this
+    // covers Esc pressed while the canvas itself has focus, which is the common case
+    // right after opening the panel and clicking back into the chart).
+    if (filterPanel.isOpen()) {
+      filterPanel.close();
+      toolbar.setButtonState('filterPanel', { toggled: false });
+      return;
+    }
     selection = clearSelection(selection);
     broadcastSelection();
     scheduleRender();
   },
   onRefresh: refresh,
   onToggleTimeDifferences: () => setDisplayFlags(toggleFlag(displayFlags, 'showTimeDifferences')),
-  onDeleteExclude: () => {
-    // STUB (phase U7 owns the Filter UI this needs -- "Del-exclude shortcut" is
-    // explicitly one of U7's own listed deliverables, not this phase's).
-  },
+  onDeleteExclude: () => void deleteExcludeSelection(),
   onMoveFocus: (direction) => void onMoveFocus(direction),
   onGotoCause: () => void onGotoCause(),
   onGotoConsequence: () => void onGotoConsequence(),
@@ -924,6 +971,183 @@ attachTooltip({
   resolveHit: resolveHitForTooltip,
   ctx: labelProviderCtx,
 });
+
+// ---------------------------------------------------------------------------------
+// Phase U7: Filter panel -- apply/remove with progress+cancel, re-anchor, Del-exclude,
+// context-menu prefill shortcuts. See filterPanel.ts/filterPanelState.ts's own headers
+// for the pure logic; everything below is the RPC/viewport-mutation glue only a
+// stateful bootstrap module like this one can own.
+// ---------------------------------------------------------------------------------
+
+filterPanel = buildFilterPanel(document.getElementById('filterPanelHost')!, {
+  onApply: () => {
+    const params = buildFilterParams(filterPanel.getState());
+    if (params !== null) void applyFilterParamsAndReanchor(params);
+  },
+  onRemove: () => void applyFilterParamsAndReanchor(null),
+  onClose: () => toolbar.setButtonState('filterPanel', { toggled: false }),
+  onStateChange: (next) => {
+    state = { ...state, filterPanel: next };
+    persistState();
+  },
+  requestData: () => {
+    filterPanel.setModuleTree(moduleTree);
+    if (filterHintsLoaded) return;
+    void rpc
+      .request<FilterHints>(ElogMethods.getFilterHints, undefined)
+      .then((hints) => {
+        filterHintsLoaded = true;
+        filterPanel.setFilterHints(hints);
+      })
+      .catch(() => {
+        // best effort -- the panel's multi-select lists just stay empty until the next open
+      });
+  },
+});
+
+function toggleFilterPanel(): void {
+  filterPanel.toggle();
+  toolbar.setButtonState('filterPanel', { toggled: filterPanel.isOpen() });
+}
+
+/**
+ * Applies (`params !== null`) or removes (`params === null`) a filter, showing the
+ * panel's busy/Cancel affordance while `elog/setFilter` is in flight (long-running,
+ * cancellable -- `elogProtocol.ts`'s `ElogMethods.setFilter` doc comment), then
+ * re-anchors the chart -- port of `SequenceChartContributor.filter()`/`removeFilter()`
+ * (verified by reading the source): capture the viewport-center event number BEFORE
+ * the coordinate system changes (same "anchor" trick `applyTimelineMode()` already
+ * uses for a timeline-mode switch, since a filter change resets the engine's
+ * coordinate-system version exactly the same way), then relocate+center on it and
+ * reset to the default zoom level afterward (Java: `scrollToSimulationTime(center)` +
+ * `defaultZoom()`). This chart webview is always the sole INITIATOR of `elog/setFilter`
+ * (the Event Log table has no filter panel of its own, and
+ * `sequenceChartEditor.ts`'s `supportsMultipleEditorsPerDocument: false` guarantees at
+ * most one chart webview per session) -- the table's own re-anchor (independently,
+ * off the session's `elog/filterChanged` broadcast) lives in `tableView.ts`'s
+ * `onFilterChanged()`.
+ */
+async function applyFilterParamsAndReanchor(params: FilterParams | null): Promise<void> {
+  let anchorEventNumber: number | null = null;
+  if (summary && !summary.isEmpty) {
+    const centerTc = viewport.leftTc + contentWidth(viewport) / 2 / viewport.pixelsPerTc;
+    try {
+      const mapped = await rpc.request<MapCoordsResult>(ElogMethods.scMapCoords, { kind: 'tcToEventNumber', tc: centerTc });
+      anchorEventNumber = mapped.eventNumber;
+    } catch {
+      anchorEventNumber = null;
+    }
+  }
+
+  filterPanel.setBusy(true);
+  const { promise, cancel } = rpc.requestCancelable<LogSummary>(ElogMethods.setFilter, params);
+  filterPanel.setBusy(true, cancel);
+  try {
+    const newSummary = await promise;
+    currentFilterParams = params;
+    summary = newSummary;
+    renderModelCache.bumpGeneration();
+    renderModelCache.invalidateAll();
+    knownModuleIds.clear();
+    lastModel = null;
+
+    if (!newSummary.isEmpty) {
+      if (anchorEventNumber !== null) await relocateAndCenter(anchorEventNumber, true);
+      else await relocateAndCenter(newSummary.firstEventNumber, false);
+      viewport = { ...viewport, pixelsPerTc: DEFAULT_PIXELS_PER_TC }; // Java's defaultZoom(), after scrollToSimulationTime(center)
+    } else {
+      viewport = { ...viewport, coordinateSystemVersion: newSummary.coordinateSystemVersion };
+    }
+    await refreshEndpointsTc();
+    filterPanel.setFiltered(newSummary.filtered);
+    scheduleRender();
+  } catch (err) {
+    if (!(err instanceof RequestCancelledError)) {
+      // best-effort -- matches every other engine round trip in this file (doGotoEvent/
+      // doGotoSimTime/performFind), no error dialog, the panel/chart just stay as they were
+    }
+  } finally {
+    filterPanel.setBusy(false);
+  }
+}
+
+/**
+ * Del/Backspace on the current chart selection -- port of `SequenceChart.java`'s
+ * `SWT.DEL` key handler (`~line 5736`, verified by reading the source): merges the
+ * selected event numbers into whichever filter is currently active (creating a
+ * range-only... exclusion-only filter if none is), then re-applies. Re-anchor strategy
+ * is DIFFERENT from `applyFilterParamsAndReanchor()`'s Apply/Remove flow on purpose
+ * (matches Java exactly): restores the SAME visible simulation-time window
+ * (`zoomToSimulationTimeRange(oldLeft, oldRight)`) rather than centering on one event
+ * and resetting zoom -- excluding a handful of selected events shouldn't jerk the
+ * viewport away from where the user was just looking.
+ */
+async function deleteExcludeSelection(): Promise<void> {
+  if (selection.events.size === 0 || !summary || summary.isEmpty) return;
+  const eventNumbers = [...selection.events];
+  const range = visibleTcRange(viewport);
+  const leftSim = simTimeAt(viewport.leftTc);
+  const rightSim = simTimeAt(range.rightTc);
+  const merged = mergeExcludedEventNumbers(currentFilterParams, eventNumbers);
+
+  filterPanel.setBusy(true);
+  const { promise, cancel } = rpc.requestCancelable<LogSummary>(ElogMethods.setFilter, merged);
+  filterPanel.setBusy(true, cancel);
+  try {
+    const newSummary = await promise;
+    currentFilterParams = merged;
+    filterPanel.setState(applyExcludedEventNumbersToState(filterPanel.getState(), eventNumbers));
+    summary = newSummary;
+    renderModelCache.bumpGeneration();
+    renderModelCache.invalidateAll();
+    knownModuleIds.clear();
+    lastModel = null;
+    selection = clearSelection(selection); // Java: the excluded events are dropped from selectedObjects
+    broadcastSelection();
+
+    if (!newSummary.isEmpty) {
+      await relocateAndCenter(newSummary.firstEventNumber, false); // establishes a fresh coordinate system baseline; the range restore below overrides its viewport
+      if (leftSim !== null && rightSim !== null) {
+        try {
+          const [left, right] = await Promise.all([
+            rpc.request<MapCoordsResult>(ElogMethods.scMapCoords, { kind: 'simTimeToTc', simulationTime: String(leftSim) }),
+            rpc.request<MapCoordsResult>(ElogMethods.scMapCoords, { kind: 'simTimeToTc', simulationTime: String(rightSim) }),
+          ]);
+          if (left.tc !== null && right.tc !== null && right.tc > left.tc) {
+            viewport = { ...viewport, leftTc: left.tc, pixelsPerTc: contentWidth(viewport) / (right.tc - left.tc) };
+          }
+        } catch {
+          // best effort -- fall back to whatever relocateAndCenter already set up
+        }
+      }
+    } else {
+      viewport = { ...viewport, coordinateSystemVersion: newSummary.coordinateSystemVersion };
+    }
+    await refreshEndpointsTc();
+    filterPanel.setFiltered(newSummary.filtered);
+    scheduleRender();
+  } catch (err) {
+    if (!(err instanceof RequestCancelledError)) {
+      // best-effort, matches applyFilterParamsAndReanchor()'s own catch
+    }
+  } finally {
+    filterPanel.setBusy(false);
+  }
+}
+
+/** "Filter Causes/Consequences..." (per-event chart context-menu item) -- pre-fills the panel's trace section and opens it; Apply is still a separate, explicit user action (see `chartContextMenu.ts`'s header). */
+function filterCausesConsequencesFor(eventNumber: number): void {
+  filterPanel.prefillAndOpen((s) => prefillCauseConsequenceFilter(s, eventNumber));
+  toolbar.setButtonState('filterPanel', { toggled: true });
+}
+
+/** "Filter Message..." (per-dependency chart context-menu item) -- pre-fills the panel's message-ID + a narrow event-number range around the dependency's cause event and opens it (see `filterPanelState.ts`'s `prefillMessageFilter()` doc comment for the simplification vs. Java). */
+function filterMessageFor(dep: RenderDependency): void {
+  const messageId = dep.messageId ?? null;
+  if (messageId === null || !summary) return;
+  filterPanel.prefillAndOpen((s) => prefillMessageFilter(s, messageId, dep.causeEventNumber, summary!.lastEventNumber));
+  toolbar.setButtonState('filterPanel', { toggled: true });
+}
 
 const resizeObserver = new ResizeObserver((entries) => {
   for (const entry of entries) {
@@ -960,11 +1184,20 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
         state = { ...state, ...(message.persistedState as PersistedChartState) };
         toolbar.setDropdownValue('timelineMode', state.timelineMode ?? TimelineMode.SIMULATION_TIME);
         displayFlags = mergeDisplayFlags(state.displayFlags);
+        filterPanel.setState(mergeFilterPanelState(state.filterPanel));
       }
+      // Phase U7: seed the chart's mirror of the session's currently-active filter (may
+      // be non-null even on THIS webview's very first `init` -- a filter persisted by a
+      // previous session and rehydrated on file reopen, see
+      // `eventLogController.ts`'s `FILTER_PARAMS_KEY`) and reflect it in the panel/
+      // toolbar right away, without waiting for the user to ever open the panel.
+      currentFilterParams = message.filterParams;
+      filterPanel.setFiltered(summary?.filtered ?? false);
       renderFrame();
       if (fileUri) {
         void rpc.request<ElogModule | null>(ElogMethods.getModuleTree, undefined).then((tree) => {
           moduleTree = tree;
+          filterPanel.setModuleTree(tree);
           recomputeBookmarkIndexes();
           scheduleRender();
         });
@@ -978,6 +1211,16 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
       rpc.handleResponse(message);
       break;
     case 'engineNotify': {
+      if (message.event === 'elog/progress') {
+        // ADDITIVE (phase U7): previously silently dropped entirely. `ElogProgressParams`
+        // carries only a `requestId` correlator, no percentage/message -- with the
+        // engine's single-job serial queue, any progress notification arriving while the
+        // filter panel is busy can only be about that in-flight `elog/setFilter`
+        // (`applyFilterParamsAndReanchor()`/`deleteExcludeSelection()`); tick the busy
+        // label so a long filter operation visibly shows liveness rather than looking hung.
+        filterPanel.tickBusy();
+        break;
+      }
       if (message.event === 'elog/changed' || message.event === 'elog/refreshed' || message.event === 'restarted') {
         const payload = message.payload as { summary?: LogSummary; change?: 'appended' | 'overwritten' };
         if (payload?.summary) {
@@ -1039,6 +1282,12 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
           break;
         case 'findNext':
           repeatFind();
+          break;
+        case 'toggleFilterPanel':
+          // From `omnetpp.eventlog.openFilter`/the table's "Filter…" item (see
+          // `eventLogDialogs.ts`'s `openFilterPanelForSession()` and
+          // `sequenceChartEditor.ts`'s `ready` handler's `consumeOpenFilterOnAttach()`).
+          toggleFilterPanel();
           break;
         case 'centerOnAxisBookmark': {
           // Phase U6 -- "Show Bookmarks" QuickPick reveal for an Axis-kind bookmark

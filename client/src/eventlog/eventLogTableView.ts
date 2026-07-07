@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { EventLogUiSettings, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
 import { handleToggleBookmarkMessage } from './bookmarks';
 import type { EventLogController } from './eventLogController';
+import { openFilterPanelForSession } from './eventLogDialogs';
 import type { EventLogSession } from './eventLogSession';
 import { handleWebviewMessage } from './sequenceChartEditor';
 import { buildEventLogWebviewHtml } from './webviewHtml';
@@ -122,6 +123,7 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
           summary: session?.summary ?? null,
           selection: session?.getSelection() ?? { eventNumbers: [] },
           bookmarks: this.boundUri ? this.controller.getBookmarkStore(this.boundUri).list() : [],
+          filterParams: session?.getCurrentFilterParams() ?? null,
         });
         return;
       }
@@ -131,6 +133,14 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
       if (message.type === 'toggleBookmark') {
         const session = this.currentSession();
         if (this.boundUri && session) void handleToggleBookmarkMessage(this.controller.getBookmarkStore(this.boundUri), session, message.candidate);
+        return;
+      }
+      // Phase U7: the table has no filter panel of its own -- forward to whichever
+      // session this view is currently bound to (see `uiProtocol.ts`'s
+      // `requestFilterPanel` doc comment).
+      if (message.type === 'requestFilterPanel') {
+        const session = this.currentSession();
+        if (session) void openFilterPanelForSession(session);
         return;
       }
       const session = this.currentSession();
@@ -172,7 +182,7 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
     else if (this.view) {
       // No active session anymore (e.g. all chart editors closed while unpinned) --
       // let the webview fall back to its own empty state.
-      void this.view.webview.postMessage({ type: 'init', fileUri: '', persistedState: undefined, settings: readEventLogUiSettingsForTable(), summary: null, selection: { eventNumbers: [] }, bookmarks: [] });
+      void this.view.webview.postMessage({ type: 'init', fileUri: '', persistedState: undefined, settings: readEventLogUiSettingsForTable(), summary: null, selection: { eventNumbers: [] }, bookmarks: [], filterParams: null });
     }
   }
 
@@ -189,6 +199,7 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
       summary: session.summary,
       selection: session.getSelection(),
       bookmarks: this.controller.getBookmarkStore(this.boundUri).list(),
+      filterParams: session.getCurrentFilterParams(),
     });
   }
 

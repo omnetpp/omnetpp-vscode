@@ -7,6 +7,8 @@ import type { EventLogSession } from './eventLogSession';
 import { buildEventLogWebviewHtml } from './webviewHtml';
 
 const VIEW_TYPE = 'omnetpp.sequenceChart';
+/** Exported for `eventLogDialogs.ts`'s `openFilterPanelForSession()` (phase U7 -- "if no chart editor visible, open one"), so it doesn't need to duplicate/guess this string. */
+export const SEQUENCE_CHART_VIEW_TYPE = VIEW_TYPE;
 
 /**
  * Phase U5: `workspaceState` key for the chart's persisted UI state (currently:
@@ -135,7 +137,12 @@ export class SequenceChartEditorProvider implements vscode.CustomReadonlyEditorP
           summary: session.summary,
           selection: session.getSelection(),
           bookmarks: this.controller.getBookmarkStore(document.uri).list(),
+          filterParams: session.getCurrentFilterParams(),
         });
+        // Phase U7: "if no chart editor visible, open one" -- `openFilterPanelForSession()`
+        // set this flag because no chart webview was attached yet to `sendCommand()` to;
+        // now that one just sent `init`, pop the filter panel open immediately.
+        if (session.consumeOpenFilterOnAttach()) sink.postMessage({ type: 'command', command: 'toggleFilterPanel' });
         return;
       }
       if (message.type === 'stateChanged') {
@@ -206,6 +213,7 @@ export async function handleWebviewMessage(
         summary: session.summary,
         selection: session.getSelection(),
         bookmarks: [],
+        filterParams: session.getCurrentFilterParams(),
       };
       sink.postMessage(init);
       break;
@@ -256,6 +264,13 @@ export async function handleWebviewMessage(
       // BookmarkStore -- see both callers' own 'toggleBookmark' handling) -- present
       // only so this switch stays a complete, self-documenting map of every message
       // type, matching this function's own "shared message-pump body" header.
+      break;
+    case 'requestFilterPanel':
+      // Only ever sent by the Event Log table webview (the chart toggles its own panel
+      // locally, no host round trip needed) -- intercepted before this shared function
+      // in `eventLogTableView.ts` (needs the controller to resolve/open a chart
+      // editor). Present here only so this switch stays a complete map of every
+      // message type.
       break;
   }
 }

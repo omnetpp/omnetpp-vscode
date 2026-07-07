@@ -60,6 +60,14 @@ export const ElogMethods = {
   getSummary: 'elog/getSummary',
   /** request: void → ElogModule | null */
   getModuleTree: 'elog/getModuleTree',
+  /**
+   * request: void → FilterHints. ADDITIVE (phase U7): autocompletion data for the
+   * filter panel's message-name/message-class-name/module-name/module-class-name/
+   * module-NED-type-name pickers -- a cheap, capped scan of whatever the engine has
+   * already parsed (`FilterHints`'s own doc comment). Not long-running/cancellable
+   * (bounded by its own cap, unlike `setFilter`/`scGetViewport`).
+   */
+  getFilterHints: 'elog/getFilterHints',
   /** request: FilterParams | null → LogSummary -- long-running, cancellable. `null` reverts to the raw (unfiltered) log. */
   setFilter: 'elog/setFilter',
   /** request: ScSetTimelineModeParams → ScState */
@@ -201,6 +209,30 @@ export interface LogSummary {
 // ---------------------------------------------------------------------------------
 // elog/getModuleTree -- ElogModule is imported from moduleTree.ts (re-exported above)
 // ---------------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------------
+// elog/getFilterHints -- phase U7 (filter panel autocompletion)
+// ---------------------------------------------------------------------------------
+
+/**
+ * Autocompletion data for the U7 filter panel, built engine-side
+ * (`shared/src/eventlog/filterHints.ts`'s `buildFilterHints()`) from whatever the
+ * engine has already parsed -- a cheap, bounded scan (NOT a full-file guarantee: on a
+ * huge/still-growing log this only reflects module/message names seen so far,
+ * matching `FilterEventLogDialog.java`'s own "encountered so far" labels for its
+ * message name/class checkbox lists, verified by reading the source). Every list is
+ * capped (see `buildFilterHints()`'s `cap` parameter) with `truncated` set if any list
+ * was cut off, so the panel can show "+ more" rather than silently hiding entries.
+ */
+export interface FilterHints {
+  moduleNames: string[];
+  moduleClassNames: string[];
+  moduleNedTypeNames: string[];
+  messageNames: string[];
+  messageClassNames: string[];
+  /** `true` iff any of the lists above were capped. */
+  truncated: boolean;
+}
 
 // ---------------------------------------------------------------------------------
 // elog/setFilter

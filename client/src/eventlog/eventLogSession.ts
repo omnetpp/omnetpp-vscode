@@ -27,6 +27,7 @@ import {
   type CheckChangesResult,
   type ElogChangedParams,
   type EventDetailParams,
+  type FilterHints,
   type FilterParams,
   type FindTextParams,
   type GotoEventParams,
@@ -59,6 +60,24 @@ export interface EventLogSessionOptions {
   workerOptions?: WorkerClientOptions;
   /** Called once every chart AND table sink has detached (the session is now idle) -- the owner (controller) should drop this session from its registry at that point. `dispose()` has already been called on the worker by then. */
   onIdle?: () => void;
+  /**
+   * ADDITIVE (phase U7): a filter persisted from a PREVIOUS session for this same file
+   * (`EventLogController`'s per-uri `workspaceState` blob) -- re-applied right after
+   * `initialize()` opens the file, so a filter set before a window reload / editor
+   * close is transparently back in place the next time this file is opened (port plan
+   * decision record: "filter state persisted per file and re-applied on reopen").
+   * `undefined`/`null` = nothing to rehydrate.
+   */
+  initialFilterParams?: FilterParams | null;
+  /**
+   * ADDITIVE (phase U7): fired every time this session's active filter changes
+   * (`setFilter()` below, including the initial rehydrate) -- the owner (controller)
+   * uses this to keep its per-uri persisted-filter blob in sync, mirroring
+   * `sequenceChartEditor.ts`'s `stateChanged`-driven `workspaceState` persistence but
+   * at the session/controller layer (this state is shared by chart AND table, not
+   * owned by either webview -- see `setFilter()`'s own doc comment).
+   */
+  onFilterChanged?: (params: FilterParams | null) => void;
 }
 
 export class EventLogSession {
@@ -70,6 +89,11 @@ export class EventLogSession {
 
   /** Selection placeholder for U6 ("Sync, bookmarks, goto") -- not yet applied to any rendering, just held and echoed. */
   private selection: EventLogSelection = { eventNumbers: [] };
+
+  /** Phase U7 -- the session's currently-active filter (`null` = unfiltered), mirrored from `WorkerClient.getCurrentFilterParams()` so a webview attaching later (or the controller persisting it) doesn't need a round trip to learn it. Kept in sync by `setFilter()` (every call, including `initialize()`'s rehydrate) -- a crash-restart re-applies the SAME params (`workerClient.ts`'s own `lastFilterParams` replay), so this needs no adjustment there. */
+  private currentFilterParams: FilterParams | null = null;
+  /** Phase U7 -- one-shot flag set by `omnetpp.eventlog.openFilter`/the table's "Filter…" item when NO Sequence Chart webview is attached yet (so there is nowhere to `sendCommand()` to): `sequenceChartEditor.ts`'s `ready` handler consumes it via `consumeOpenFilterOnAttach()` right after sending `init`, so the freshly-opened chart's filter panel pops open without a race against the webview's own bootstrap. */
+  private openFilterOnAttach = false;
 
   constructor(
     /** The elog file's VS Code URI, as a string (the controller's registry key). */
@@ -93,12 +117,31 @@ export class EventLogSession {
     return this.workerClientInstance;
   }
 
-  /** Opens the file this session was constructed for; the resolved summary is
-   *  cached (`lastSummary`) for `init` messages sent to webviews that attach later. */
+  /**
+   * Opens the file this session was constructed for; the resolved summary is
+   * cached (`lastSummary`) for `init` messages sent to webviews that attach later.
+   *
+   * Phase U7: if `options.initialFilterParams` was supplied (a filter persisted from a
+   * previous session for this same file), re-applies it right away -- best-effort: a
+   * failure here (e.g. the persisted params no longer make sense against a since-
+   * changed file) does NOT fail the whole open, it just leaves the log unfiltered,
+   * matching `WorkerClient`'s own "keep it simple" crash-restart re-apply philosophy
+   * (`workerClient.ts`'s header). No `onFilterChanged` callback fires for this initial
+   * rehydrate (the value came FROM that same persisted store; re-writing it back
+   * would be a redundant, no-op `workspaceState.update()`).
+   */
   async initialize(): Promise<LogSummary> {
     const summary = await this.workerClientInstance.open({ path: this.filePath });
     this.lastSummary = summary;
-    return summary;
+    if (this.options.initialFilterParams) {
+      try {
+        this.lastSummary = await this.workerClientInstance.setFilter(this.options.initialFilterParams);
+        this.currentFilterParams = this.options.initialFilterParams;
+      } catch {
+        // best-effort rehydrate -- see this method's doc comment
+      }
+    }
+    return this.lastSummary;
   }
 
   /** The last summary this session has seen (from `initialize()`, `refresh()`, or a `elog/changed`/restart notification) -- `null` before the first successful open. */
@@ -227,6 +270,20 @@ export class EventLogSession {
     this.broadcast({ type: 'command', command, args });
   }
 
+  // ---- open-filter-on-attach (phase U7: "if no chart editor visible, open one") -------
+
+  /** Records that the filter panel should pop open the moment a Sequence Chart webview next attaches (`eventLogDialogs.ts`'s `openFilterPanelForSession()`, used when `hasChartAttachment()` is currently `false`). */
+  requestOpenFilterOnAttach(): void {
+    this.openFilterOnAttach = true;
+  }
+
+  /** Consumes (clears) the flag set by `requestOpenFilterOnAttach()` -- called once, by `sequenceChartEditor.ts`'s `ready` handler, right after it sends `init`. */
+  consumeOpenFilterOnAttach(): boolean {
+    const value = this.openFilterOnAttach;
+    this.openFilterOnAttach = false;
+    return value;
+  }
+
   // ---- generic engine-request proxy (webview `engineRequest` -> WorkerClient) ------------
 
   /**
@@ -258,8 +315,10 @@ export class EventLogSession {
         return this.refresh();
       case ElogMethods.getModuleTree:
         return wc.getModuleTree(token);
+      case ElogMethods.getFilterHints:
+        return wc.getFilterHints(token);
       case ElogMethods.setFilter:
-        return wc.setFilter(params as FilterParams | null, token);
+        return this.setFilter(params as FilterParams | null, token);
       case ElogMethods.scSetTimelineMode:
         return wc.scSetTimelineMode(params as ScSetTimelineModeParams, token);
       case ElogMethods.scRelocateOrigin:
@@ -291,6 +350,33 @@ export class EventLogSession {
       default:
         throw new Error(`EventLogSession: unknown engine method "${method}"`);
     }
+  }
+
+  // ---- filter (phase U7: session-mediated so chart + table share one filter state) ----
+
+  /** The session's currently-active filter (`null` = unfiltered) -- see `currentFilterParams`'s own doc comment. */
+  getCurrentFilterParams(): FilterParams | null {
+    return this.currentFilterParams;
+  }
+
+  /**
+   * Applies (or, with `null`, removes) a filter and broadcasts the change to EVERY
+   * attached webview (chart AND table, origin included) as `engineNotify` event
+   * `elog/filterChanged` -- unlike selection, filtering has no "echo" concern (it isn't
+   * a continuously-driven local gesture), and BOTH views need to independently re-
+   * anchor themselves afterward (the chart re-centers + resets zoom; the table
+   * re-resolves its own fix-point row), so every attachment -- not just whichever
+   * webview happened to call this -- needs the fresh `LogSummary` up front. Also
+   * updates `currentFilterParams` (for later-attaching webviews' `init` messages) and
+   * fires `options.onFilterChanged` (the controller's per-uri persistence hook).
+   */
+  async setFilter(params: FilterParams | null, token?: CancellationToken): Promise<LogSummary> {
+    const summary = await this.workerClientInstance.setFilter(params, token);
+    this.lastSummary = summary;
+    this.currentFilterParams = params;
+    this.options.onFilterChanged?.(params);
+    this.broadcast({ type: 'engineNotify', event: 'elog/filterChanged', payload: { summary, params } });
+    return summary;
   }
 
   // ---- goto (wired end-to-end this phase; also called directly by eventLogDialogs.ts) ----

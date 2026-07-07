@@ -47,6 +47,7 @@ import {
   type ElogProgressParams,
   type EventDetail,
   type EventDetailParams,
+  type FilterHints,
   type FilterParams,
   type FindTextParams,
   type FindTextResult,
@@ -259,10 +260,20 @@ export class WorkerClient {
     return this.rawRequest(ElogMethods.getModuleTree, undefined, token);
   }
 
+  /** ADDITIVE (phase U7): filter-panel autocompletion data -- see `elogProtocol.ts`'s `FilterHints` doc. */
+  getFilterHints(token?: CancellationToken): Promise<FilterHints> {
+    return this.rawRequest(ElogMethods.getFilterHints, undefined, token);
+  }
+
   async setFilter(params: FilterParams | null, token?: CancellationToken): Promise<LogSummary> {
     const summary = await this.rawRequest<FilterParams | null, LogSummary>(ElogMethods.setFilter, params, token);
     this.lastFilterParams = params;
     return summary;
+  }
+
+  /** The most recently applied filter (`null` = unfiltered), for a host-side session that wants to persist/rehydrate it -- see `eventLogSession.ts`'s `getCurrentFilterParams()`. */
+  getCurrentFilterParams(): FilterParams | null {
+    return this.lastFilterParams;
   }
 
   scSetTimelineMode(params: ScSetTimelineModeParams, token?: CancellationToken): Promise<ScState> {

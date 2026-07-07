@@ -472,14 +472,19 @@
           "group": "navigation@1"
         },
         {
-          "command": "omnetpp.eventlog.showEventLogTable",
+          "command": "omnetpp.eventlog.openFilter",
           "when": "activeCustomEditorId == 'omnetpp.sequenceChart'",
           "group": "navigation@2"
         },
         {
-          "command": "omnetpp.eventlog.showBookmarks",
+          "command": "omnetpp.eventlog.showEventLogTable",
           "when": "activeCustomEditorId == 'omnetpp.sequenceChart'",
           "group": "navigation@3"
+        },
+        {
+          "command": "omnetpp.eventlog.showBookmarks",
+          "when": "activeCustomEditorId == 'omnetpp.sequenceChart'",
+          "group": "navigation@4"
         }
       ],
       "view/title": [
@@ -534,19 +539,24 @@
           "group": "navigation@1"
         },
         {
-          "command": "omnetpp.eventlog.showBookmarks",
+          "command": "omnetpp.eventlog.openFilter",
           "when": "view == omnetppEventLogTable",
           "group": "navigation@2"
         },
         {
+          "command": "omnetpp.eventlog.showBookmarks",
+          "when": "view == omnetppEventLogTable",
+          "group": "navigation@3"
+        },
+        {
           "command": "omnetpp.eventlog.pinEventLogTable",
           "when": "view == omnetppEventLogTable && !omnetpp.eventlogTablePinned",
-          "group": "navigation@3"
+          "group": "navigation@4"
         },
         {
           "command": "omnetpp.eventlog.unpinEventLogTable",
           "when": "view == omnetppEventLogTable && omnetpp.eventlogTablePinned",
-          "group": "navigation@3"
+          "group": "navigation@4"
         }
       ],
       "view/item/context": [

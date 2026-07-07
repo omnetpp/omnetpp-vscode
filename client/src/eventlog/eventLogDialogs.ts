@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import { MatchKind } from '@omnetpp/shared/elog-protocol';
 import type { EventLogController } from './eventLogController';
 import type { EventLogSession } from './eventLogSession';
+import type { EventLogTableViewProvider } from './eventLogTableView';
+import { SEQUENCE_CHART_VIEW_TYPE } from './sequenceChartEditor';
 
 /**
  * The goto/find commands (`omnetpp.eventlog.gotoEvent`/`.gotoSimulationTime`/
@@ -23,8 +25,15 @@ import type { EventLogSession } from './eventLogSession';
  * "the simplest correct wiring" the phase brief asks for: no new native UI to
  * maintain, and the native fallback still functions when there is nowhere to forward to.
  *
- * `omnetpp.eventlog.openFilter` remains a stub: the Filter UI is phase U7 (needs
- * E5's match infra surfaced through a real panel).
+ * `omnetpp.eventlog.openFilter` (phase U7): follows the very same "forward into the
+ * webview if a chart is attached" shape as goto/find above, but with an extra fallback
+ * step of its own -- "if no chart editor visible, open one" (`openFilterPanelForSession()`
+ * below), since unlike goto/find there is no sensible NATIVE fallback for a whole filter
+ * panel (a native input box cannot replicate 6 sections + a module tree). The active
+ * chart editor is preferred; if none is focused, the Event Log table's currently bound
+ * session (if any) is used instead -- the table has no filter panel of its own (see
+ * `uiProtocol.ts`'s `requestFilterPanel` doc comment) but IS a legitimate source of
+ * "which file did the user mean".
  */
 
 async function withActiveSession(controller: EventLogController, action: string): Promise<EventLogSession | undefined> {
@@ -79,9 +88,32 @@ export async function gotoSimulationTimeCommand(controller: EventLogController):
   }
 }
 
-/** Stub -- the Filter UI is phase U7 (needs E5's match infra to be surfaced through a real panel). */
-export function openFilterCommand(): void {
-  void vscode.window.showInformationMessage('OMNeT++: the Event Log filter panel is not implemented yet (planned for a later phase).');
+export async function openFilterCommand(controller: EventLogController, tableView: EventLogTableViewProvider): Promise<void> {
+  const session = controller.getActiveSession() ?? tableView.getBoundSession();
+  if (!session) {
+    void vscode.window.showInformationMessage('OMNeT++: Filter Event Log needs an open .elog file (a Sequence Chart editor or a bound Event Log table).');
+    return;
+  }
+  await openFilterPanelForSession(session);
+}
+
+/**
+ * Opens/focuses `session`'s Sequence Chart editor and toggles its filter panel --
+ * shared by the `omnetpp.eventlog.openFilter` command above and the Event Log table's
+ * "Filter…" toolbar/context-menu item (`eventLogTableView.ts`'s `requestFilterPanel`
+ * handling, since the table has no filter panel of its own).
+ */
+export async function openFilterPanelForSession(session: EventLogSession): Promise<void> {
+  if (session.hasChartAttachment()) {
+    session.sendCommand('toggleFilterPanel');
+    return;
+  }
+  // No chart webview attached yet -- open one (port plan: "if no chart editor visible,
+  // open one"). `sequenceChartEditor.ts`'s `ready` handler consumes this flag right
+  // after sending `init`, so the panel opens as soon as the fresh webview is ready,
+  // without a race against its own bootstrap script.
+  session.requestOpenFilterOnAttach();
+  await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.parse(session.uriString), SEQUENCE_CHART_VIEW_TYPE);
 }
 
 /**

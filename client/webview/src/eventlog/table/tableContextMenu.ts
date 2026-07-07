@@ -28,6 +28,8 @@ export interface TableMenuActions {
   copySelection(): void;
   openFindBar(): void;
   refresh(): void;
+  /** ADDITIVE (phase U7): the table has no filter panel of its own -- opens/focuses the Sequence Chart's (see `uiProtocol.ts`'s `requestFilterPanel` doc comment). */
+  openFilter(): void;
 }
 
 export interface TableMenuBuildParams {
@@ -56,6 +58,7 @@ export function buildTableContextMenu(params: TableMenuBuildParams): MenuEntry[]
     { id: 'copy', label: 'Copy', disabled: !hasSelection, onSelect: actions.copySelection },
     { id: 'findText', label: 'Find Text...', onSelect: actions.openFindBar },
     { separator: true },
+    { id: 'filter', label: 'Filter Event Log...', icon: 'filter', onSelect: actions.openFilter },
     { id: 'refresh', label: 'Refresh', icon: 'refresh', onSelect: actions.refresh },
   ];
   return entries;

@@ -29,6 +29,8 @@ function dispatch(session: EngineSession, method: string, params: unknown): unkn
       return session.getSummary();
     case ElogMethods.getModuleTree:
       return session.getModuleTree();
+    case ElogMethods.getFilterHints:
+      return session.getFilterHints();
     case ElogMethods.setFilter:
       return session.setFilter(params as Parameters<EngineSession['setFilter']>[0]);
     case ElogMethods.scSetTimelineMode:

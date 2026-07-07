@@ -133,6 +133,56 @@ export function buildEventLogWebviewHtml(webview: vscode.Webview, extensionUri: 
     background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); cursor: pointer; }
   .elog-dialog-buttons button:last-child { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
   .elog-dialog-buttons button:disabled { opacity: 0.5; cursor: default; }
+
+  /* Filter panel (phase U7, chart/filterPanel.ts) -- a collapsible right-side overlay
+     over the Sequence Chart canvas ("in-webview collapsible filter panel" decision
+     record), NOT a modal (unlike .elog-dialog above): it stays mounted, just
+     display:none-toggled, so its own local edits (checkboxes/text fields) survive a
+     close/reopen without a round trip. */
+  .elog-filter-panel { position: absolute; top: 0; right: 0; bottom: 0; width: 340px; max-width: 90%;
+    z-index: 50; flex-direction: column; background: var(--vscode-editorWidget-background);
+    border-left: 1px solid var(--vscode-editorWidget-border, rgba(128,128,128,0.4));
+    box-shadow: -2px 0 8px rgba(0,0,0,0.25); font-size: 12px; }
+  .elog-filter-panel-header { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 8px; border-bottom: 1px solid var(--vscode-editorWidget-border, transparent); font-weight: bold; }
+  .elog-filter-panel-close { background: transparent; border: none; color: var(--vscode-foreground); cursor: pointer;
+    display: flex; align-items: center; border-radius: 3px; padding: 2px; }
+  .elog-filter-panel-close:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2)); }
+  .elog-filter-panel-body { flex: 1 1 auto; overflow-y: auto; padding: 6px 8px; }
+  .elog-filter-section-header { display: flex; align-items: center; gap: 6px; padding: 4px 0; font-weight: bold; cursor: pointer; }
+  .elog-filter-section-header input[type="checkbox"] { flex: 0 0 auto; }
+  .elog-filter-section-detail { margin: 0 0 8px 20px; padding-left: 8px; border-left: 2px solid var(--vscode-editorWidget-border, rgba(128,128,128,0.3));
+    opacity: 0.5; }
+  .elog-filter-section-detail.enabled { opacity: 1; }
+  .elog-filter-field-row { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+  .elog-filter-field-row label { flex: 0 0 auto; min-width: 0; }
+  .elog-filter-group { margin-bottom: 6px; }
+  .elog-filter-group-title { font-weight: bold; text-transform: uppercase; font-size: 10px;
+    color: var(--vscode-descriptionForeground); margin: 8px 0 2px; letter-spacing: 0.4px; }
+  .elog-filter-input-number { width: 90px; background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, transparent); border-radius: 3px; padding: 2px 4px; font: inherit; }
+  .elog-filter-input-text { flex: 1 1 auto; min-width: 0; background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, transparent); border-radius: 3px; padding: 2px 4px; font: inherit; }
+  .elog-filter-multiselect { max-height: 110px; overflow-y: auto; border: 1px solid var(--vscode-editorWidget-border, rgba(128,128,128,0.3));
+    border-radius: 3px; padding: 2px 4px; }
+  .elog-filter-multiselect-item { display: flex; align-items: center; gap: 6px; padding: 1px 0; cursor: pointer; }
+  .elog-filter-moduletree { max-height: 160px; overflow-y: auto; border: 1px solid var(--vscode-editorWidget-border, rgba(128,128,128,0.3));
+    border-radius: 3px; padding: 2px 4px; }
+  .elog-filter-moduletree-row { display: flex; align-items: center; gap: 6px; padding: 1px 0; white-space: nowrap; }
+  .elog-filter-hint-empty { font-style: italic; color: var(--vscode-descriptionForeground); padding: 2px 0; }
+  .elog-filter-note { font-style: italic; color: var(--vscode-descriptionForeground); margin-top: 4px; }
+  .elog-filter-description { margin: 8px 0; padding: 6px 8px; background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.1));
+    border-radius: 3px; white-space: pre-wrap; word-break: break-word; color: var(--vscode-descriptionForeground); min-height: 2.6em; }
+  .elog-filter-busy { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0 8px;
+    padding: 4px 8px; background: var(--vscode-inputValidation-infoBackground, rgba(128,128,128,0.15)); border-radius: 3px; }
+  .elog-filter-busy button { padding: 2px 8px; border-radius: 3px; border: 1px solid var(--vscode-button-border, transparent);
+    background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); cursor: pointer; }
+  .elog-filter-panel-footer { flex: 0 0 auto; display: flex; justify-content: flex-end; gap: 6px; padding: 6px 8px;
+    border-top: 1px solid var(--vscode-editorWidget-border, transparent); }
+  .elog-filter-panel-footer button { padding: 4px 12px; border-radius: 3px; border: 1px solid var(--vscode-button-border, transparent);
+    background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); cursor: pointer; }
+  .elog-filter-panel-footer button.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+  .elog-filter-panel-footer button:disabled { opacity: 0.5; cursor: default; }
 </style>
 </head>
 <body>

@@ -136,6 +136,14 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
         if (payload?.summary) summary = payload.summary;
         unmountTable();
         render();
+      } else if (message.event === 'elog/filterChanged') {
+        // ADDITIVE (phase U7): always triggered by the Sequence Chart's filter panel
+        // (the table has no filter panel of its own) -- see `tableView.ts`'s
+        // `onFilterChanged()` doc comment for the re-anchor semantics this ports.
+        const payload = message.payload as { summary: LogSummary };
+        summary = payload.summary;
+        render();
+        table?.onFilterChanged();
       }
       break;
     }
