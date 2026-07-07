@@ -210,13 +210,30 @@ export class WorkerClient {
    * engineThread.ts's `pump()`), which reaches `changedListeners` via the ordinary
    * `onChanged()` wiring below -- adding a second, client-side firing here would just
    * double the notification.
+   *
+   * BUGFIX (found while writing phase U1's `eventLogSession.test.ts`, the
+   * first real caller to exercise the common no-token path end-to-end):
+   * `vscode-jsonrpc`'s `sendRequest()` picks its (params) vs. (params, token)
+   * overload by *argument count*, not by whether the token is `undefined` --
+   * calling it with 3 arguments where the 3rd is `undefined` (exactly what
+   * every caller below does when it omits its own optional `token` parameter)
+   * crashes the request server-side (`"null is not an object (evaluating
+   * 'token.onCancellationRequested')"`), as opposed to omitting the argument
+   * entirely. `sendRequestSafely()` below only forwards a 3rd argument when a
+   * real token was actually supplied.
    */
+  private sendRequestSafely<R>(method: string, params: unknown, token: CancellationToken | undefined): Promise<R> {
+    const connection = this.connection;
+    if (connection === null) return Promise.reject(new Error(`WorkerClient: not connected (worker restarting after a crash?), method=${method}`));
+    return token === undefined ? connection.sendRequest<R>(method, params) : connection.sendRequest<R>(method, params, token);
+  }
+
   private rawRequest<P, R>(method: string, params: P, token?: CancellationToken): Promise<R> {
     if (this.connection === null) return Promise.reject(new Error(`WorkerClient: not connected (worker restarting after a crash?), method=${method}`));
-    return this.connection.sendRequest<R>(method, params, token).catch((err: unknown) => {
+    return this.sendRequestSafely<R>(method, params, token).catch((err: unknown) => {
       if (!isContentChangedError(err)) throw err;
       if (this.connection === null) throw err; // disconnected between the failed attempt and this retry (e.g. a crash) -- nothing sensible to retry against
-      return this.connection.sendRequest<R>(method, params, token);
+      return this.sendRequestSafely<R>(method, params, token);
     });
   }
 

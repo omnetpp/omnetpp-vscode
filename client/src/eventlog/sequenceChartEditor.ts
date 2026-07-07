@@ -1,0 +1,190 @@
+import * as path from 'node:path';
+import * as vscode from 'vscode';
+import type { EventLogUiSettings, HostToWebviewMessage, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
+import type { EventLogController } from './eventLogController';
+import type { EventLogSession } from './eventLogSession';
+import { buildEventLogWebviewHtml } from './webviewHtml';
+
+const VIEW_TYPE = 'omnetpp.sequenceChart';
+
+/**
+ * The `CustomDocument` VS Code hands back from `openCustomDocument()`. It has
+ * (deliberately) no state of its own beyond the uri -- the session registry in
+ * `EventLogController` is the durable owner (port plan: "session host-side is
+ * the durable owner"). `dispose()` is called by VS Code once every editor
+ * showing this document has closed (the built-in "tabGroups close detection"
+ * hook for custom editors -- there is no need to also listen on
+ * `vscode.window.tabGroups` directly, `CustomDocument.dispose()` already IS
+ * that signal, scoped correctly per-document).
+ */
+class SequenceChartDocument implements vscode.CustomDocument {
+  constructor(
+    readonly uri: vscode.Uri,
+    private readonly onDispose: () => void,
+  ) {}
+  dispose(): void {
+    this.onDispose();
+  }
+}
+
+/**
+ * The Sequence Chart custom editor (`*.elog`, read-only -- a viewer, never an
+ * editable document, hence `CustomReadonlyEditorProvider`). Per-webview it:
+ *  1. builds the CSP'd HTML shell (chart.js script + codicons),
+ *  2. attaches the webview to the file's `EventLogSession` as a `MessageSink`,
+ *  3. runs the message pump: `ready` -> push `init`; `engineRequest` -> proxy
+ *     through `session.handleEngineRequest()` and reply with `engineResponse`.
+ *
+ * No `WebviewPanelSerializer` is registered (and none is needed): custom
+ * editors persist and restore themselves automatically through
+ * `openCustomDocument()`/`resolveCustomEditor()` -- VS Code remembers the
+ * `viewType` + resource URI across window reloads and simply re-invokes the
+ * same provider, the same way `openCustomDocument` is invoked on first open.
+ * (Verified against `vscode.d.ts`: `registerCustomEditorProvider()` takes no
+ * serializer option at all -- unlike `registerWebviewPanelSerializer()`, which
+ * is a *different*, `createWebviewPanel()`-only API this provider never uses.)
+ */
+export class SequenceChartEditorProvider implements vscode.CustomReadonlyEditorProvider<SequenceChartDocument> {
+  constructor(
+    private readonly extensionUri: vscode.Uri,
+    private readonly controller: EventLogController,
+  ) {}
+
+  static register(context: vscode.ExtensionContext, controller: EventLogController): vscode.Disposable {
+    return vscode.window.registerCustomEditorProvider(
+      VIEW_TYPE,
+      new SequenceChartEditorProvider(context.extensionUri, controller),
+      { webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: false },
+    );
+  }
+
+  async openCustomDocument(uri: vscode.Uri): Promise<SequenceChartDocument> {
+    // Acquire (spawn + open, or reuse) the session BEFORE returning the
+    // document, so resolveCustomEditor() below can always find it synchronously.
+    await this.controller.acquireSession(uri);
+    return new SequenceChartDocument(uri, () => {
+      if (this.controller.getActiveSession()?.uriString === uri.toString()) this.controller.setActiveUri(undefined);
+    });
+  }
+
+  resolveCustomEditor(document: SequenceChartDocument, webviewPanel: vscode.WebviewPanel): void {
+    const session = this.controller.getSession(document.uri);
+    if (!session) {
+      // Should not happen (openCustomDocument always acquires first), but fail
+      // visibly rather than silently showing a blank panel.
+      webviewPanel.webview.html = `<html><body>OMNeT++: failed to open event log session for ${document.uri.fsPath}</body></html>`;
+      return;
+    }
+
+    webviewPanel.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview')],
+    };
+    webviewPanel.webview.html = buildEventLogWebviewHtml(webviewPanel.webview, this.extensionUri, 'sequenceChart.js', 'OMNeT++ Sequence Chart');
+    webviewPanel.title = `${basename(document.uri)} — Sequence Chart`;
+
+    const sink = webviewPanel.webview;
+    session.attach('chart', sink);
+
+    if (webviewPanel.active) this.controller.setActiveUri(document.uri.toString());
+    webviewPanel.onDidChangeViewState((e) => {
+      this.controller.setActiveUri(e.webviewPanel.active ? document.uri.toString() : undefined);
+    });
+    webviewPanel.onDidDispose(() => {
+      session.detach('chart', sink);
+      if (this.controller.getActiveSession()?.uriString === document.uri.toString()) this.controller.setActiveUri(undefined);
+    });
+
+    webviewPanel.webview.onDidReceiveMessage((message: WebviewToHostMessage) => {
+      void handleWebviewMessage(session, sink, document.uri, message);
+    });
+  }
+}
+
+function basename(uri: vscode.Uri): string {
+  return uri.fsPath.split(/[\\/]/).pop() ?? uri.fsPath;
+}
+
+/**
+ * Shared message-pump body (used verbatim by `eventLogTableView.ts` too): the
+ * `ready`/`engineRequest`/`selectionChanged`/`stateChanged` handling is
+ * identical regardless of which webview (chart or table) sent it -- only the
+ * `AttachmentKind` used for `session.attach()`/`detach()` differs, and that's
+ * already baked into the caller by the time this runs.
+ */
+export async function handleWebviewMessage(
+  session: EventLogSession,
+  sink: { postMessage(message: HostToWebviewMessage): void },
+  uri: vscode.Uri,
+  message: WebviewToHostMessage,
+): Promise<void> {
+  switch (message.type) {
+    case 'ready': {
+      const settings = readEventLogUiSettings();
+      const init: HostToWebviewMessage = {
+        type: 'init',
+        fileUri: uri.toString(),
+        persistedState: undefined,
+        settings,
+        summary: session.summary,
+      };
+      sink.postMessage(init);
+      break;
+    }
+    case 'engineRequest': {
+      try {
+        const result = await session.handleEngineRequest(message.method, message.params);
+        sink.postMessage({ type: 'engineResponse', id: message.id, result });
+      } catch (err) {
+        sink.postMessage({
+          type: 'engineResponse',
+          id: message.id,
+          error: { message: err instanceof Error ? err.message : String(err) },
+        });
+      }
+      break;
+    }
+    case 'selectionChanged':
+      session.setSelection(message.selection, sink);
+      break;
+    case 'revealRequest':
+      session.reveal(message.target);
+      break;
+    case 'stateChanged':
+      // U1: no persistence matrix yet (that's a later phase's job per the port
+      // plan's "State persistence" section) -- accepted and dropped for now so
+      // the webview's `stateChanged` postMessage never errors.
+      break;
+    case 'export':
+      await handleExport(message, uri);
+      break;
+    case 'contextValue':
+      void vscode.commands.executeCommand('setContext', message.key, message.value);
+      break;
+  }
+}
+
+async function handleExport(message: Extract<WebviewToHostMessage, { type: 'export' }>, uri: vscode.Uri): Promise<void> {
+  const filters: Record<string, string[]> = message.format === 'svg' ? { 'SVG image': ['svg'] } : { 'PNG image': ['png'] };
+  const dir = uri.scheme === 'file' ? path.dirname(uri.fsPath) : (vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '');
+  const target = await vscode.window.showSaveDialog({ filters, defaultUri: vscode.Uri.file(path.join(dir, message.suggestedName)) });
+  if (!target) return;
+  const bytes = message.format === 'svg' ? Buffer.from(message.data, 'utf8') : Buffer.from(message.data, 'base64');
+  await vscode.workspace.fs.writeFile(target, bytes);
+  void vscode.window.showInformationMessage(`OMNeT++: exported to ${target.fsPath}`);
+}
+
+/** Reads the `omnetpp.sequenceChart.*`/`omnetpp.eventlog.*` settings into the `init` message's `settings` field. */
+function readEventLogUiSettings(): EventLogUiSettings {
+  const config = vscode.workspace.getConfiguration('omnetpp');
+  return {
+    sequenceChart: {
+      defaultTimelineMode: config.get<string>('sequenceChart.defaultTimelineMode', 'SIMULATION_TIME'),
+      fontSize: config.get<number>('sequenceChart.fontSize', 0) || undefined,
+    },
+    eventlog: {
+      followEndOnAppend: config.get<boolean>('eventlog.followEndOnAppend', true),
+      maxEngineMemoryMB: config.get<number>('eventlog.maxEngineMemoryMB', 0) || undefined,
+    },
+  };
+}

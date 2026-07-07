@@ -21,6 +21,7 @@ import { registerViews } from './views';
 import { registerNedPreview } from './nedPreviewPanel';
 import { registerDocsCommand } from './docsCommand';
 import { startMcpBridge } from './mcpBridge';
+import { registerEventLog } from './eventlog';
 
 let client: LanguageClient | undefined;
 
@@ -94,6 +95,7 @@ export function activate(context: ExtensionContext): void {
   registerViews(context, client);
   registerNedPreview(context, client);
   registerDocsCommand(context, client);
+  registerEventLog(context);
   registerRevalidationTriggers(context);
 
   // Push setting changes to the server so they apply without a window reload.

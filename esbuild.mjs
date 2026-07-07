@@ -42,6 +42,27 @@ const targets = [
     format: 'iife',
     external: [],
   },
+  // the Sequence Chart custom editor + Event Log table view webview apps
+  // (phase U1): browser IIFEs, same shape as the NED preview target above.
+  // They import only @omnetpp/shared/elog-protocol and @omnetpp/shared/ui-protocol
+  // (DTOs + a couple of small, dependency-free enums — never the eventlog
+  // engine barrel), so the bundle stays free of the parser/FileReader/etc.
+  {
+    entryPoints: ['client/webview/src/eventlog/chart/chartMain.ts'],
+    outfile: 'dist/webview/sequenceChart.js',
+    platform: 'browser',
+    target: 'es2021',
+    format: 'iife',
+    external: [],
+  },
+  {
+    entryPoints: ['client/webview/src/eventlog/table/tableMain.ts'],
+    outfile: 'dist/webview/eventLogTable.js',
+    platform: 'browser',
+    target: 'es2021',
+    format: 'iife',
+    external: [],
+  },
 ];
 
 if (watch) {

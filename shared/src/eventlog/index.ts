@@ -65,6 +65,20 @@ export { SequenceChartFacade } from './sequenceChartFacade';
 export { EventLogTableFacade } from './eventLogTableFacade';
 export { buildModuleTree, type ElogModule } from './moduleTree';
 
+// phase U1: the host<->webview UI envelope (see uiProtocol.ts's file header).
+// Type-only, so re-exporting it here has no bearing on the barrel's runtime
+// footprint -- browser bundles should still prefer the dedicated
+// '@omnetpp/shared/ui-protocol' subpath (see shared/package.json) to keep the
+// import intent explicit, the same way './elog-protocol' is preferred over
+// this barrel for elogProtocol.ts.
+export type {
+  EventLogSelection,
+  EventLogUiSettings,
+  HostToWebviewMessage,
+  RevealTarget,
+  WebviewToHostMessage,
+} from './uiProtocol';
+
 import type { IChunk } from './ieventlog';
 import { parseEventLogEntry } from './eventLogEntry';
 import { createEntry } from './entries';

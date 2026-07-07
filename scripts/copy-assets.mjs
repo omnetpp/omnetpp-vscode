@@ -51,7 +51,15 @@ if (existsSync(iconsSrc)) {
   console.warn('resources/icons not found - run "bun scripts/gen-icons.mjs <omnetpp-src>" (preview icons will be missing).');
 }
 
-// 5) material neddoc template snapshot (gen-neddoc-material-assets.mjs)
+// 5) codicons (font + stylesheet) for the eventlog webviews' in-webview
+// toolbars (phase U1) -- `dist/webview/codicons/` is loaded via a <link> in
+// `webviewHtml.ts`'s buildEventLogWebviewHtml(). @vscode/codicons is a root
+// devDependency (package.json), not fetched by any gen-*.mjs script.
+const codiconsSrc = join(root, 'node_modules', '@vscode', 'codicons', 'dist');
+copyInto(join(codiconsSrc, 'codicon.css'), join(dist, 'webview', 'codicons'));
+copyInto(join(codiconsSrc, 'codicon.ttf'), join(dist, 'webview', 'codicons'));
+
+// 6) material neddoc template snapshot (gen-neddoc-material-assets.mjs)
 const materialSrc = join(root, 'resources', 'neddoc-material');
 if (existsSync(materialSrc)) {
   cpSync(materialSrc, join(dist, 'neddoc-material'), { recursive: true });

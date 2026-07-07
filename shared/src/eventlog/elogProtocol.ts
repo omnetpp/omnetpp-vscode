@@ -27,10 +27,21 @@
  * types, never the engine itself (which stays worker-thread-only).
  */
 
-import type { EventLogTableFilterMode, MatchKind, TimelineMode } from './enums';
+import type { EventLogTableFilterMode } from './enums';
+// MatchKind/TimelineMode are imported as VALUES (not `import type`) and
+// re-exported below -- phase U1 callers (`client/src/eventlog/
+// eventLogDialogs.ts`'s goto commands, `client/webview/src/eventlog/chart/
+// chartMain.ts`'s timeline-mode dropdown) need the actual enum members, not
+// just the type, and (per this file's header) are only supposed to depend on
+// `@omnetpp/shared/elog-protocol`, never the full `@omnetpp/shared/eventlog`
+// barrel (too heavy for the browser bundle). `enums.ts` itself has zero
+// dependencies and is a handful of small enums, so re-exporting these two
+// here keeps this subpath's "browser-safe, type-light" contract intact.
+import { MatchKind, TimelineMode } from './enums';
 import type { ElogModule } from './moduleTree';
 
 export type { ElogModule };
+export { MatchKind, TimelineMode };
 
 // ---------------------------------------------------------------------------------
 // Method names

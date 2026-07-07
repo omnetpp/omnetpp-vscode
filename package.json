@@ -91,6 +91,13 @@
           "title": "OMNeT++",
           "icon": "media/omnetpp.svg"
         }
+      ],
+      "panel": [
+        {
+          "id": "omnetppEventLog",
+          "title": "OMNeT++ Event Log",
+          "icon": "media/omnetpp.svg"
+        }
       ]
     },
     "views": {
@@ -115,8 +122,28 @@
           "id": "omnetppUsedBy",
           "name": "Used By"
         }
+      ],
+      "omnetppEventLog": [
+        {
+          "id": "omnetppEventLogTable",
+          "name": "Table",
+          "type": "webview",
+          "when": "omnetpp.eventlogOpen"
+        }
       ]
     },
+    "customEditors": [
+      {
+        "viewType": "omnetpp.sequenceChart",
+        "displayName": "OMNeT++ Sequence Chart",
+        "selector": [
+          {
+            "filenamePattern": "*.elog"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
     "commands": [
       {
         "command": "omnetpp.showImpact",
@@ -247,31 +274,146 @@
         "command": "omnetpp.previewExportPng",
         "title": "Export as PNG...",
         "category": "OMNeT++"
+      },
+      {
+        "command": "omnetpp.eventlog.showEventLogTable",
+        "title": "Show Event Log Table",
+        "category": "OMNeT++"
+      },
+      {
+        "command": "omnetpp.eventlog.refresh",
+        "title": "Refresh Event Log",
+        "category": "OMNeT++",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "omnetpp.eventlog.openFilter",
+        "title": "Filter Event Log...",
+        "category": "OMNeT++",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "omnetpp.eventlog.gotoEvent",
+        "title": "Go to Event...",
+        "category": "OMNeT++"
+      },
+      {
+        "command": "omnetpp.eventlog.gotoSimulationTime",
+        "title": "Go to Simulation Time...",
+        "category": "OMNeT++"
+      },
+      {
+        "command": "omnetpp.eventlog.findText",
+        "title": "Find in Event Log...",
+        "category": "OMNeT++"
+      },
+      {
+        "command": "omnetpp.eventlog.pinEventLogTable",
+        "title": "Pin to This Event Log",
+        "category": "OMNeT++",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "omnetpp.eventlog.unpinEventLogTable",
+        "title": "Unpin",
+        "category": "OMNeT++",
+        "icon": "$(pinned)"
       }
     ],
     "menus": {
       "commandPalette": [
-        { "command": "omnetpp.pinType", "when": "false" },
-        { "command": "omnetpp.unpinType", "when": "false" },
-        { "command": "omnetpp.pinModule", "when": "false" },
-        { "command": "omnetpp.unpinModule", "when": "false" },
-        { "command": "omnetpp.pinParam", "when": "false" },
-        { "command": "omnetpp.unpinParam", "when": "false" },
-        { "command": "omnetpp.pinUsedBy", "when": "false" },
-        { "command": "omnetpp.unpinUsedBy", "when": "false" },
-        { "command": "omnetpp.setActiveConfiguration", "when": "editorLangId == 'OMNeT++ INI'" },
-        { "command": "omnetpp.clearActiveConfiguration", "when": "omnetpp.hasActiveConfig" },
-        { "command": "omnetpp.setActiveConfigItem", "when": "false" },
-        { "command": "omnetpp.filterConfigurations", "when": "true" },
-        { "command": "omnetpp.clearConfigurationsFilter", "when": "omnetpp.configFilterActive" },
-        { "command": "omnetpp.refreshConfigurations", "when": "true" },
-        { "command": "omnetpp.showNedPreview", "when": "editorLangId == 'OMNeT++ NED'" },
-        { "command": "omnetpp.previewShowType", "when": "false" },
-        { "command": "omnetpp.previewBack", "when": "false" },
-        { "command": "omnetpp.previewForward", "when": "false" },
-        { "command": "omnetpp.previewRelayout", "when": "false" },
-        { "command": "omnetpp.previewExportSvg", "when": "false" },
-        { "command": "omnetpp.previewExportPng", "when": "false" }
+        {
+          "command": "omnetpp.pinType",
+          "when": "false"
+        },
+        {
+          "command": "omnetpp.unpinType",
+          "when": "false"
+        },
+        {
+          "command": "omnetpp.pinModule",
+          "when": "false"
+        },
+        {
+          "command": "omnetpp.unpinModule",
+          "when": "false"
+        },
+        {
+          "command": "omnetpp.pinParam",
+          "when": "false"
+        },
+        {
+          "command": "omnetpp.unpinParam",
+          "when": "false"
+        },
+        {
+          "command": "omnetpp.pinUsedBy",
+          "when": "false"
+        },
+        {
+          "command": "omnetpp.unpinUsedBy",
+          "when": "false"
+        },
+        {
+          "command": "omnetpp.setActiveConfiguration",
+          "when": "editorLangId == 'OMNeT++ INI'"
+        },
+        {
+          "command": "omnetpp.clearActiveConfiguration",
+          "when": "omnetpp.hasActiveConfig"
+        },
+        {
+          "command": "omnetpp.setActiveConfigItem",
+          "when": "false"
+        },
+        {
+          "command": "omnetpp.filterConfigurations",
+          "when": "true"
+        },
+        {
+          "command": "omnetpp.clearConfigurationsFilter",
+          "when": "omnetpp.configFilterActive"
+        },
+        {
+          "command": "omnetpp.refreshConfigurations",
+          "when": "true"
+        },
+        {
+          "command": "omnetpp.showNedPreview",
+          "when": "editorLangId == 'OMNeT++ NED'"
+        },
+        {
+          "command": "omnetpp.previewShowType",
+          "when": "false"
+        },
+        {
+          "command": "omnetpp.previewBack",
+          "when": "false"
+        },
+        {
+          "command": "omnetpp.previewForward",
+          "when": "false"
+        },
+        {
+          "command": "omnetpp.previewRelayout",
+          "when": "false"
+        },
+        {
+          "command": "omnetpp.previewExportSvg",
+          "when": "false"
+        },
+        {
+          "command": "omnetpp.previewExportPng",
+          "when": "false"
+        },
+        {
+          "command": "omnetpp.eventlog.pinEventLogTable",
+          "when": "false"
+        },
+        {
+          "command": "omnetpp.eventlog.unpinEventLogTable",
+          "when": "false"
+        }
       ],
       "webview/context": [
         {
@@ -312,6 +454,16 @@
           "command": "omnetpp.showNedPreview",
           "when": "editorLangId == 'OMNeT++ NED'",
           "group": "navigation"
+        },
+        {
+          "command": "omnetpp.eventlog.refresh",
+          "when": "activeCustomEditorId == 'omnetpp.sequenceChart'",
+          "group": "navigation@1"
+        },
+        {
+          "command": "omnetpp.eventlog.showEventLogTable",
+          "when": "activeCustomEditorId == 'omnetpp.sequenceChart'",
+          "group": "navigation@2"
         }
       ],
       "view/title": [
@@ -359,6 +511,21 @@
           "command": "omnetpp.refreshConfigurations",
           "when": "view == omnetppActiveConfig",
           "group": "navigation@4"
+        },
+        {
+          "command": "omnetpp.eventlog.refresh",
+          "when": "view == omnetppEventLogTable",
+          "group": "navigation@1"
+        },
+        {
+          "command": "omnetpp.eventlog.pinEventLogTable",
+          "when": "view == omnetppEventLogTable && !omnetpp.eventlogTablePinned",
+          "group": "navigation@2"
+        },
+        {
+          "command": "omnetpp.eventlog.unpinEventLogTable",
+          "when": "view == omnetppEventLogTable && omnetpp.eventlogTablePinned",
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
@@ -509,7 +676,9 @@
         },
         "omnetpp.neddoc.excludeDirs": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "order": 4,
           "markdownDescription": "Directories excluded from the documentation, as workspace-relative glob-ish patterns (`*` and `**` supported; a bare name matches at any depth), e.g. `examples` or `src/legacy/**`."
@@ -613,6 +782,37 @@
           ],
           "default": "off",
           "description": "Trace the communication between VS Code and the OMNeT++ language server."
+        },
+        "omnetpp.sequenceChart.defaultTimelineMode": {
+          "type": "string",
+          "enum": [
+            "SIMULATION_TIME",
+            "EVENT_NUMBER",
+            "STEP",
+            "NONLINEAR"
+          ],
+          "default": "SIMULATION_TIME",
+          "markdownDescription": "The Sequence Chart's initial timeline mode for a freshly opened `.elog` file."
+        },
+        "omnetpp.sequenceChart.fontSize": {
+          "type": "number",
+          "default": 0,
+          "markdownDescription": "Font size (px) used for chart labels; `0` follows the editor font size."
+        },
+        "omnetpp.sequenceChart.styleRules": {
+          "type": "array",
+          "default": [],
+          "markdownDescription": "Reserved for a later phase's module-specific chart styling rules."
+        },
+        "omnetpp.eventlog.followEndOnAppend": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "While viewing the end of a still-appending `.elog` file (a live simulation run), automatically scroll to follow newly appended events."
+        },
+        "omnetpp.eventlog.maxEngineMemoryMB": {
+          "type": "number",
+          "default": 0,
+          "markdownDescription": "Soft memory budget (MB) for the per-file eventlog engine's caches; `0` uses the engine's built-in default."
         }
       }
     }
@@ -623,6 +823,7 @@
     "@types/bun": "^1.3.0",
     "@types/node": "^20.14.0",
     "@types/vscode": "^1.101.0",
+    "@vscode/codicons": "^0.0.45",
     "@vscode/test-electron": "^2.4.1",
     "@vscode/vsce": "^3.0.0",
     "esbuild": "^0.23.0",
