@@ -257,3 +257,35 @@ test('pickDoubleClickTarget: event/methodCall hits are not double-click targets 
   const hits = [{ kind: 'event', eventNumber: 1, moduleId: 1 } as const, { kind: 'methodCall', eventNumber: 1, sourceModuleId: 1, targetModuleId: 2, tc: 5 } as const];
   assert.equal(pickDoubleClickTarget(hits), undefined);
 });
+
+// ---------------------------------------------------------------------------------
+// moduleAction glyphs (phase U8) -- exact-box hit, HIGHEST priority (Java mouseUp
+// filters ModuleActions first, SequenceChart.java:6009)
+// ---------------------------------------------------------------------------------
+
+test('hitTest: moduleAction box hit (exact bounds +1px slack)', () => {
+  const primitives: DrawPrimitive[] = [{ kind: 'moduleAction', action: 'expand', moduleId: 4, scope: 'axis', x: 100, y: 50, size: 11, color: '#999' }];
+  const inside = hitTest({ primitives, px: 105, py: 55, pointerTc: null });
+  assert.deepEqual(inside, [{ kind: 'moduleAction', action: 'expand', moduleId: 4, scope: 'axis' }]);
+  // just outside the +1 slack
+  assert.deepEqual(hitTest({ primitives, px: 113, py: 55, pointerTc: null }), []);
+  assert.deepEqual(hitTest({ primitives, px: 105, py: 48, pointerTc: null }), []);
+});
+
+test('pickPrimary/pickPrimaryGroup: moduleAction outranks events, axes, everything', () => {
+  const primitives: DrawPrimitive[] = [
+    { kind: 'moduleAction', action: 'close', moduleId: 4, scope: 'header', x: 100, y: 50, size: 11, color: '#999' },
+    { kind: 'eventMark', eventNumber: 7, moduleId: 4, x: 104, y: 54, radius: 3, color: '#e06666' },
+    { kind: 'axisLine', moduleId: 4, x1: 0, x2: 800, y: 55, lineHeight: 1, color: '#ccc' },
+  ];
+  const hits = hitTest({ primitives, px: 104, py: 54, pointerTc: 12 });
+  assert.ok(hits.some((h) => h.kind === 'event'), 'the event under the glyph is still collected');
+  assert.equal(pickPrimary(hits)?.kind, 'moduleAction');
+  const group = pickPrimaryGroup(hits);
+  assert.ok(group.length >= 1 && group.every((h) => h.kind === 'moduleAction'));
+});
+
+test('pickDoubleClickTarget: moduleAction glyphs are NOT double-click targets (Java mouseDoubleClick ignores them)', () => {
+  const hits = [{ kind: 'moduleAction', action: 'expand', moduleId: 4, scope: 'axis' } as const];
+  assert.equal(pickDoubleClickTarget(hits), undefined);
+});

@@ -341,4 +341,30 @@ export class NedTypeInfo {
     }
     return false;
   }
+
+  /**
+   * Names of this type's type-level NED properties (`@display`, `@networkNode`, ...),
+   * local first, then inherited from `ancestors()` (primary chain + additional
+   * extends), deduplicated. Names are returned WITHOUT the leading `@`. Used by the
+   * `get_ned_type` MCP tool (`properties` field) -- e.g. the Sequence Chart's
+   * "Network Node"/"Network Interface" preset configurations check for
+   * `@networkNode`/`@networkInterface`/`@wireJunction`, mirroring how the Eclipse
+   * IDE's `SequenceChartContributor.collectAxisModules()` queries NEDResources.
+   */
+  typePropertyNames(): string[] {
+    const names: string[] = [];
+    const seen = new Set<string>();
+    const collect = (t: NedTypeInfo): void => {
+      for (const p of propertyNodes(t.node)) {
+        const m = /^@\s*([A-Za-z_][A-Za-z0-9_:-]*)/.exec(p.text);
+        if (m && !seen.has(m[1])) {
+          seen.add(m[1]);
+          names.push(m[1]);
+        }
+      }
+    };
+    collect(this);
+    for (const base of this.ancestors()) collect(base);
+    return names;
+  }
 }

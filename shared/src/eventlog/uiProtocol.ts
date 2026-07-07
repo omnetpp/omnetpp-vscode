@@ -196,6 +196,19 @@ export type WebviewToHostMessage =
    */
   | { type: 'toggleBookmark'; candidate: BookmarkCandidate }
   /**
+   * ADDITIVE (phase U8, axis-management presets): asks the host to resolve which NED
+   * type-level properties (`@networkNode`, `@networkInterface`, `@wireJunction`, ...)
+   * each named NED type carries -- the "Network Node"/"Network Interface" preset
+   * configurations select open axis modules by NED property, exactly like
+   * `SequenceChartContributor.collectAxisModules(property)` does through Eclipse's
+   * NEDResources. The host answers via the language server's `omnetpp/mcp/callTool`
+   * (`get_ned_type`, one call per unique type name, cached host-side); a type the NED
+   * index cannot resolve yields `null` for that name (webview degrades gracefully --
+   * see `chartMain.ts`'s preset handlers). `id` is a webview-chosen correlator echoed
+   * back on the matching `nedTypeQueryResult`.
+   */
+  | { type: 'nedTypeQuery'; id: number; typeNames: string[] }
+  /**
    * ADDITIVE (phase U7): the Event Log table has no filter panel of its own (only the
    * Sequence Chart hosts one, `client/webview/src/eventlog/chart/filterPanel.ts`) --
    * its "Filter…" toolbar button/context-menu item sends this instead, and the HOST
@@ -263,4 +276,11 @@ export type HostToWebviewMessage =
   /** ADDITIVE (phase U6): the full bookmark list changed (a `toggleBookmark` was applied, or the "Show Bookmarks" QuickPick's own store mutation) -- sent to every attachment, origin included. */
   | { type: 'bookmarksChanged'; bookmarks: Bookmark[] }
   /** A forwarded editor-title/view-title command the webview itself must act on (e.g. re-layout, export) -- mirrors `nedPreviewPanel.ts`'s `sendCommand()`. */
-  | { type: 'command'; command: string; args?: unknown };
+  | { type: 'command'; command: string; args?: unknown }
+  /**
+   * ADDITIVE (phase U8): reply to `nedTypeQuery` with the same `id`. `properties` maps
+   * each requested type name to its type-level NED property names (local + inherited,
+   * without the `@`), or `null` when the type could not be resolved (no language
+   * client, no NED index, or an unknown/unqualified type name).
+   */
+  | { type: 'nedTypeQueryResult'; id: number; properties: Record<string, string[] | null> };

@@ -53,7 +53,14 @@ export interface InteractionCallbacks {
   hitTestAt(px: number, py: number): HitObject[];
   /** Plain/ctrl+click, already resolved to `pickPrimaryGroup()`-equivalent hits by the caller? No — this receives the RAW `hitTest()` result; `chartMain.ts` applies `pickPrimaryGroup`/`selection.ts`'s `applyClick` itself (keeps this module a thin DOM translator). */
   onClick(hits: HitObject[], ctrl: boolean): void;
-  onDoubleClick(hits: HitObject[]): void;
+  /** `ctrl` (phase U8): Ctrl/Cmd+double-click on an axis opens the module RECURSIVELY (`SequenceChart.java:5965`'s `SWT.MOD1` branch); plain opens one level. */
+  onDoubleClick(hits: HitObject[], ctrl: boolean): void;
+  /**
+   * Phase U8 (optional): CSS cursor override while hovering (not dragging) -- e.g.
+   * `'pointer'` over a `moduleAction` glyph (Eclipse shows the hand cursor over its
+   * ModuleAction hotspots). `null`/`undefined` = the default `'grab'`.
+   */
+  getCursorAt?(px: number, py: number): string | null;
   onContextMenu(clientX: number, clientY: number, hits: HitObject[]): void;
   onEscape(): void;
   onRefresh(): void;
@@ -107,7 +114,14 @@ export function attachInteractions(canvas: HTMLElement, cb: InteractionCallbacks
   };
 
   const onMouseMove = (e: MouseEvent): void => {
-    if (!dragging) return;
+    if (!dragging) {
+      // hover cursor override (phase U8) -- only when the pointer is actually over the canvas
+      if (cb.getCursorAt && e.target instanceof Node && canvas.contains(e.target)) {
+        const { px, py } = contentPoint(e);
+        canvas.style.cursor = cb.getCursorAt(px, py) ?? 'grab';
+      }
+      return;
+    }
     const dx = e.clientX - lastClientX;
     const dy = e.clientY - lastClientY;
     if (Math.abs(e.clientX - lastClientX) > CLICK_DRAG_THRESHOLD_PX || Math.abs(e.clientY - lastClientY) > CLICK_DRAG_THRESHOLD_PX) dragMoved = true;
@@ -132,7 +146,7 @@ export function attachInteractions(canvas: HTMLElement, cb: InteractionCallbacks
 
   const onDoubleClick = (e: MouseEvent): void => {
     const { px, py } = contentPoint(e);
-    cb.onDoubleClick(cb.hitTestAt(px, py));
+    cb.onDoubleClick(cb.hitTestAt(px, py), e.ctrlKey || e.metaKey);
   };
 
   const onContextMenu = (e: MouseEvent): void => {

@@ -115,6 +115,61 @@ export function toggleFlag(flags: ChartDisplayFlags, key: keyof ChartDisplayFlag
   return { ...flags, [key]: !flags[key] };
 }
 
+// ---------------------------------------------------------------------------------
+// Preset flag profiles (phase U8) — ports of SequenceChart.java's setShowAll()/
+// setShowDefault()/setShowNetworkCommunication() (lines 425-492, read in full).
+// Used by the Preset Configuration menu (`SequenceChartContributor.java:380-427`):
+// Network Node / Network Interface -> network-communication profile; Full Detail ->
+// everything on; Default -> the default profile; Empty -> everything off.
+// ---------------------------------------------------------------------------------
+
+/** Port of `setShowAll(value)`: every flag set to `value` (Java flips all ~26 `setShow*` setters). */
+export function showAllFlags(value: boolean): ChartDisplayFlags {
+  const flags = {} as Record<keyof ChartDisplayFlags, boolean>;
+  for (const key of Object.keys(DEFAULT_DISPLAY_FLAGS) as (keyof ChartDisplayFlags)[]) flags[key] = value;
+  return flags as ChartDisplayFlags;
+}
+
+/** Port of `setShowDefault()`: everything off, then Java's exact 16-flag true-list (`SequenceChart.java:456-475`). */
+export function presetDefaultFlags(): ChartDisplayFlags {
+  return {
+    ...showAllFlags(false),
+    showArrowHeads: true,
+    showAxes: true,
+    showAxisHeaders: true,
+    showAxisLabels: true,
+    showAxisVectorData: true,
+    showComponentMethodCalls: true,
+    showEventMarks: true,
+    showEventNumbers: true,
+    showHairlines: true,
+    showMessageNames: true,
+    showMessageSends: true,
+    showMethodNames: true,
+    showPositionAndRange: true,
+    showSelfMessageSends: true,
+    showTimeDifferences: true,
+    showTransmissionDurations: true,
+  };
+}
+
+/** Port of `setShowNetworkCommunication()`: everything off, then Java's exact 10-flag true-list (`SequenceChart.java:480-492`) — no event marks/numbers, no method calls, no self-messages: only the inter-module message traffic. */
+export function presetNetworkCommunicationFlags(): ChartDisplayFlags {
+  return {
+    ...showAllFlags(false),
+    showArrowHeads: true,
+    showAxes: true,
+    showAxisHeaders: true,
+    showAxisLabels: true,
+    showHairlines: true,
+    showMessageNames: true,
+    showMessageSends: true,
+    showPositionAndRange: true,
+    showTimeDifferences: true,
+    showTransmissionDurations: true,
+  };
+}
+
 /** Merges a (possibly partial/stale, e.g. from an older persisted blob) patch over the defaults — never lets a missing/renamed field crash the round trip. */
 export function mergeDisplayFlags(patch: Partial<ChartDisplayFlags> | undefined | null): ChartDisplayFlags {
   return { ...DEFAULT_DISPLAY_FLAGS, ...(patch ?? {}) };

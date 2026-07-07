@@ -104,7 +104,22 @@ export type DrawPrimitive =
    * dependency bookmarks -- only the `(x, y)` anchor differs per caller (see
    * `buildDrawList()`'s three call sites below).
    */
-  | { kind: 'bookmarkMark'; x: number; y: number; color: string };
+  | { kind: 'bookmarkMark'; x: number; y: number; color: string }
+  /**
+   * Phase U8 — an inline axis-management glyph hotspot (Java's `ModuleAction`, laid
+   * out in `layoutAxis()`/`layoutAxisHeader()` and dispatched in `mouseUp()`'s
+   * highest-priority cascade level): a small `size`×`size` box at `(x, y)` (top-left)
+   * drawn as a vector expand(+)/collapse(−)/close(×) icon. `scope` decides the close
+   * glyph's semantics (Java: close on an Axis removes ONE module; close on an
+   * AxisHeader removes the whole subtree via `visitItems`). DEVIATION (documented):
+   * Java paints the close glyph only while the mouse hovers its bounds (though the
+   * bounds are always hit-testable); this port draws it always — a persistent
+   * affordance instead of hover-tracked repaints.
+   */
+  | { kind: 'moduleAction'; action: 'expand' | 'collapse' | 'close'; moduleId: number; scope: 'axis' | 'header'; x: number; y: number; size: number; color: string };
+
+/** Phase U8 — glyph box edge length (Java uses the 16px `expand.png`/`collapse.png`/`close.png` images; a slightly smaller vector glyph fits this port's tighter axis labels). */
+export const MODULE_ACTION_SIZE = 11;
 
 /** Colors this module needs beyond `EventLogPalette` (reuse/filtered-dependency dash colors, the "long" arrowhead color) — derived locally from the imported palette rather than editing `common/theme.ts` (out of this phase's file ownership). */
 export function deriveArrowColors(theme: EventLogPalette): Record<ArrowKind, string> {
@@ -215,6 +230,18 @@ export interface BuildDrawListParams {
   infoPanelText?: InfoPanelText;
   /** Phase U5 antialias auto-toggle perf gate ("drop labels first" — see this phase's report for the exact mapping): when `true`, message/method/event-number labels are skipped (arrows/marks/axes still draw in full). */
   skipLabelsForPerf?: boolean;
+  /**
+   * Phase U8 — `openAxisModules.ts`'s `moduleIdToAxisModuleIdMap()`: maps a module id
+   * WITHOUT its own axis to the module id of the nearest open-ancestor axis, so a
+   * collapsed compound module's inner events/dependencies/method calls draw on the
+   * ancestor's axis (Java's `calculateModuleIdToAxisModuleIndexMap()`). Omitted =
+   * pre-U8 behavior (only modules with their own axis draw anything).
+   */
+  moduleIdToAxisModuleId?: ReadonlyMap<number, number>;
+  /** Phase U8 — per-axis expand/collapse glyph visibility (`openAxisModules.ts`'s `moduleGlyphInfo()`), keyed by axis module id. Omitted = no axis glyphs at all (e.g. module tree not loaded yet, so there is no open-module model to act on). The close glyph is emitted for every axis whenever this map is present (its visibility is unconditional in Java). */
+  axisGlyphs?: ReadonlyMap<number, { expand: boolean; collapse: boolean }>;
+  /** Phase U8 — per-header glyphs, keyed by the header's `fullPath` (`DrawableAxisHeader.fullPath`); a header whose path resolves to no real module has no entry and draws no glyphs. */
+  headerGlyphs?: ReadonlyMap<string, { moduleId: number; expand: boolean; collapse: boolean }>;
 }
 
 export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
@@ -223,6 +250,18 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
   const primitives: DrawPrimitive[] = [];
   const arrowColors = deriveArrowColors(theme);
   const axisByModuleId = new Map(axesLayout.axes.map((a) => [a.moduleId, a]));
+  // Phase U8: expand the lookup so a module without its own axis resolves to its
+  // nearest open-ancestor's axis (see BuildDrawListParams.moduleIdToAxisModuleId) --
+  // every downstream `axisByModuleId.get(...)` (events, dependencies, method calls,
+  // time differences) then attributes activity to the right row with no other change.
+  if (params.moduleIdToAxisModuleId) {
+    for (const [id, axisModuleId] of params.moduleIdToAxisModuleId) {
+      if (!axisByModuleId.has(id)) {
+        const axis = axisByModuleId.get(axisModuleId);
+        if (axis) axisByModuleId.set(id, axis);
+      }
+    }
+  }
   const showLabels = !skipLabelsForPerf;
 
   // ---- zero-simulation-time regions (background bands, drawn first so everything else layers on top) ----
@@ -259,6 +298,25 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       primitives.push({ kind: 'axisLine', moduleId: axis.moduleId, x1: GUTTER_LEFT_WIDTH, x2: viewport.canvasWidth, y, lineHeight: axis.lineHeight, color: theme.foreground });
       if (flags.showAxisLabels) primitives.push({ kind: 'axisLabel', moduleId: axis.moduleId, x: 4 + labelIndent, y, text: axis.label, color: theme.foreground });
       if (bookmarkedModuleIds?.has(axis.moduleId)) primitives.push({ kind: 'bookmarkMark', x: GUTTER_LEFT_WIDTH - 6, y, color: BOOKMARK_MARK_COLOR });
+      // Phase U8 -- per-axis expand/collapse/close glyphs (Java `layoutAxis()`'s
+      // ModuleActions). Right-aligned inside the left gutter (Java lays them out just
+      // right of the measured label text; this port has no synchronous text metrics in
+      // a pure module, so a fixed right-edge slot is used -- documented deviation,
+      // same hotspots either way). Order: [expand][collapse][close], close rightmost.
+      if (params.axisGlyphs) {
+        const info = params.axisGlyphs.get(axis.moduleId);
+        const gy = y - Math.round(MODULE_ACTION_SIZE / 2);
+        let gx = GUTTER_LEFT_WIDTH - 4 - MODULE_ACTION_SIZE;
+        primitives.push({ kind: 'moduleAction', action: 'close', moduleId: axis.moduleId, scope: 'axis', x: gx, y: gy, size: MODULE_ACTION_SIZE, color: theme.descriptionForeground });
+        if (info?.collapse) {
+          gx -= MODULE_ACTION_SIZE + 2;
+          primitives.push({ kind: 'moduleAction', action: 'collapse', moduleId: axis.moduleId, scope: 'axis', x: gx, y: gy, size: MODULE_ACTION_SIZE, color: theme.descriptionForeground });
+        }
+        if (info?.expand) {
+          gx -= MODULE_ACTION_SIZE + 2;
+          primitives.push({ kind: 'moduleAction', action: 'expand', moduleId: axis.moduleId, scope: 'axis', x: gx, y: gy, size: MODULE_ACTION_SIZE, color: theme.descriptionForeground });
+        }
+      }
     }
   }
 
@@ -271,7 +329,22 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       const y0 = axisRowY(firstAxis.y, viewport) - firstAxis.lineHeight;
       const y1 = axisRowY(lastAxis.y, viewport) + lastAxis.lineHeight;
       if (y1 < GUTTER_TOP_HEIGHT || y0 > viewport.canvasHeight) continue;
-      primitives.push({ kind: 'axisHeaderBox', x: 2 + level * HEADER_LEVEL_WIDTH, y0, y1, label: header.label, color: theme.isDark ? '#2f5060' : '#d7f2f2' });
+      const x = 2 + level * HEADER_LEVEL_WIDTH;
+      primitives.push({ kind: 'axisHeaderBox', x, y0, y1, label: header.label, color: theme.isDark ? '#2f5060' : '#d7f2f2' });
+      // Phase U8 -- per-header glyphs (Java `layoutAxisHeader()`'s ModuleActions),
+      // stacked vertically at the top of the header band: [expand][collapse][close]
+      // top-down. Close on a HEADER removes the whole subtree (scope: 'header').
+      const headerInfo = params.headerGlyphs?.get(header.fullPath);
+      if (headerInfo) {
+        let gy = Math.max(y0, GUTTER_TOP_HEIGHT) + 2;
+        const pushGlyph = (action: 'expand' | 'collapse' | 'close'): void => {
+          primitives.push({ kind: 'moduleAction', action, moduleId: headerInfo.moduleId, scope: 'header', x: x - 1, y: gy, size: MODULE_ACTION_SIZE, color: theme.descriptionForeground });
+          gy += MODULE_ACTION_SIZE + 2;
+        };
+        if (headerInfo.expand) pushGlyph('expand');
+        if (headerInfo.collapse) pushGlyph('collapse');
+        pushGlyph('close');
+      }
     }
   }
 

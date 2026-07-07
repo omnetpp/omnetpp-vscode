@@ -2,6 +2,8 @@ import {
   ElogMethods,
   MatchKind,
   TimelineMode,
+  type AdjacencyParams,
+  type AdjacencyResult,
   type ElogModule,
   type EventDetail,
   type FilterHints,
@@ -27,12 +29,44 @@ import { renderSummaryStrip } from '../common/summary';
 import { readPalette, watchThemeChange, type EventLogPalette } from '../common/theme';
 import { showContextMenu } from '../common/contextMenu';
 import { DEFAULT_FIND_TEXT_STATE, openFindTextDialog, openGotoEventDialog, openGotoSimTimeDialog, type FindTextState } from '../common/dialogs';
-import { deriveAxes, findModuleIdByFullName, findModuleNode, maxVerticalScroll, type AxesLayout } from './axes';
-import { calculateAxisHeaders } from './axisHeaders';
-import { buildChartContextMenu, type ChartMenuActions } from './chartContextMenu';
+import { AUTO_AXIS_SPACING, clampAxisSpacing, DENSE_AXIS_SPACING, deriveAxes, findModuleIdByFullName, findModuleNode, layoutAxes, maxVerticalScroll, type AxesLayout, type AxisSpacingSpec } from './axes';
+import { calculateAxisHeaders, flattenDrawableAxisHeaders, type AxisHeaderNode } from './axisHeaders';
+import {
+  applyOrdering,
+  calculateManualOrdering,
+  calculateOrderingByMinimizingCost,
+  calculateOrderingByModuleId,
+  calculateOrderingByModuleName,
+  currentManualOrder,
+  ensureInManualOrder,
+  MINIMIZE_CROSSINGS_SAMPLE_COUNT,
+  updateManualOrder,
+  type AxisOrderingMode,
+} from './axisOrder';
+import {
+  buildNodeMap,
+  buildParentMap,
+  collapseOpenAxisModule,
+  collapseOpenAxisModuleSubmodules,
+  computeVisibleAxisModuleIds,
+  defaultOpenAxisModules,
+  expandOpenAxisModule,
+  expandOpenAxisModuleRecursively,
+  moduleGlyphInfo,
+  moduleIdsToPaths,
+  moduleIdToAxisModuleIdMap,
+  openModule,
+  openModuleRecursively,
+  pathsToModuleIds,
+  removeOpenAxisModule,
+  removeOpenAxisModuleSubtree,
+} from './openAxisModules';
+import { buildChartContextMenu, type AxisModuleMenuInfo, type ChartMenuActions, type PresetConfiguration } from './chartContextMenu';
 import { buildSampleTable, pixelToTc, tcToSimTimeApprox, type TcSimSample } from './coords';
-import { mergeDisplayFlags, toggleFlag, type ChartDisplayFlags } from './displayFlags';
+import { mergeDisplayFlags, presetDefaultFlags, presetNetworkCommunicationFlags, showAllFlags, toggleFlag, type ChartDisplayFlags } from './displayFlags';
 import { bookmarkDependencyKey, buildDrawList, type DrawPrimitive, type InfoPanelText } from './drawList';
+import { openSelectModulesDialog } from './selectModulesDialog';
+import { openListReorderDialog } from './reorderDialog';
 import { calculateTicks, formatTickLabel } from './ticks';
 import { ANTIALIAS_TURN_OFF_AT_MSEC, ANTIALIAS_TURN_ON_AT_MSEC, createCanvasStack, type CanvasStackHandle } from './canvasStack';
 import { buildFilterPanel, type FilterPanelHandle } from './filterPanel';
@@ -102,6 +136,21 @@ interface PersistedChartState {
    * params; this port's panel is a persistent sidebar, so it gets to remember more).
    */
   filterPanel?: Partial<FilterPanelState>;
+  /**
+   * Phase U8 -- the open axis modules, as module FULL PATHS (see `openAxisModules.
+   * ts`'s header for the ids-in-memory/paths-persisted decision). `undefined` = the
+   * user never touched axis management for this file (first tree load applies Java's
+   * default, `openModuleRecursively(root)`); an EMPTY array is a real state (the
+   * "Empty" preset) and must round-trip as such.
+   */
+  openAxisModulePaths?: string[];
+  /** Phase U8 -- `SequenceChart.AxisOrderingMode`, persisted like `timelineMode`. */
+  axisOrderingMode?: AxisOrderingMode;
+  /** Phase U8 -- `ManualAxisOrder.lastAxisModuleOrder` as module full paths (the persistent TOTAL order over every module ever seen -- both the Manual mode and Minimize Crossings' re-basing read it). */
+  manualAxisOrderPaths?: string[];
+  /** Phase U8 -- `AxisSpacingMode` (`'auto'` = Balanced, `'manual'` = Dense/Increase/Decrease territory) + the manual spacing value (Java persists both, `SequenceChartSettings.axisSpacingMode`/`.axisSpacing`). */
+  axisSpacingMode?: 'auto' | 'manual';
+  axisSpacing?: number;
 }
 
 const vscode = acquireVsCodeApi();
@@ -148,6 +197,138 @@ let bookmarkedModuleIds = new Set<number>();
 let currentFilterParams: FilterParams | null = null;
 let filterPanel: FilterPanelHandle;
 let filterHintsLoaded = false;
+
+// ---------------------------------------------------------------------------------
+// Phase U8 -- axis management state (open axis modules / ordering / spacing).
+// See `openAxisModules.ts` + `axisOrder.ts` for the ported semantics.
+// ---------------------------------------------------------------------------------
+
+/** The open axis modules (module ids, insertion-ordered like Java's ArrayList). `null` until the module tree loads and `initializeOpenAxisModules()` resolves the persisted paths / applies the default -- `currentAxesLayout()` falls back to the pre-U8 all-known-modules derivation meanwhile. */
+let openAxisModuleIds: number[] | null = null;
+let axisOrderingMode: AxisOrderingMode = state.axisOrderingMode ?? 'moduleId';
+/** `ManualAxisOrder.lastAxisModuleOrder`, as full paths. Grown in-memory by `ensureInManualOrder()` during ordering (deterministic re-append, so per-frame growth is deliberately NOT persisted -- only explicit reorder-dialog commits are). */
+let manualOrderPaths: string[] = state.manualAxisOrderPaths ?? [];
+let axisSpacingMode: 'auto' | 'manual' = state.axisSpacingMode ?? 'auto';
+let axisSpacingManual: number = state.axisSpacing !== undefined ? clampAxisSpacing(state.axisSpacing) : DENSE_AXIS_SPACING;
+/** Minimize-crossings result cache, keyed by the visible axis-module id list -- the bubble sort needs an engine round trip (`elog/sc/adjacencyMatrix`) so it cannot run inside the synchronous layout pass; until the async job lands, layout uses the manual-order re-base (Java's own starting order for this mode). */
+let crossingsOrderCache: { key: string; orderedIds: number[] } | null = null;
+let crossingsInFlightKey: string | null = null;
+/** Transient status-strip note (e.g. a preset's degradation message); cleared by a timer. */
+let statusNote: string | null = null;
+let statusNoteTimer: ReturnType<typeof setTimeout> | undefined;
+
+function showStatusNote(text: string): void {
+  statusNote = text;
+  clearTimeout(statusNoteTimer);
+  statusNoteTimer = setTimeout(() => {
+    statusNote = null;
+    renderStatus();
+  }, 8000);
+  renderStatus();
+}
+
+function fullPathOf(moduleId: number): string {
+  return findModuleNode(moduleId, moduleTree)?.fullName ?? `Module #${moduleId}`;
+}
+
+/** Applies the current ordering mode to the visible axis-module id list (Java `calculateAxisModulePositions()`'s switch). */
+function orderVisibleAxes(visible: readonly number[]): number[] {
+  switch (axisOrderingMode) {
+    case 'moduleId':
+      return applyOrdering(visible, calculateOrderingByModuleId(visible));
+    case 'moduleFullPath':
+      return applyOrdering(visible, calculateOrderingByModuleName(visible.map(fullPathOf)));
+    case 'manual': {
+      const paths = visible.map(fullPathOf);
+      manualOrderPaths = ensureInManualOrder(manualOrderPaths, paths);
+      return applyOrdering(visible, calculateManualOrdering(manualOrderPaths, paths));
+    }
+    case 'minimizeCrossings': {
+      const key = visible.join(',');
+      if (crossingsOrderCache?.key === key) return crossingsOrderCache.orderedIds;
+      void requestCrossingsOrdering([...visible], key);
+      // until the engine round trip lands: the manual-order re-base, which is ALSO the
+      // exact starting order Java feeds the bubble sort (`manualAxisOrder.
+      // getCurrentAxisModuleOrder()` re-base in `calculateAxisModulePositions()`)
+      const paths = visible.map(fullPathOf);
+      manualOrderPaths = ensureInManualOrder(manualOrderPaths, paths);
+      return applyOrdering(visible, calculateManualOrdering(manualOrderPaths, paths));
+    }
+  }
+}
+
+/**
+ * Fetches the adjacency matrix and runs the ported bubble sort (`axisOrder.ts`).
+ * Weights/sampling per `FlatAxisOrderByMinimizingCost.java`: send=1, reuse=0, 1000
+ * samples -- SIMPLIFICATION (documented): Java uses an EXACT event-range matrix when
+ * the visible range spans <1000 events and sampling otherwise; this port always
+ * samples (the engine supports both, but the chart would need an extra
+ * viewport-to-event-range round trip to know the span -- the sampled matrix is what
+ * Java uses for every non-trivial log anyway). Also passes the full
+ * descendant->axis mapping so collapsed-subtree traffic counts (see
+ * `AdjacencyParams.moduleIdToAxisIndex`).
+ */
+async function requestCrossingsOrdering(visible: number[], key: string): Promise<void> {
+  if (crossingsInFlightKey === key || visible.length === 0) return;
+  crossingsInFlightKey = key;
+  try {
+    const paths = visible.map(fullPathOf);
+    manualOrderPaths = ensureInManualOrder(manualOrderPaths, paths);
+    const base = applyOrdering(visible, calculateManualOrdering(manualOrderPaths, paths));
+    const indexOf = new Map(base.map((id, i) => [id, i]));
+    const moduleIdToAxisIndex: Record<string, number> = {};
+    for (const [id, axisModuleId] of moduleIdToAxisModuleIdMap(base, moduleTree, knownModuleIds)) {
+      if (!indexOf.has(id)) {
+        const index = indexOf.get(axisModuleId);
+        if (index !== undefined) moduleIdToAxisIndex[String(id)] = index;
+      }
+    }
+    const params: AdjacencyParams = { moduleIds: base, moduleIdToAxisIndex, numberOfSamples: MINIMIZE_CROSSINGS_SAMPLE_COUNT, messageSendWeight: 1, messageReuseWeight: 0 };
+    const result = await rpc.request<AdjacencyResult>(ElogMethods.scAdjacencyMatrix, params);
+    const positions = calculateOrderingByMinimizingCost(result.matrix, result.numberOfAxes);
+    crossingsOrderCache = { key, orderedIds: applyOrdering(base, positions) };
+    scheduleRender();
+  } catch {
+    // engine busy/superseded -- the next layout invalidation retries
+  } finally {
+    if (crossingsInFlightKey === key) crossingsInFlightKey = null;
+  }
+}
+
+/** The full U8 axes pipeline: visible set (open modules × activity) -> ordering -> vertical layout. Falls back to the pre-U8 derivation while the module tree / open set aren't initialized yet. */
+function currentAxesLayout(): AxesLayout {
+  const spacing: AxisSpacingSpec = axisSpacingMode === 'manual' ? { mode: 'manual', manualSpacing: axisSpacingManual } : AUTO_AXIS_SPACING;
+  if (moduleTree === null || openAxisModuleIds === null) {
+    if (spacing.mode === 'manual') return layoutAxes([...knownModuleIds].sort((a, b) => a - b), moduleTree, contentHeight(viewport), spacing);
+    return deriveAxes(knownModuleIds, moduleTree, contentHeight(viewport), displayFlags.showEmptyAxes);
+  }
+  const visible = computeVisibleAxisModuleIds(openAxisModuleIds, knownModuleIds, moduleTree, displayFlags.showEmptyAxes);
+  return layoutAxes(orderVisibleAxes(visible), moduleTree, contentHeight(viewport), spacing);
+}
+
+/** REPLACE the open set (all mutation paths funnel through here -- Java's `setOpenAxisModules()` + invalidation), persisting as full paths. */
+function setOpenAxisModules(ids: number[]): void {
+  openAxisModuleIds = ids;
+  crossingsOrderCache = null;
+  state = { ...state, openAxisModulePaths: moduleIdsToPaths(ids, moduleTree) };
+  persistState();
+  scheduleRender();
+}
+
+/** Resolves the persisted open set (or applies Java's default, `openModuleRecursively(root)`) once the module tree is available. Also re-run after an `overwritten` change re-fetches the tree (paths re-resolve against the NEW tree; ids would not). */
+function initializeOpenAxisModules(): void {
+  if (moduleTree === null) return;
+  const persisted = state.openAxisModulePaths;
+  if (persisted === undefined) {
+    openAxisModuleIds = defaultOpenAxisModules(moduleTree);
+    return;
+  }
+  const resolved = pathsToModuleIds(persisted, moduleTree);
+  // a non-empty persisted set resolving to NOTHING = the file was replaced by a run
+  // with a different module structure -- fall back to the default rather than an
+  // accidentally-empty chart (an intentionally-empty persisted set stays empty)
+  openAxisModuleIds = persisted.length > 0 && resolved.length === 0 ? defaultOpenAxisModules(moduleTree) : resolved;
+}
 
 /** Re-derives the three render-ready bookmark index sets `drawList.ts` consumes from `bookmarks`/`moduleTree` -- call after either changes (a fresh `init`/`bookmarksChanged`, or the module tree finishing its first `elog/getModuleTree` load). Does NOT itself schedule a render (callers already do, alongside whatever else they're updating). */
 function recomputeBookmarkIndexes(): void {
@@ -272,7 +453,7 @@ function renderFrame(): void {
   );
   if (model) applyModel(model);
 
-  const axesLayout: AxesLayout = deriveAxes(knownModuleIds, moduleTree, contentHeight(viewport), displayFlags.showEmptyAxes);
+  const axesLayout: AxesLayout = currentAxesLayout();
   const lastSimTime = summary.lastSimulationTime !== null ? Number(summary.lastSimulationTime) : 0;
   const tickResult = calculateTicks(currentTimelineMode, viewport.leftTc, range.rightTc, viewport.pixelsPerTc, lastSimTime, simTimeAt);
   const axisHeaderRoot = displayFlags.showAxisHeaders
@@ -281,6 +462,14 @@ function renderFrame(): void {
         (moduleId) => findModuleNode(moduleId, moduleTree)?.fullName ?? `Module #${moduleId}`,
       )
     : null;
+
+  // Phase U8 -- glyph visibility + closed-submodule->axis attribution, only once the
+  // open-module model is live (no tree = nothing to expand/collapse/remap).
+  const axisManagementLive = moduleTree !== null && openAxisModuleIds !== null;
+  const moduleIdToAxisModuleId = axisManagementLive ? moduleIdToAxisModuleIdMap(axesLayout.axes.map((a) => a.moduleId), moduleTree, knownModuleIds) : undefined;
+  const treeNodeMap = axisManagementLive ? buildNodeMap(moduleTree) : undefined;
+  const axisGlyphs = axisManagementLive ? new Map(axesLayout.axes.map((a) => [a.moduleId, moduleGlyphInfo(a.moduleId, openAxisModuleIds!, moduleTree, treeNodeMap)])) : undefined;
+  const headerGlyphs = axisManagementLive ? buildHeaderGlyphs(axisHeaderRoot, treeNodeMap) : undefined;
 
   const t0 = performance.now();
   const primitives = buildDrawList({
@@ -300,6 +489,9 @@ function renderFrame(): void {
     axisHeaderRoot,
     infoPanelText: computeInfoPanelText(),
     skipLabelsForPerf: !antialiasEnabled,
+    moduleIdToAxisModuleId,
+    axisGlyphs,
+    headerGlyphs,
   });
   lastPrimitives = primitives;
   canvasStack.render(primitives, antialiasEnabled);
@@ -310,6 +502,20 @@ function renderFrame(): void {
   else if (!antialiasEnabled && elapsedMs < ANTIALIAS_TURN_ON_AT_MSEC) antialiasEnabled = true;
   renderStatus();
   updateHScrollbar();
+}
+
+/** Phase U8 -- resolves each drawable axis header's `fullPath` back to a real module and computes its glyph visibility (`layoutAxisHeader()`'s conditions); headers whose merged path resolves to no module (or the synthetic empty-label root) get no glyphs. */
+function buildHeaderGlyphs(axisHeaderRoot: AxisHeaderNode | null, nodeMap?: Map<number, ElogModule>): Map<string, { moduleId: number; expand: boolean; collapse: boolean }> {
+  const result = new Map<string, { moduleId: number; expand: boolean; collapse: boolean }>();
+  if (axisHeaderRoot === null || moduleTree === null || openAxisModuleIds === null) return result;
+  for (const header of flattenDrawableAxisHeaders(axisHeaderRoot)) {
+    if (header.fullPath === '') continue;
+    const moduleId = header.moduleId ?? findModuleIdByFullName(header.fullPath, moduleTree);
+    if (moduleId === null) continue;
+    const info = moduleGlyphInfo(moduleId, openAxisModuleIds, moduleTree, nodeMap);
+    result.set(header.fullPath, { moduleId, expand: info.expand, collapse: info.collapse });
+  }
+  return result;
 }
 
 /** Phase U5 -- `showPositionAndRange`/`showEventLogInfo` panel text (`drawList.ts`'s `InfoPanelText`). Port of `drawPositionAndRange()`/`drawEventLogInfo()` (`SequenceChart.java:3338-3403`), approximated from `LogSummary` + the currently-loaded viewport model rather than the live parse-progress counters Java's second `eventLogInfo` line reads (`getNumParsedEvents()`/`FileReader.getNumReadLines/Bytes()` have no protocol exposure yet) -- documented simplification. */
@@ -339,7 +545,7 @@ function renderStatus(): void {
     const span = document.createElement('span');
     const leftLabel = leftSim !== null ? formatTickLabel(leftSim) : '?';
     const rightLabel = rightSim !== null ? formatTickLabel(rightSim) : '?';
-    span.textContent = `View: ${leftLabel} – ${rightLabel}  (${viewport.pixelsPerTc.toPrecision(3)} px/tc)${viewport.followEnd ? '  •  following end' : ''}${antialiasEnabled ? '' : '  •  perf: reduced detail'}`;
+    span.textContent = `View: ${leftLabel} – ${rightLabel}  (${viewport.pixelsPerTc.toPrecision(3)} px/tc)${viewport.followEnd ? '  •  following end' : ''}${antialiasEnabled ? '' : '  •  perf: reduced detail'}${statusNote ? `  •  ${statusNote}` : ''}`;
     statusEl.appendChild(span);
   }
 }
@@ -680,7 +886,7 @@ function repeatFind(): void {
 
 /** Vertically scrolls (only) so `moduleId`'s axis is centered in the content area -- "Center" on an axis, and the vertical half of "Center"/"Select Modules" navigation on an event (see `centerOnEvent` below). No-op if the module has no axis yet. */
 function centerOnAxis(moduleId: number): void {
-  const axesLayout = deriveAxes(knownModuleIds, moduleTree, contentHeight(viewport), displayFlags.showEmptyAxes);
+  const axesLayout = currentAxesLayout();
   const axis = axesLayout.axes.find((a) => a.moduleId === moduleId);
   if (!axis) return;
   viewport = scrollVerticalTo(viewport, axis.y - contentHeight(viewport) / 2, maxVerticalScroll(axesLayout, contentHeight(viewport)));
@@ -720,6 +926,9 @@ async function resolveHitForTooltip(px: number, py: number): Promise<ResolvedHit
   if (!primary) return null;
 
   switch (primary.kind) {
+    case 'moduleAction':
+      // phase U8 -- glyphs have no tooltip in Java either (plain image buttons)
+      return null;
     case 'event': {
       const event = findEvent(primary.eventNumber);
       if (!event) return null;
@@ -750,21 +959,223 @@ async function resolveHitForTooltip(px: number, py: number): Promise<ResolvedHit
 }
 
 function handleClick(hits: HitObject[], ctrl: boolean): void {
+  // Phase U8 -- ModuleAction glyphs take the whole click (Java mouseUp's FIRST cascade
+  // level), but only for a PLAIN click: MOD1+click takes the selection-toggle path and
+  // ignores glyphs entirely (SequenceChart.java:6023, verified).
+  if (!ctrl) {
+    const action = hits.find((h): h is Extract<HitObject, { kind: 'moduleAction' }> => h.kind === 'moduleAction');
+    if (action) {
+      performModuleAction(action);
+      return;
+    }
+  }
   const group = pickPrimaryGroup(hits);
   selection = applyClick(selection, group, ctrl);
   broadcastSelection();
   scheduleRender();
 }
 
-/** Double-click: zoom-to-message (fit a dependency's cause/consequence span) or the axis/open-module case, which is a documented STUB (U8 owns module-open navigation; this port has nowhere to navigate to yet). */
-function handleDoubleClick(hits: HitObject[]): void {
+/** Phase U8 -- glyph dispatch, port of `mouseUp`'s ModuleAction branch (`SequenceChart.java:6054-6075`): expand appends direct submodules; collapse prunes the subtree; close on an AXIS removes one module, close on a HEADER removes the whole subtree (`visitItems`). */
+function performModuleAction(action: Extract<HitObject, { kind: 'moduleAction' }>): void {
+  if (openAxisModuleIds === null || moduleTree === null) return;
+  switch (action.action) {
+    case 'expand':
+      setOpenAxisModules(expandOpenAxisModule(openAxisModuleIds, action.moduleId, moduleTree));
+      break;
+    case 'collapse':
+      setOpenAxisModules(collapseOpenAxisModule(openAxisModuleIds, action.moduleId, moduleTree));
+      break;
+    case 'close':
+      setOpenAxisModules(action.scope === 'header' ? removeOpenAxisModuleSubtree(openAxisModuleIds, action.moduleId, moduleTree) : removeOpenAxisModule(openAxisModuleIds, action.moduleId));
+      break;
+  }
+}
+
+/** Double-click: zoom-to-message (fit a dependency's cause/consequence span), or open-module on an axis (phase U8, port of `mouseDoubleClick` `SequenceChart.java:5954-5986`: plain = `openModule` one level, Ctrl/Cmd = `openModuleRecursively` -- both whole-set REPLACEs). */
+function handleDoubleClick(hits: HitObject[], ctrl: boolean): void {
   const target = pickDoubleClickTarget(hits);
   if (!target) return;
   if (target.kind === 'dependency') {
     viewport = zoomToFit(viewport, Math.min(target.causeTc, target.consequenceTc), Math.max(target.causeTc, target.consequenceTc));
     scheduleRender();
+  } else if (target.kind === 'axis' && moduleTree !== null && openAxisModuleIds !== null) {
+    setOpenAxisModules(ctrl ? openModuleRecursively(target.moduleId, moduleTree) : openModule(target.moduleId, moduleTree));
   }
-  // target.kind === 'axis' -- open-module stub (U8), deliberately a no-op for now.
+}
+
+// ---------------------------------------------------------------------------------
+// Phase U8 -- axis-management actions: dialogs, presets, ordering mode, spacing
+// ---------------------------------------------------------------------------------
+
+/** "Select Modules…" -- see `selectModulesDialog.ts` (port of the contributor's inline TitleAreaDialog; OK = whole-set replace). */
+function showSelectModulesDialog(): void {
+  if (moduleTree === null || openAxisModuleIds === null) return;
+  openSelectModulesDialog(moduleTree, openAxisModuleIds, (ids) => setOpenAxisModules(ids));
+}
+
+/**
+ * "Manual..." ordering -- opens the reorder dialog over the CURRENT visible axes;
+ * OK splices the new order into the persistent total order (`updateManualOrder()`),
+ * commits mode `'manual'`, and persists. Cancel = nothing changes (the contributor's
+ * `Window.CANCEL` branch), including the ordering mode.
+ */
+function showManualOrderingDialog(): void {
+  if (moduleTree === null || openAxisModuleIds === null) return;
+  const visible = computeVisibleAxisModuleIds(openAxisModuleIds, knownModuleIds, moduleTree, displayFlags.showEmptyAxes);
+  if (visible.length === 0) return;
+  const paths = visible.map(fullPathOf);
+  manualOrderPaths = ensureInManualOrder(manualOrderPaths, paths);
+  const current = currentManualOrder(manualOrderPaths, paths);
+  const idByPath = new Map(visible.map((id) => [fullPathOf(id), id]));
+  const items = current.map((path) => ({ id: idByPath.get(path)!, label: `${path} (id = ${idByPath.get(path)})` }));
+  openListReorderDialog('Manual Axis Ordering', 'Reorder chart axes:', items, (orderedIds) => {
+    const updatedCurrent = orderedIds.map((id) => fullPathOf(id));
+    manualOrderPaths = updateManualOrder(manualOrderPaths, current, updatedCurrent);
+    commitAxisOrderingMode('manual');
+  });
+}
+
+function commitAxisOrderingMode(mode: AxisOrderingMode): void {
+  axisOrderingMode = mode;
+  crossingsOrderCache = null;
+  state = { ...state, axisOrderingMode: mode, manualAxisOrderPaths: manualOrderPaths };
+  persistState();
+  toolbar.setDropdownValue('axisOrdering', mode);
+  scheduleRender();
+}
+
+/** Ordering-mode selection (menu radio or toolbar dropdown). `'manual'` routes through the dialog and only commits on OK (see `showManualOrderingDialog()`); the toolbar dropdown is reset to the current mode first so a cancel leaves it truthful. */
+function selectAxisOrderingMode(mode: AxisOrderingMode): void {
+  if (mode === 'manual') {
+    toolbar.setDropdownValue('axisOrdering', axisOrderingMode);
+    showManualOrderingDialog();
+    return;
+  }
+  commitAxisOrderingMode(mode);
+}
+
+function setAxisSpacingState(mode: 'auto' | 'manual', manualSpacing?: number): void {
+  axisSpacingMode = mode;
+  if (manualSpacing !== undefined) axisSpacingManual = clampAxisSpacing(manualSpacing);
+  state = { ...state, axisSpacingMode, axisSpacing: axisSpacingManual };
+  persistState();
+  scheduleRender();
+}
+
+/** Spacing actions -- `SequenceChartContributor.java:1657-1748`: Balanced = AUTO; Dense = MANUAL at `fontHeight + 1`; Increase/Decrease = MANUAL at current effective spacing ±5 (Java reads `getAxisSpacing()`, the last COMPUTED value, so ±5 from an AUTO layout works too). */
+const spacingActions = {
+  balanced: () => setAxisSpacingState('auto'),
+  dense: () => setAxisSpacingState('manual', DENSE_AXIS_SPACING),
+  increase: () => setAxisSpacingState('manual', currentAxesLayout().spacing + 5),
+  decrease: () => setAxisSpacingState('manual', currentAxesLayout().spacing - 5),
+};
+
+// ---- NED type-property lookup (webview -> host -> language server) ----------------
+
+let nedQuerySeq = 1;
+const pendingNedQueries = new Map<number, (properties: Record<string, string[] | null>) => void>();
+
+/** One `nedTypeQuery` round trip (see `uiProtocol.ts`); resolves `{}` after a 15s timeout so a preset never hangs on a missing language server. */
+function queryNedTypeProperties(typeNames: string[]): Promise<Record<string, string[] | null>> {
+  return new Promise((resolve) => {
+    const id = nedQuerySeq++;
+    const timer = setTimeout(() => {
+      if (pendingNedQueries.delete(id)) resolve({});
+    }, 15000);
+    pendingNedQueries.set(id, (properties) => {
+      clearTimeout(timer);
+      resolve(properties);
+    });
+    vscode.postMessage({ type: 'nedTypeQuery', id, typeNames });
+  });
+}
+
+/**
+ * Port of `SequenceChartContributor.collectAxisModules(property)`: every module whose
+ * NED type carries ANY of `properties` (matched items only, not their subtrees).
+ * Returns `null` when NO queried type resolved at all (no NED index/installDir/open
+ * workspace with the types) -- callers degrade; a resolved-but-empty match returns [].
+ */
+async function collectAxisModulesByNedProperty(properties: string[]): Promise<number[] | null> {
+  if (moduleTree === null) return null;
+  const typeNames = new Set<string>();
+  const stack: ElogModule[] = [moduleTree];
+  const modules: ElogModule[] = [];
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    modules.push(node);
+    if (node.nedTypeName) typeNames.add(node.nedTypeName);
+    stack.push(...node.children);
+  }
+  const resolved = await queryNedTypeProperties([...typeNames].sort());
+  const anyResolved = Object.values(resolved).some((props) => props !== null);
+  if (!anyResolved) return null;
+  const matching = new Set(Object.entries(resolved).filter(([, props]) => props !== null && properties.some((p) => props.includes(p))).map(([name]) => name));
+  return modules.filter((m) => matching.has(m.nedTypeName)).map((m) => m.moduleId);
+}
+
+/**
+ * Preset Configuration dispatch -- port of `SequenceChartContributor.java:380-427`
+ * (see `chartContextMenu.ts`'s `presetSection()` for names/order and
+ * `displayFlags.ts` for the three flag profiles). DEGRADATION (documented): Network
+ * Node / Network Interface need NED `@networkNode`/`@networkInterface`/
+ * `@wireJunction` property lookups through the language server; when nothing
+ * resolves (no NED index) or nothing matches, this falls back to Full Detail and
+ * says so in the status strip rather than silently emptying the chart.
+ */
+async function applyPresetConfiguration(preset: PresetConfiguration): Promise<void> {
+  if (moduleTree === null || openAxisModuleIds === null) return;
+  switch (preset) {
+    case 'fullDetail':
+      setOpenAxisModules(openModuleRecursively(moduleTree.moduleId, moduleTree));
+      setDisplayFlags(showAllFlags(true));
+      break;
+    case 'default':
+      setOpenAxisModules(openModule(moduleTree.moduleId, moduleTree));
+      setDisplayFlags(presetDefaultFlags());
+      break;
+    case 'empty':
+      setOpenAxisModules([]);
+      setDisplayFlags(showAllFlags(false));
+      break;
+    case 'networkNode':
+    case 'networkInterface': {
+      const property = preset === 'networkNode' ? 'networkNode' : 'networkInterface';
+      const matched = await collectAxisModulesByNedProperty([property, 'wireJunction']);
+      if (matched === null || matched.length === 0) {
+        showStatusNote(matched === null ? `NED index unavailable for @${property} lookup — applied Full Detail instead` : `no modules with @${property} found — applied Full Detail instead`);
+        setOpenAxisModules(openModuleRecursively(moduleTree.moduleId, moduleTree));
+        setDisplayFlags(showAllFlags(true));
+      } else {
+        setOpenAxisModules(matched);
+        setDisplayFlags(presetNetworkCommunicationFlags());
+      }
+      break;
+    }
+  }
+}
+
+/** Per-axis context-menu info (`chartContextMenu.ts`'s `resolveAxisInfo`) -- `null` while the open-module model isn't live (items disabled). */
+function resolveAxisMenuInfo(moduleId: number): AxisModuleMenuInfo | null {
+  if (moduleTree === null || openAxisModuleIds === null) return null;
+  const node = findModuleNode(moduleId, moduleTree);
+  if (!node) return null;
+  const glyphs = moduleGlyphInfo(moduleId, openAxisModuleIds, moduleTree);
+  const parentId = buildParentMap(moduleTree).get(moduleId);
+  return {
+    label: `${node.fullName} (id = ${moduleId})`,
+    hasParent: parentId !== null && parentId !== undefined,
+    canExpand: glyphs.expand,
+    canCollapse: glyphs.collapse,
+  };
+}
+
+/** "Open Parent Module" -- `openModule(module.getParentModule())`, a whole-set replace on the parent. */
+function openParentModuleAction(moduleId: number): void {
+  if (moduleTree === null) return;
+  const parentId = buildParentMap(moduleTree).get(moduleId);
+  if (parentId === null || parentId === undefined) return;
+  setOpenAxisModules(openModule(parentId, moduleTree));
 }
 
 function openChartContextMenu(clientX: number, clientY: number, hits: HitObject[]): void {
@@ -794,6 +1205,33 @@ function openChartContextMenu(clientX: number, clientY: number, hits: HitObject[
       const dep = findDependency(hit);
       if (dep) filterMessageFor(dep);
     },
+    // ---- phase U8: axis management ----
+    removeAxisModule: (moduleId) => {
+      if (openAxisModuleIds !== null) setOpenAxisModules(removeOpenAxisModule(openAxisModuleIds, moduleId));
+    },
+    openCompoundModule: (moduleId) => {
+      if (moduleTree !== null) setOpenAxisModules(openModule(moduleId, moduleTree));
+    },
+    openParentModule: openParentModuleAction,
+    expandAxisModule: (moduleId) => {
+      if (openAxisModuleIds !== null && moduleTree !== null) setOpenAxisModules(expandOpenAxisModule(openAxisModuleIds, moduleId, moduleTree));
+    },
+    expandAxisModuleRecursively: (moduleId) => {
+      if (openAxisModuleIds !== null && moduleTree !== null) setOpenAxisModules(expandOpenAxisModuleRecursively(openAxisModuleIds, moduleId, moduleTree));
+    },
+    collapseAxisModule: (moduleId) => {
+      if (openAxisModuleIds !== null && moduleTree !== null) setOpenAxisModules(collapseOpenAxisModule(openAxisModuleIds, moduleId, moduleTree));
+    },
+    collapseAxisModuleSubmodules: (moduleId) => {
+      if (openAxisModuleIds !== null && moduleTree !== null) setOpenAxisModules(collapseOpenAxisModuleSubmodules(openAxisModuleIds, moduleId, moduleTree));
+    },
+    openSelectModulesDialog: showSelectModulesDialog,
+    applyPreset: (preset) => void applyPresetConfiguration(preset),
+    setAxisOrderingMode: selectAxisOrderingMode,
+    spacingBalanced: spacingActions.balanced,
+    spacingDense: spacingActions.dense,
+    spacingIncrease: spacingActions.increase,
+    spacingDecrease: spacingActions.decrease,
     setTimelineMode: (mode) => void applyTimelineMode(mode, false),
     zoomIn: () => {
       viewport = zoomAtCenter(viewport, 1.5);
@@ -833,6 +1271,8 @@ function openChartContextMenu(clientX: number, clientY: number, hits: HitObject[
       return dep?.messageId ?? null;
     },
     currentTimelineMode,
+    currentAxisOrderingMode: axisOrderingMode,
+    resolveAxisInfo: resolveAxisMenuInfo,
     actions,
     displayFlags,
   });
@@ -912,7 +1352,48 @@ toolbar = buildToolbar(document.getElementById('toolbar')!, [
   { kind: 'button', button: { id: 'refresh', icon: 'refresh', title: 'Refresh', onClick: refresh } },
   { kind: 'separator' },
   { kind: 'button', button: { id: 'filterPanel', icon: 'filter', title: 'Filter Event Log…', toggled: false, onClick: () => toggleFilterPanel() } },
+  { kind: 'separator' },
+  // ---- phase U8: axis management (Eclipse toolbar: select-modules, preset dropdown, ordering cycle, increase/decrease spacing) ----
+  { kind: 'button', button: { id: 'selectModules', icon: 'list-tree', title: 'Select Modules…', onClick: () => showSelectModulesDialog() } },
+  { kind: 'button', button: { id: 'spacingIncrease', icon: 'unfold', title: 'Increase Spacing', onClick: () => spacingActions.increase() } },
+  { kind: 'button', button: { id: 'spacingDecrease', icon: 'fold', title: 'Decrease Spacing', onClick: () => spacingActions.decrease() } },
   { kind: 'spacer' },
+  {
+    kind: 'dropdown',
+    dropdown: {
+      id: 'presetConfiguration',
+      title: 'Preset Configuration',
+      // an ACTION dropdown (Eclipse: a drop-down toolbar action): the placeholder row is re-selected after each apply
+      options: [
+        { value: '', label: 'Preset…' },
+        { value: 'networkNode', label: 'Network Node' },
+        { value: 'networkInterface', label: 'Network Interface' },
+        { value: 'fullDetail', label: 'Full Detail' },
+        { value: 'default', label: 'Default' },
+        { value: 'empty', label: 'Empty' },
+      ],
+      value: '',
+      onChange: (v) => {
+        if (v !== '') void applyPresetConfiguration(v as PresetConfiguration);
+        toolbar.setDropdownValue('presetConfiguration', '');
+      },
+    },
+  },
+  {
+    kind: 'dropdown',
+    dropdown: {
+      id: 'axisOrdering',
+      title: 'Axis Ordering Mode',
+      options: [
+        { value: 'moduleId', label: 'Order: Module Id' },
+        { value: 'moduleFullPath', label: 'Order: Module Path' },
+        { value: 'minimizeCrossings', label: 'Order: Minimize Crossings' },
+        { value: 'manual', label: 'Order: Manual…' },
+      ],
+      value: axisOrderingMode,
+      onChange: (v) => selectAxisOrderingMode(v as AxisOrderingMode),
+    },
+  },
   { kind: 'dropdown', dropdown: { id: 'timelineMode', title: 'Timeline Mode', options: TIMELINE_MODE_OPTIONS, value: currentTimelineMode, onChange: (v) => void applyTimelineMode(v, false) } },
 ]);
 
@@ -927,13 +1408,15 @@ attachInteractions(canvasContainer, {
     viewport = v;
     toolbar.setButtonState('followEnd', { toggled: v.followEnd });
   },
-  getAxesLayout: () => deriveAxes(knownModuleIds, moduleTree, contentHeight(viewport), displayFlags.showEmptyAxes),
+  getAxesLayout: () => currentAxesLayout(),
   getBeginTc: () => beginTc,
   getEndTc: () => endTc,
   onChanged: () => scheduleRender(),
 
   getPrimitives: () => lastPrimitives,
   hitTestAt,
+  // pointer cursor over an axis-management glyph (phase U8; Eclipse shows the hand cursor over ModuleActions)
+  getCursorAt: (px, py) => (hitTestAt(px, py).some((h) => h.kind === 'moduleAction') ? 'pointer' : null),
   onClick: handleClick,
   onDoubleClick: handleDoubleClick,
   onContextMenu: openChartContextMenu,
@@ -1050,6 +1533,7 @@ async function applyFilterParamsAndReanchor(params: FilterParams | null): Promis
     renderModelCache.invalidateAll();
     knownModuleIds.clear();
     lastModel = null;
+    crossingsOrderCache = null; // filtered log = different dependency statistics
 
     if (!newSummary.isEmpty) {
       if (anchorEventNumber !== null) await relocateAndCenter(anchorEventNumber, true);
@@ -1102,6 +1586,7 @@ async function deleteExcludeSelection(): Promise<void> {
     renderModelCache.invalidateAll();
     knownModuleIds.clear();
     lastModel = null;
+    crossingsOrderCache = null; // filtered log = different dependency statistics
     selection = clearSelection(selection); // Java: the excluded events are dropped from selectedObjects
     broadcastSelection();
 
@@ -1185,6 +1670,13 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
         toolbar.setDropdownValue('timelineMode', state.timelineMode ?? TimelineMode.SIMULATION_TIME);
         displayFlags = mergeDisplayFlags(state.displayFlags);
         filterPanel.setState(mergeFilterPanelState(state.filterPanel));
+        // phase U8 -- axis management state (open set itself resolves from paths once
+        // the module tree arrives below, initializeOpenAxisModules())
+        axisOrderingMode = state.axisOrderingMode ?? 'moduleId';
+        manualOrderPaths = state.manualAxisOrderPaths ?? [];
+        axisSpacingMode = state.axisSpacingMode ?? 'auto';
+        if (state.axisSpacing !== undefined) axisSpacingManual = clampAxisSpacing(state.axisSpacing);
+        toolbar.setDropdownValue('axisOrdering', axisOrderingMode);
       }
       // Phase U7: seed the chart's mirror of the session's currently-active filter (may
       // be non-null even on THIS webview's very first `init` -- a filter persisted by a
@@ -1197,6 +1689,7 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
       if (fileUri) {
         void rpc.request<ElogModule | null>(ElogMethods.getModuleTree, undefined).then((tree) => {
           moduleTree = tree;
+          initializeOpenAxisModules(); // phase U8 -- resolve persisted paths / apply the default open set
           filterPanel.setModuleTree(tree);
           recomputeBookmarkIndexes();
           scheduleRender();
@@ -1228,9 +1721,21 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
           summary = payload.summary;
           renderModelCache.bumpGeneration();
           renderModelCache.invalidateAll();
+          crossingsOrderCache = null; // new/changed data invalidates the sampled weight matrix
           if (versionChanged || payload.change === 'overwritten') {
             knownModuleIds.clear();
             lastModel = null;
+            // phase U8 -- an overwritten file may have a different module structure:
+            // re-fetch the tree and re-resolve the persisted open-module PATHS against
+            // it (ids may have shifted; paths are the durable identity).
+            openAxisModuleIds = null;
+            void rpc.request<ElogModule | null>(ElogMethods.getModuleTree, undefined).then((tree) => {
+              moduleTree = tree;
+              initializeOpenAxisModules();
+              filterPanel.setModuleTree(tree);
+              recomputeBookmarkIndexes();
+              scheduleRender();
+            });
           }
           void refreshEndpointsTc().then(() => {
             if (viewport.followEnd) void goToEnd();
@@ -1267,6 +1772,16 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
       recomputeBookmarkIndexes();
       scheduleRender();
       break;
+    case 'nedTypeQueryResult': {
+      // phase U8 -- preset configuration's NED-property lookup reply (see
+      // `queryNedTypeProperties()`'s correlator).
+      const resolve = pendingNedQueries.get(message.id);
+      if (resolve) {
+        pendingNedQueries.delete(message.id);
+        resolve(message.properties);
+      }
+      break;
+    }
     case 'command':
       // Forwarded from `eventLogDialogs.ts`'s native commands when this webview is
       // attached (see that file's header) -- opens the corresponding in-webview dialog.

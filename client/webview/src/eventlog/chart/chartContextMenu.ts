@@ -18,12 +18,17 @@
  *    `chartMain.ts`'s `filterMessageFor()`; DISABLED when the dependency has no
  *    `messageId` (e.g. a `'filtered'`-kind gap arrow, which represents zero or more
  *    already-collapsed dependencies, not one real message).
- *  - Per-axis section (one submenu per distinct hit axis): Center. "Open Module"
- *    DISABLED (U8 -- module-open navigation isn't built yet, matches this phase's
- *    "double-click axis stub" decision) and a single DISABLED placeholder summarizing
- *    the rest of Java's per-axis actions (Attach Vector to Axis, Expand/Collapse
- *    Axis Module [x4], Remove/Open Compound/Open Parent Module) as "More axis
- *    actions… (axis management, phase U8)".
+ *  - Per-axis section (one submenu per distinct hit axis; phase U8 wires the full
+ *    Java action set, `SequenceChartContributor.java:610-636`'s order): Center,
+ *    Toggle Bookmark, then Remove Axis Module / Open Compound Module / Open Parent
+ *    Module (disabled when the module has no parent), then Expand Axis Module /
+ *    Expand Axis Module Recursively / Collapse Axis Module / Collapse Axis Module
+ *    Submodules (expand items disabled when there is nothing left to expand,
+ *    collapse items when nothing is open below -- Java greys via the same
+ *    allSubmodulesOpen/noSubmodulesOpen booleans the glyphs use). Java's "Attach/
+ *    Detach Vector to Axis" is out of scope for the whole port (.vec axis data
+ *    strips, per the plan's decision record) and "Zoom to Value" with it (needs the
+ *    vector data); both are omitted rather than shown disabled.
  *  - Method calls: Java's own `contributeToPopupMenu()` has NO per-method-call
  *    section (verified — only Event/MessageDependency/ModuleTreeItem get dynamic
  *    submenus), so this port doesn't add one either, even though method calls DO
@@ -34,20 +39,36 @@
  *  - Phase U5 ADDS: a "Show/Hide" submenu with all ~25 `displayFlags.ts` toggles
  *    (`TOGGLE_ORDER`, each a checkable item — no disabled placeholders here, every one
  *    is fully wired into `drawList.ts`).
- *  - EXPLICITLY OMITTED (not even as disabled placeholders — genuinely later-phase
- *    ownership per the port plan's phase table, listed in the phase report rather
- *    than cluttering the menu): Select Modules..., Preset Configuration, Axis
- *    Ordering Mode, Filter (dropdown), Configure Style, Spacing, Change Font..., Toggle
- *    bookmark, Pin, Release Memory, Self Test, Copy to Clipboard, Export to SVG...,
- *    Show In.
+ *  - Phase U8 ADDS the axis-management static sections (`SequenceChartContributor.
+ *    java`'s menu order): Select Modules..., Preset Configuration (Network Node /
+ *    Network Interface / separator / Full Detail / Default / Empty), Axis Ordering
+ *    Mode (Module Id / Module Path / Minimize Crossings / Manual... radios), Spacing
+ *    (Balanced Axes / Dense Axes / Increase Spacing / Decrease Spacing).
+ *  - STILL OMITTED (not even as disabled placeholders — genuinely later-phase
+ *    ownership per the port plan's phase table): Filter (dropdown), Configure Style,
+ *    Change Font..., Pin, Release Memory, Self Test, Copy to Clipboard, Export to
+ *    SVG..., Show In.
  */
 
 import { TimelineMode } from '@omnetpp/shared/elog-protocol';
 import type { MenuEntry } from '../common/contextMenu';
+import type { AxisOrderingMode } from './axisOrder';
 import type { ChartDisplayFlags } from './displayFlags';
 import { TOGGLE_ORDER } from './displayFlags';
 import { formatEventLabel } from './labelProvider';
 import type { HitObject } from './hitTest';
+
+/** The Preset Configuration entries (`SequenceChartContributor.java:380-427` — see `chartMain.ts`'s `applyPreset()` for what each one does). */
+export type PresetConfiguration = 'networkNode' | 'networkInterface' | 'fullDetail' | 'default' | 'empty';
+
+/** Per-axis menu enablement info, resolved by `chartMain.ts` from the module tree + open-set (`openAxisModules.ts`'s `moduleGlyphInfo()` and friends). `null` when the module tree hasn't loaded yet (all axis-management items disabled). */
+export interface AxisModuleMenuInfo {
+  /** The axis submenu title -- Java labels dynamic per-object submenus with the object's own text; `"<fullPath> (id = <n>)"` like the manual-order dialog rows. */
+  label: string;
+  hasParent: boolean;
+  canExpand: boolean;
+  canCollapse: boolean;
+}
 
 export interface ChartMenuActions {
   selectEvent(eventNumber: number): void;
@@ -66,6 +87,30 @@ export interface ChartMenuActions {
   filterCausesConsequences(eventNumber: number): void;
   /** Phase U7 -- "Filter Message..." (per-dependency section); only invoked when the hit resolves to a `RenderDependency` with a non-null `messageId` (see `resolveDependencyLabel`'s sibling `resolveDependencyMessageId` below). */
   filterMessage(hit: Extract<HitObject, { kind: 'dependency' }>): void;
+  // ---- phase U8: axis management (per-axis incremental + whole-set operations) ----
+  /** `removeOpenAxisModule()` -- delete this one module from the open set. */
+  removeAxisModule(moduleId: number): void;
+  /** `openModule(module)` -- REPLACE the open set with the module + its direct submodules. */
+  openCompoundModule(moduleId: number): void;
+  /** `openModule(module.getParentModule())` -- REPLACE with the parent + its direct submodules. */
+  openParentModule(moduleId: number): void;
+  /** `expandOpenAxisModule()` -- append the module's direct submodules. */
+  expandAxisModule(moduleId: number): void;
+  /** The contributor's "Expand Axis Module Recursively" -- append every descendant. */
+  expandAxisModuleRecursively(moduleId: number): void;
+  /** `collapseOpenAxisModule()` -- prune every open strict descendant. */
+  collapseAxisModule(moduleId: number): void;
+  /** The contributor's "Collapse Axis Module Submodules" -- prune below the direct submodules. */
+  collapseAxisModuleSubmodules(moduleId: number): void;
+  openSelectModulesDialog(): void;
+  applyPreset(preset: PresetConfiguration): void;
+  /** Selecting `'manual'` must open the reorder dialog first and only commit the mode on OK (`SequenceChartContributor`'s "Manual..." radio: `Window.CANCEL` leaves the mode unchanged) -- `chartMain.ts` owns that flow. */
+  setAxisOrderingMode(mode: AxisOrderingMode): void;
+  /** Spacing submenu (contributor lines 670-674/1657-1748): Balanced = AUTO; Dense = MANUAL at `fontHeight + 1`; Increase/Decrease = MANUAL ±5 px. */
+  spacingBalanced(): void;
+  spacingDense(): void;
+  spacingIncrease(): void;
+  spacingDecrease(): void;
   setTimelineMode(mode: TimelineMode): void;
   zoomIn(): void;
   zoomOut(): void;
@@ -90,6 +135,10 @@ export interface ChartMenuBuildParams {
   /** Phase U7 -- resolves a dependency hit's `messageId` (`RenderDependency.messageId`), for gating "Filter Message..."; `null` if unresolvable/absent (disables the item -- see `ChartMenuActions.filterMessage`'s doc comment). */
   resolveDependencyMessageId(hit: Extract<HitObject, { kind: 'dependency' }>): number | null;
   currentTimelineMode: TimelineMode;
+  /** Phase U8 -- for the Axis Ordering Mode radios' checkmarks. */
+  currentAxisOrderingMode: AxisOrderingMode;
+  /** Phase U8 -- per-axis enablement/label info; `null` = module tree not loaded yet (axis-management items disabled). */
+  resolveAxisInfo(moduleId: number): AxisModuleMenuInfo | null;
   actions: ChartMenuActions;
   /** Phase U5 — current toggle state, for the Show/Hide submenu's checkmarks. */
   displayFlags: ChartDisplayFlags;
@@ -130,15 +179,69 @@ function dependencySection(hit: Extract<HitObject, { kind: 'dependency' }>, labe
   };
 }
 
-function axisSection(hit: Extract<HitObject, { kind: 'axis' }>, actions: ChartMenuActions): MenuEntry {
+function axisSection(hit: Extract<HitObject, { kind: 'axis' }>, info: AxisModuleMenuInfo | null, actions: ChartMenuActions): MenuEntry {
+  const noTree = info === null;
   return {
     id: `axis-${hit.moduleId}`,
-    label: `Axis (id = ${hit.moduleId})`,
+    label: info?.label ?? `Axis (id = ${hit.moduleId})`,
     submenu: [
       { id: 'center', label: 'Center', onSelect: () => actions.centerOnAxis(hit.moduleId) },
       { id: 'toggleBookmark', label: 'Toggle Bookmark', onSelect: () => actions.toggleAxisBookmark(hit.moduleId) },
-      { id: 'openModule', label: 'Open Module', disabled: true },
-      { id: 'more', label: 'More axis actions… (axis management, phase U8)', disabled: true },
+      { separator: true },
+      { id: 'removeAxisModule', label: 'Remove Axis Module', disabled: noTree, onSelect: () => actions.removeAxisModule(hit.moduleId) },
+      { id: 'openCompoundModule', label: 'Open Compound Module', disabled: noTree, onSelect: () => actions.openCompoundModule(hit.moduleId) },
+      { id: 'openParentModule', label: 'Open Parent Module', disabled: noTree || !info.hasParent, onSelect: () => actions.openParentModule(hit.moduleId) },
+      { separator: true },
+      { id: 'expandAxisModule', label: 'Expand Axis Module', disabled: noTree || !info.canExpand, onSelect: () => actions.expandAxisModule(hit.moduleId) },
+      { id: 'expandAxisModuleRecursively', label: 'Expand Axis Module Recursively', disabled: noTree || !info.canExpand, onSelect: () => actions.expandAxisModuleRecursively(hit.moduleId) },
+      { id: 'collapseAxisModule', label: 'Collapse Axis Module', disabled: noTree || !info.canCollapse, onSelect: () => actions.collapseAxisModule(hit.moduleId) },
+      { id: 'collapseAxisModuleSubmodules', label: 'Collapse Axis Module Submodules', disabled: noTree || !info.canCollapse, onSelect: () => actions.collapseAxisModuleSubmodules(hit.moduleId) },
+    ],
+  };
+}
+
+/** Phase U8 -- the Preset Configuration submenu (`SequenceChartContributor.java:380-427`'s exact names/order, incl. the separator between the NED-property presets and the structural ones). */
+function presetSection(actions: ChartMenuActions): MenuEntry {
+  return {
+    id: 'presetConfiguration',
+    label: 'Preset Configuration',
+    submenu: [
+      { id: 'preset-networkNode', label: 'Network Node', onSelect: () => actions.applyPreset('networkNode') },
+      { id: 'preset-networkInterface', label: 'Network Interface', onSelect: () => actions.applyPreset('networkInterface') },
+      { separator: true },
+      { id: 'preset-fullDetail', label: 'Full Detail', onSelect: () => actions.applyPreset('fullDetail') },
+      { id: 'preset-default', label: 'Default', onSelect: () => actions.applyPreset('default') },
+      { id: 'preset-empty', label: 'Empty', onSelect: () => actions.applyPreset('empty') },
+    ],
+  };
+}
+
+const AXIS_ORDERING_LABELS: [AxisOrderingMode, string][] = [
+  ['moduleId', 'Module Id'],
+  ['moduleFullPath', 'Module Path'],
+  ['minimizeCrossings', 'Minimize Crossings'],
+  ['manual', 'Manual...'],
+];
+
+/** Phase U8 -- the Axis Ordering Mode radio submenu (contributor lines 987-1036). */
+function axisOrderingSection(current: AxisOrderingMode, actions: ChartMenuActions): MenuEntry {
+  return {
+    id: 'axisOrderingMode',
+    label: 'Axis Ordering Mode',
+    submenu: AXIS_ORDERING_LABELS.map(([mode, label]): MenuEntry => ({ id: `order-${mode}`, label, checked: mode === current, onSelect: () => actions.setAxisOrderingMode(mode) })),
+  };
+}
+
+/** Phase U8 -- the Spacing submenu (contributor lines 670-674). */
+function spacingSection(actions: ChartMenuActions): MenuEntry {
+  return {
+    id: 'spacing',
+    label: 'Spacing',
+    submenu: [
+      { id: 'spacing-balanced', label: 'Balanced Axes', onSelect: actions.spacingBalanced },
+      { id: 'spacing-dense', label: 'Dense Axes', onSelect: actions.spacingDense },
+      { id: 'spacing-increase', label: 'Increase Spacing', onSelect: actions.spacingIncrease },
+      { id: 'spacing-decrease', label: 'Decrease Spacing', onSelect: actions.spacingDecrease },
     ],
   };
 }
@@ -153,7 +256,7 @@ function showHideSection(displayFlags: ChartDisplayFlags, actions: ChartMenuActi
 }
 
 export function buildChartContextMenu(params: ChartMenuBuildParams): MenuEntry[] {
-  const { hits, resolveDependencyLabel, resolveDependencyMessageId, currentTimelineMode, actions, displayFlags } = params;
+  const { hits, resolveDependencyLabel, resolveDependencyMessageId, currentTimelineMode, currentAxisOrderingMode, resolveAxisInfo, actions, displayFlags } = params;
   const entries: MenuEntry[] = [];
 
   const events = hits.filter((h): h is Extract<HitObject, { kind: 'event' }> => h.kind === 'event');
@@ -166,8 +269,15 @@ export function buildChartContextMenu(params: ChartMenuBuildParams): MenuEntry[]
   for (const hit of dependencies) entries.push(dependencySection(hit, resolveDependencyLabel(hit) ?? '(message)', resolveDependencyMessageId(hit), actions));
   if (dependencies.length > 0) entries.push({ separator: true });
 
-  for (const hit of axes) entries.push(axisSection(hit, actions));
+  for (const hit of axes) entries.push(axisSection(hit, resolveAxisInfo(hit.moduleId), actions));
   if (axes.length > 0) entries.push({ separator: true });
+
+  // ---- phase U8: axis-management static sections (contributor's menu order) ----
+  entries.push({ id: 'selectModules', label: 'Select Modules...', onSelect: actions.openSelectModulesDialog });
+  entries.push(presetSection(actions));
+  entries.push(axisOrderingSection(currentAxisOrderingMode, actions));
+  entries.push(spacingSection(actions));
+  entries.push({ separator: true });
 
   entries.push({
     id: 'timelineMode',

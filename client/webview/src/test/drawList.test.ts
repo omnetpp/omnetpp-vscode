@@ -312,3 +312,45 @@ test('displayFlags.showZeroSimulationTimeRegions=false -> no regionBand primitiv
   const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: burstEvents, dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, displayFlags: { ...DEFAULT_DISPLAY_FLAGS, showZeroSimulationTimeRegions: false } });
   assert.strictEqual(primitives.filter((p) => p.kind === 'regionBand').length, 0);
 });
+
+// ---------------------------------------------------------------------------------
+// phase U8: moduleAction glyphs + closed-submodule -> ancestor-axis attribution
+// ---------------------------------------------------------------------------------
+
+test('U8 axisGlyphs: close always, expand/collapse per the passed visibility info', () => {
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([1, 2]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const axisGlyphs = new Map([
+    [1, { expand: true, collapse: false }],
+    [2, { expand: false, collapse: true }],
+  ]);
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, displayFlags: DEFAULT_DISPLAY_FLAGS, axisGlyphs });
+  const glyphs = primitives.filter((p) => p.kind === 'moduleAction');
+  const forModule = (id: number) => glyphs.filter((g) => g.moduleId === id).map((g) => g.action).sort();
+  assert.deepEqual(forModule(1), ['close', 'expand']);
+  assert.deepEqual(forModule(2), ['close', 'collapse']);
+  assert.ok(glyphs.every((g) => g.scope === 'axis'));
+  // glyphs live inside the left gutter (right-aligned hotspot slots)
+  assert.ok(glyphs.every((g) => g.x >= 0 && g.x + g.size <= GUTTER_LEFT_WIDTH));
+});
+
+test('U8 axisGlyphs omitted: no moduleAction primitives at all (module tree not loaded)', () => {
+  const primitives = draw();
+  assert.equal(primitives.filter((p) => p.kind === 'moduleAction').length, 0);
+});
+
+test('U8 moduleIdToAxisModuleId: events/deps of a closed submodule draw on the ancestor axis', () => {
+  const viewport = baseViewport();
+  // only module 1 has an axis; module 9 is a (closed) descendant mapped onto it
+  const axesLayout = deriveAxes(new Set([1]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const mapped = new Map([[9, 1]]);
+  const orphanEvents = [event_(1, 9, 10)];
+  const withMap = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: orphanEvents, dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, displayFlags: DEFAULT_DISPLAY_FLAGS, moduleIdToAxisModuleId: mapped });
+  const mark = withMap.find((p) => p.kind === 'eventMark');
+  assert.ok(mark, 'the mapped event draws');
+  const axisY = withMap.find((p) => p.kind === 'axisLine' && p.moduleId === 1)!;
+  assert.equal((mark as { y: number }).y, (axisY as { y: number }).y, 'drawn at module 1\'s axis row');
+
+  const withoutMap = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: orphanEvents, dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, displayFlags: DEFAULT_DISPLAY_FLAGS });
+  assert.equal(withoutMap.filter((p) => p.kind === 'eventMark').length, 0, 'pre-U8 behavior without the map: no axis, no mark');
+});

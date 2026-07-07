@@ -106,6 +106,11 @@ function selectionFromGroup(group: HitObject[]): ChartSelectionState {
 
 function toggleOne(state: ChartSelectionState, hit: HitObject): ChartSelectionState {
   switch (hit.kind) {
+    case 'moduleAction':
+      // Phase U8 -- glyphs are ACTIONS, never selection members (Java's MOD1+click
+      // path skips ModuleActions entirely; chartMain.ts's plain-click path consumes
+      // them before selection is ever consulted). Toggling one is a no-op.
+      return state;
     case 'event': {
       const events = new Set(state.events);
       const wasPresent = events.has(hit.eventNumber);

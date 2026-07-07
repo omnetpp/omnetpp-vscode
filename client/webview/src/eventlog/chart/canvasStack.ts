@@ -156,7 +156,7 @@ export interface CanvasStackHandle {
   dispose(): void;
 }
 
-const NONCACHEABLE_KINDS = new Set<DrawPrimitive['kind']>(['gutter', 'tick', 'axisLabel', 'label', 'selectionMark', 'bookmarkMark', 'infoPanel', 'timeDifferenceLabel']);
+const NONCACHEABLE_KINDS = new Set<DrawPrimitive['kind']>(['gutter', 'tick', 'axisLabel', 'label', 'selectionMark', 'bookmarkMark', 'infoPanel', 'timeDifferenceLabel', 'moduleAction']);
 
 export function createCanvasStack(container: HTMLElement): CanvasStackHandle {
   const content = document.createElement('canvas');
@@ -356,6 +356,34 @@ export function createCanvasStack(container: HTMLElement): CanvasStackHandle {
         ctx.arc(p.x, p.y, p.radius, 0, 2 * Math.PI);
         ctx.stroke();
         break;
+      case 'moduleAction': {
+        // Phase U8 -- axis-management glyph hotspot: a bordered box with a vector
+        // plus (expand) / minus (collapse) / cross (close) symbol, standing in for
+        // Eclipse's expand.png/collapse.png/close.png ModuleAction images.
+        const cx = p.x + p.size / 2;
+        const cy = p.y + p.size / 2;
+        const arm = Math.floor(p.size / 2) - 2;
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([]);
+        ctx.strokeRect(p.x + 0.5, p.y + 0.5, p.size - 1, p.size - 1);
+        ctx.beginPath();
+        if (p.action === 'close') {
+          ctx.moveTo(cx - arm, cy - arm);
+          ctx.lineTo(cx + arm, cy + arm);
+          ctx.moveTo(cx + arm, cy - arm);
+          ctx.lineTo(cx - arm, cy + arm);
+        } else {
+          ctx.moveTo(cx - arm, cy);
+          ctx.lineTo(cx + arm, cy);
+          if (p.action === 'expand') {
+            ctx.moveTo(cx, cy - arm);
+            ctx.lineTo(cx, cy + arm);
+          }
+        }
+        ctx.stroke();
+        break;
+      }
       case 'bookmarkMark': {
         // A small filled "flag" glyph (a vertical pole + a triangular pennant) -- see
         // `drawList.ts`'s `DrawPrimitive` doc for why this stands in for Eclipse's

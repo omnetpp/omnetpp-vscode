@@ -118,6 +118,21 @@ export const DEFAULT_FIND_TEXT_STATE: FindTextState = { search: '', caseSensitiv
 // DOM prompt UI (not unit-tested -- see this file's header)
 // ---------------------------------------------------------------------------------
 
+/**
+ * Phase U8 (ADDITIVE): the overlay/panel/Esc-to-close shell alone, for dialogs whose
+ * body is NOT a flat field list (`openPrompt()` below stays the field-list
+ * convenience) — the Select Modules module tree and the Manual Axis Ordering reorder
+ * list build their own body DOM into `panel`.
+ */
+export function openDialogShell(title: string): { panel: HTMLElement; close: () => void } {
+  const { panel, close } = buildOverlay();
+  const titleEl = document.createElement('div');
+  titleEl.className = 'elog-dialog-title';
+  titleEl.textContent = title;
+  panel.appendChild(titleEl);
+  return { panel, close };
+}
+
 function buildOverlay(): { overlay: HTMLElement; panel: HTMLElement; close: () => void } {
   const overlay = document.createElement('div');
   overlay.className = 'elog-dialog-overlay';

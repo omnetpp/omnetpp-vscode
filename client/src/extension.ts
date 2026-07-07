@@ -95,7 +95,7 @@ export function activate(context: ExtensionContext): void {
   registerViews(context, client);
   registerNedPreview(context, client);
   registerDocsCommand(context, client);
-  registerEventLog(context);
+  registerEventLog(context, client);
   registerRevalidationTriggers(context);
 
   // Push setting changes to the server so they apply without a window reload.

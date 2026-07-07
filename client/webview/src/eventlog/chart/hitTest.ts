@@ -16,10 +16,8 @@
  *  - `MOUSE_TOLERANCE = 3` px — lines, axis bands.
  *  - Event symbols use `MOUSE_TOLERANCE + 3 = 6` px (a wider, easier-to-hit target).
  *
- * Priority order (mouseUp's cascade, `SequenceChart.java:6009-6021`, verified): a
- * `ModuleAction` (axis-header expand/collapse/close icon) would be first, but this
- * port's axis rendering has no header icons yet (U8 territory — axis management) so
- * that level never applies and is omitted. The remaining cascade, exactly as ported:
+ * Priority order (mouseUp's cascade, `SequenceChart.java:6009-6021`, verified):
+ * `ModuleAction` (axis/axis-header expand/collapse/close glyph, phase U8) FIRST, then
  * event > message dependency > component method call > axis > timestamp.
  *
  * Phase U5: self-message arrows are now real half/quarter ellipses (`arrowGeometry.ts`'s
@@ -40,14 +38,16 @@ export const HIT_TOLERANCE = 3;
 export const EVENT_HIT_TOLERANCE = HIT_TOLERANCE + 3;
 
 export type HitObject =
+  /** Phase U8 — an axis-management glyph (see `drawList.ts`'s `'moduleAction'` primitive). Highest hit priority (Java filters `ModuleAction`s first in `mouseUp`). */
+  | { kind: 'moduleAction'; action: 'expand' | 'collapse' | 'close'; moduleId: number; scope: 'axis' | 'header' }
   | { kind: 'event'; eventNumber: number; moduleId: number }
   | { kind: 'dependency'; dependencyKind: 'send' | 'reuse' | 'filtered'; causeEventNumber: number; consequenceEventNumber: number; causeTc: number; consequenceTc: number }
   | { kind: 'methodCall'; eventNumber: number; sourceModuleId: number; targetModuleId: number; tc: number }
   | { kind: 'axis'; moduleId: number }
   | { kind: 'timestamp'; tc: number };
 
-/** Priority cascade for a plain/ctrl click and for tooltip primary selection — first non-empty category wins. `ModuleAction` (see this file's header) is omitted (not yet applicable). */
-const PRIORITY_ORDER: HitObject['kind'][] = ['event', 'dependency', 'methodCall', 'axis', 'timestamp'];
+/** Priority cascade for a plain/ctrl click and for tooltip primary selection — first non-empty category wins (`moduleAction` first, per this file's header). */
+const PRIORITY_ORDER: HitObject['kind'][] = ['moduleAction', 'event', 'dependency', 'methodCall', 'axis', 'timestamp'];
 
 // ---------------------------------------------------------------------------------
 // Ported geometry primitives (SequenceChart.java, verified line numbers in header)
@@ -135,6 +135,8 @@ function arrowRefToHit(ref: ArrowRef): HitObject {
 
 function hitKey(hit: HitObject): string {
   switch (hit.kind) {
+    case 'moduleAction':
+      return `act:${hit.action}:${hit.scope}:${hit.moduleId}`;
     case 'event':
       return `event:${hit.eventNumber}`;
     case 'dependency':
@@ -178,6 +180,12 @@ export function hitTest(params: HitTestParams): HitObject[] {
 
   for (const p of primitives) {
     switch (p.kind) {
+      case 'moduleAction':
+        // Exact box bounds +1px slack (Java hit-tests the image's Rectangle.contains --
+        // pixel-exact; one pixel of slack keeps an 11px vector glyph comfortably
+        // clickable without overlapping its 2px-spaced neighbor).
+        if (px >= p.x - 1 && px <= p.x + p.size + 1 && py >= p.y - 1 && py <= p.y + p.size + 1) push({ kind: 'moduleAction', action: p.action, moduleId: p.moduleId, scope: p.scope });
+        break;
       case 'eventMark':
       case 'selfEventMark':
         if (eventSymbolContainsPoint(px, py, p.x, p.x, p.y)) push({ kind: 'event', eventNumber: p.eventNumber, moduleId: p.moduleId });
@@ -230,9 +238,11 @@ export function pickPrimaryGroup(hits: HitObject[]): HitObject[] {
 
 /**
  * Double-click cascade (`SequenceChart.java:5954`, verified — deliberately SHORTER
- * and in a DIFFERENT order than the click cascade above): dependency (zoom-to-message)
- * first, then axis (open-module, U8 stub — see `chartMain.ts`). Event/method-call
- * double-clicks have no Java-side action and are simply no-ops here.
+ * and in a DIFFERENT order than the click cascade above, and it does NOT consider
+ * `ModuleAction` glyphs): dependency (zoom-to-message) first, then axis
+ * (open-module — phase U8 wires it: plain double-click = `openModule`, Ctrl/Cmd =
+ * `openModuleRecursively`, whole-set REPLACE semantics; see `chartMain.ts`).
+ * Event/method-call double-clicks have no Java-side action and are no-ops here.
  */
 export function pickDoubleClickTarget(hits: HitObject[]): HitObject | undefined {
   return hits.find((h) => h.kind === 'dependency') ?? hits.find((h) => h.kind === 'axis');

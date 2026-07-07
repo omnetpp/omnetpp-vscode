@@ -115,6 +115,15 @@ export interface DrawableAxisHeader {
   axisIndexStart: number;
   axisCount: number;
   moduleId: number | null;
+  /**
+   * Phase U8: the header's full dotted module path (ancestor labels joined with its
+   * own — e.g. a level-1 header labeled `"host[3]"` under the root header `"net"` has
+   * `fullPath === "net.host[3]"`). Used to resolve the header back to a real module
+   * (`findModuleIdByFullName`) for the expand/collapse/close glyph actions; empty for
+   * the synthetic root. Note a merged multi-level label (`"a.b"`) already contains
+   * its dots, so the composition below stays a plain join.
+   */
+  fullPath: string;
 }
 
 /**
@@ -123,10 +132,11 @@ export interface DrawableAxisHeader {
  * (`SequenceChart.java:4312-4319`'s own filter). `level` is depth from the root
  * (0-based), for indentation -- Java's `AxisHeader.level` (`layoutAxisHeader()`).
  */
-export function flattenDrawableAxisHeaders(root: AxisHeaderNode | null, level = 0): DrawableAxisHeader[] {
+export function flattenDrawableAxisHeaders(root: AxisHeaderNode | null, level = 0, parentPath = ''): DrawableAxisHeader[] {
   if (root === null) return [];
   const out: DrawableAxisHeader[] = [];
-  if (root.children.length !== 0) out.push({ label: root.label, level, axisIndexStart: root.axisIndexStart, axisCount: root.axisCount, moduleId: root.moduleId });
-  for (const child of root.children) out.push(...flattenDrawableAxisHeaders(child, level + 1));
+  const fullPath = root.label === '' ? parentPath : parentPath === '' ? root.label : `${parentPath}.${root.label}`;
+  if (root.children.length !== 0) out.push({ label: root.label, level, axisIndexStart: root.axisIndexStart, axisCount: root.axisCount, moduleId: root.moduleId, fullPath });
+  for (const child of root.children) out.push(...flattenDrawableAxisHeaders(child, level + 1, fullPath));
   return out;
 }

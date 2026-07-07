@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import type { LanguageClient } from 'vscode-languageclient/node';
 import { showBookmarksCommand } from './bookmarks';
 import { EventLogController } from './eventLogController';
 import { EventLogTableViewProvider } from './eventLogTableView';
@@ -9,17 +10,16 @@ import { gotoEventCommand, gotoSimulationTimeCommand, openFilterCommand, findTex
  * Registers the Sequence Chart custom editor + Event Log panel view + their
  * shared commands (phase U1, "UI scaffolding"). Mirrors `registerNedPreview()`'s
  * shape in `nedPreviewPanel.ts`: one `register*(context, client)`-style entry
- * point called from `extension.ts`. `client` (the `LanguageClient`) is
- * currently unused here -- the eventlog UI talks to its own worker processes,
- * not the NED/MSG/INI language server -- but the parameter is kept for
- * consistency with the other `register*` functions and in case a later phase
- * needs it (e.g. `gotoNedDeclaration`, U10, via `get_ned_type`).
+ * point called from `extension.ts`. `client` (the `LanguageClient`) serves the
+ * chart's NED type-property lookups (phase U8, `nedTypeQuery.ts` -- the
+ * Network Node/Network Interface preset configurations); everything else in the
+ * eventlog UI talks to its own worker processes, not the language server.
  */
-export function registerEventLog(context: vscode.ExtensionContext): void {
+export function registerEventLog(context: vscode.ExtensionContext, client?: LanguageClient): void {
   const controller = new EventLogController(context);
   context.subscriptions.push(controller);
 
-  context.subscriptions.push(SequenceChartEditorProvider.register(context, controller));
+  context.subscriptions.push(SequenceChartEditorProvider.register(context, controller, client));
 
   const { provider: tableView, disposable: tableViewDisposable } = EventLogTableViewProvider.register(context, controller);
   context.subscriptions.push(tableViewDisposable);

@@ -20,6 +20,7 @@
 
 import type { ElogModule, FilterHints } from '@omnetpp/shared/elog-protocol';
 import { buildFilterDescription } from './filterDescription';
+import { buildModuleTreeChecklist } from './moduleTreeWidget';
 import {
   applyExcludedEventNumbersToState,
   buildFilterParams,
@@ -89,29 +90,8 @@ function parseNullableInt(text: string): number | null {
 }
 
 // ---------------------------------------------------------------------------------
-// module tree tri-state helpers (standard "container checked" propagation: checking a
-// compound module checks its whole subtree; a parent shows indeterminate when only
-// some descendants are checked -- the common JFace `ContainerCheckedTreeViewer`
-// semantics `ModuleTreeViewer` builds on, verified structurally against
-// `FilterEventLogDialog.java`'s "by name" tree section)
-// ---------------------------------------------------------------------------------
-
-function collectModuleIds(node: ElogModule, into: number[] = []): number[] {
-  into.push(node.moduleId);
-  for (const child of node.children) collectModuleIds(child, into);
-  return into;
-}
-
-function moduleTriState(node: ElogModule, checked: ReadonlySet<number>): { checked: boolean; indeterminate: boolean } {
-  if (node.children.length === 0) return { checked: checked.has(node.moduleId), indeterminate: false };
-  const childStates = node.children.map((c) => moduleTriState(c, checked));
-  const selfChecked = checked.has(node.moduleId);
-  const allChecked = selfChecked && childStates.every((s) => s.checked);
-  const anyChecked = selfChecked || childStates.some((s) => s.checked || s.indeterminate);
-  if (allChecked) return { checked: true, indeterminate: false };
-  return { checked: false, indeterminate: anyChecked };
-}
-
+// module tree tri-state widget: extracted to `moduleTreeWidget.ts` in phase U8 so the
+// "Select Modules…" dialog reuses the exact same component (see that file's header).
 // ---------------------------------------------------------------------------------
 // DOM builder
 // ---------------------------------------------------------------------------------
@@ -313,44 +293,18 @@ export function buildFilterPanel(parent: HTMLElement, deps: FilterPanelDeps): Fi
   function moduleTreeWidget(): HTMLElement {
     const container = document.createElement('div');
     container.className = 'elog-filter-moduletree';
-    if (!moduleTree) {
-      const empty = document.createElement('div');
-      empty.className = 'elog-filter-hint-empty';
-      empty.textContent = '(module tree not loaded yet)';
-      container.appendChild(empty);
-      return container;
-    }
-    const checkedIds = new Set(state.moduleIds);
-
-    function renderNode(node: ElogModule, depth: number): HTMLElement {
-      const row = document.createElement('div');
-      row.className = 'elog-filter-moduletree-row';
-      row.style.paddingLeft = `${depth * 14}px`;
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      const triState = moduleTriState(node, checkedIds);
-      checkbox.checked = triState.checked;
-      checkbox.indeterminate = triState.indeterminate;
-      checkbox.addEventListener('change', () => {
-        const ids = collectModuleIds(node);
+    buildModuleTreeChecklist(container, moduleTree, {
+      getCheckedIds: () => new Set(state.moduleIds),
+      onToggle: (ids, checked) => {
         const next = new Set(state.moduleIds);
         for (const id of ids) {
-          if (checkbox.checked) next.add(id);
+          if (checked) next.add(id);
           else next.delete(id);
         }
         setField('moduleIds', [...next]);
         render();
-      });
-      const label = document.createElement('span');
-      label.textContent = `${node.fullName} (${node.nedTypeName})`;
-      row.appendChild(checkbox);
-      row.appendChild(label);
-      const wrapper = document.createElement('div');
-      wrapper.appendChild(row);
-      for (const child of node.children) wrapper.appendChild(renderNode(child, depth + 1));
-      return wrapper;
-    }
-    container.appendChild(renderNode(moduleTree, 0));
+      },
+    });
     return container;
   }
 

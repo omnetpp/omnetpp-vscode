@@ -1,25 +1,32 @@
 /**
- * axes.ts (PURE) — derives the module-axis list (which modules get an axis row, in
- * which vertical order, at which y position) from the accumulated set of module ids
- * seen across fetched `ViewportModel`s plus (optionally) the module tree
- * (`elog/getModuleTree`, for names/compound-ness).
+ * axes.ts (PURE) — lays out the module-axis list (which modules get an axis row, in
+ * which vertical order, at which y position).
  *
- * SIMPLIFICATION (documented, matches the plan's own "U8 adds algorithms" note):
- * ordering is plain ascending `moduleId` for now — Java's 3 real ordering algorithms
- * (declaration order / minimize-crossings via the adjacency matrix / manual) are
- * phase U8.
+ * Phase U8: the axis SET and ORDER are now decided upstream (`openAxisModules.ts`'s
+ * `computeVisibleAxisModuleIds()` + `axisOrder.ts`'s ordering strategies —
+ * `chartMain.ts`'s `currentAxesLayout()` runs the full pipeline); `layoutAxes()`
+ * below takes the already-ordered module id list and only does the vertical layout.
+ * The pre-U8 `deriveAxes()` (plain ascending-moduleId over the accumulated
+ * `knownModuleIds`) is kept as a thin wrapper — still used as the fallback while the
+ * module tree hasn't loaded yet (no tree = no open-module model to consult), and by
+ * existing tests.
  *
  * `includeEmptyAxes` (phase U5, port of `showEmptyAxes`, default `false` matching
  * Java): when `false` (the default), only modules actually seen in fetched viewport
  * data (`knownModuleIds`) get an axis — a module the log never produced an event for
  * has no row. When `true`, every module in `moduleTree` (not just ones with events)
- * additionally gets an axis, exactly like Java's "show empty axes" toggle.
+ * additionally gets an axis, exactly like Java's "show empty axes" toggle. (In the
+ * U8 pipeline this flag is consumed by `computeVisibleAxisModuleIds()` instead —
+ * open modules verbatim.)
  *
- * Axis vertical layout: port of `SequenceChart.java`'s `AUTO` axis-spacing mode
- * (`calculateAxisSpacing()`/the axis-layout loop, `SequenceChart.java:2334-2337,
- * 2938`): spacing is spread evenly across the viewport (never tighter than
- * `FONT_HEIGHT_PX + 1`), and each axis's `y` is `axisOffset + running spacing/height
- * sum`, spacing added BEFORE each axis line, its own thickness added after.
+ * Axis vertical layout: port of `SequenceChart.java`'s axis-spacing modes
+ * (`AxisSpacingMode { MANUAL, AUTO }`, `calculateAxisSpacing()`,
+ * `SequenceChart.java:236-237, 285-288, 2935-2945` + the layout loop at 2334-2337):
+ * AUTO ("Balanced Axes") spreads spacing evenly across the viewport (never tighter
+ * than `FONT_HEIGHT_PX + 1`); MANUAL uses a fixed per-axis spacing (min 1 px,
+ * `setAxisSpacing()`'s own clamp — "Dense Axes" pins it to `fontHeight + 1`,
+ * Increase/Decrease Spacing nudge it ±5). Each axis's `y` is `axisOffset + running
+ * spacing/height sum`, spacing added BEFORE each axis line, its thickness after.
  */
 
 import type { ElogModule } from '@omnetpp/shared/elog-protocol';
@@ -85,18 +92,33 @@ function allModuleIds(tree: ElogModule | null): number[] {
   return ids;
 }
 
+/** Axis-spacing mode + manual value (phase U8) — port of `AxisSpacingMode { MANUAL, AUTO }` + the `axisSpacing` field. "Balanced"/"Dense" are ACTION names in Java, not modes: Balanced = AUTO; Dense = MANUAL pinned to `FONT_HEIGHT_PX + 1`. */
+export interface AxisSpacingSpec {
+  mode: 'auto' | 'manual';
+  /** Only used when `mode === 'manual'`; already clamped by the caller (`setAxisSpacing()`'s `Math.max(1, …)`). */
+  manualSpacing: number;
+}
+
+export const AUTO_AXIS_SPACING: AxisSpacingSpec = { mode: 'auto', manualSpacing: 0 };
+
+/** `setAxisSpacing()`'s own clamp (`SequenceChart.java:2907-2911`) — minimum 1 px, no maximum. */
+export function clampAxisSpacing(spacing: number): number {
+  return Math.max(1, spacing);
+}
+
+/** The "Dense Axes" manual spacing value — `getFontHeight(null) + 1` in Java, which is also AUTO mode's floor. */
+export const DENSE_AXIS_SPACING = FONT_HEIGHT_PX + 1;
+
 /**
- * Builds the ordered axis list + vertical layout for `knownModuleIds` (accumulated
- * across fetched viewports -- see renderModelCache.ts). `moduleTree` (may be `null`
- * before `elog/getModuleTree` resolves) supplies names/compound-ness; a module id not
- * yet found in the tree falls back to a synthetic `"Module #<id>"` label so an axis
- * still renders (just unnamed) rather than being dropped. `includeEmptyAxes` -- see
- * this file's header.
+ * Phase U8: vertical layout for an ALREADY-ordered module id list (the output of
+ * `computeVisibleAxisModuleIds()` + an `axisOrder.ts` strategy). `moduleTree` (may be
+ * `null` before `elog/getModuleTree` resolves) supplies names/compound-ness; a module
+ * id not yet found in the tree falls back to a synthetic `"Module #<id>"` label so an
+ * axis still renders (just unnamed) rather than being dropped. Spacing per
+ * `spacing` — see `AxisSpacingSpec`.
  */
-export function deriveAxes(knownModuleIds: ReadonlySet<number>, moduleTree: ElogModule | null, contentHeightPx: number, includeEmptyAxes = false): AxesLayout {
-  const idSet = includeEmptyAxes ? new Set([...knownModuleIds, ...allModuleIds(moduleTree)]) : knownModuleIds;
-  const ids = [...idSet].sort((a, b) => a - b);
-  const resolved = ids.map((moduleId) => {
+export function layoutAxes(orderedModuleIds: readonly number[], moduleTree: ElogModule | null, contentHeightPx: number, spacing: AxisSpacingSpec = AUTO_AXIS_SPACING): AxesLayout {
+  const resolved = orderedModuleIds.map((moduleId) => {
     const found = findModuleName(moduleId, moduleTree);
     return {
       moduleId,
@@ -107,17 +129,34 @@ export function deriveAxes(knownModuleIds: ReadonlySet<number>, moduleTree: Elog
   });
 
   const totalLineHeights = resolved.reduce((sum, a) => sum + a.lineHeight, 0);
-  const spacing = resolved.length === 0 ? 1 : Math.max(FONT_HEIGHT_PX + 1, (contentHeightPx - AXIS_OFFSET * 2 - totalLineHeights) / resolved.length);
+  const effectiveSpacing =
+    spacing.mode === 'manual'
+      ? clampAxisSpacing(spacing.manualSpacing)
+      : resolved.length === 0
+        ? 1
+        : Math.max(FONT_HEIGHT_PX + 1, (contentHeightPx - AXIS_OFFSET * 2 - totalLineHeights) / resolved.length);
 
   const axes: AxisInfo[] = [];
   let y = AXIS_OFFSET;
   for (const a of resolved) {
-    y += spacing;
+    y += effectiveSpacing;
     axes.push({ ...a, y: Math.round(y) });
     y += a.lineHeight;
   }
 
-  return { axes, totalHeight: Math.max(0, y - AXIS_OFFSET), spacing };
+  return { axes, totalHeight: Math.max(0, y - AXIS_OFFSET), spacing: effectiveSpacing };
+}
+
+/**
+ * Pre-U8 derivation, kept as the module-tree-not-yet-loaded fallback (and for the
+ * existing U3-U5 tests): every accumulated `knownModuleIds` member gets an axis, in
+ * plain ascending-moduleId order, AUTO spacing. `includeEmptyAxes` -- see this file's
+ * header.
+ */
+export function deriveAxes(knownModuleIds: ReadonlySet<number>, moduleTree: ElogModule | null, contentHeightPx: number, includeEmptyAxes = false): AxesLayout {
+  const idSet = includeEmptyAxes ? new Set([...knownModuleIds, ...allModuleIds(moduleTree)]) : knownModuleIds;
+  const ids = [...idSet].sort((a, b) => a - b);
+  return layoutAxes(ids, moduleTree, contentHeightPx, AUTO_AXIS_SPACING);
 }
 
 /** Max useful `vscroll` value so the axis stack never scrolls past its own content. */

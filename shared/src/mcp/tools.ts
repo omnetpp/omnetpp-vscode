@@ -125,6 +125,8 @@ function nedTypeDetail(t: NedTypeInfo) {
     extends: t.extendsNames(),
     interfaces: t.interfaceNames(),
     ancestors: t.ancestors().map((a) => a.fqName),
+    /** Type-level NED property names (local + inherited, without the `@`) -- e.g. `["display", "networkNode"]`. ADDITIVE (Sequence Chart axis presets need `@networkNode`/`@networkInterface`/`@wireJunction` lookups). */
+    properties: t.typePropertyNames(),
     params: [...t.params().values()].map((p) => ({
       name: p.name,
       type: p.type,

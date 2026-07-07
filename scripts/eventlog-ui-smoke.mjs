@@ -27,6 +27,7 @@ import { EventLogSession } from '../client/src/eventlog/eventLogSession.ts';
 // this restriction only applies to this script's own top-level imports.
 const ElogMethods = {
   getSummary: 'elog/getSummary',
+  scAdjacencyMatrix: 'elog/sc/adjacencyMatrix',
   scSetTimelineMode: 'elog/sc/setTimelineMode',
   scRelocateOrigin: 'elog/sc/relocateOrigin',
   scGetViewport: 'elog/sc/getViewport',
@@ -107,6 +108,9 @@ async function main() {
 
   // ---- U7: filter panel plumbing (elog/getFilterHints, elog/setFilter apply/remove) --
   await smokeFilterU7(session, summary);
+
+  // ---- U8: axis management -- adjacency matrix round trip (minimize crossings) ------
+  await smokeAxisU8(session, summary);
 
   // ---- U4: real RPC cancellation end-to-end through the actual worker ---------------
   await smokeCancellationU4(bundlePath);
@@ -358,4 +362,61 @@ async function smokeCancellationU4(bundlePath) {
     bigSession?.dispose();
     fs.rmSync(bigDir, { recursive: true, force: true });
   }
+}
+
+// ---------------------------------------------------------------------------------
+// U8 (axis management): elog/sc/adjacencyMatrix round trips over the Fifo1 fixture --
+// the engine side of the Minimize Crossings ordering mode. Exercises (a) a manual
+// moduleIdToAxisIndex mapping (descendant modules attributed to an ancestor axis,
+// the additive AdjacencyParams field this phase introduced), (b) the exact
+// event-range path, and (c) the approximate sampled path chartMain.ts actually uses
+// (numberOfSamples=1000, sendWeight=1, reuseWeight=0 per FlatAxisOrderByMinimizingCost).
+// ---------------------------------------------------------------------------------
+async function smokeAxisU8(session, summary) {
+  const moduleTree = await session.handleEngineRequest(ElogMethods.getModuleTree, undefined);
+  assert(moduleTree !== null && moduleTree.children.length > 0, 'smokeAxisU8: Fifo1 module tree has submodules');
+  const childIds = moduleTree.children.map((c) => c.moduleId);
+
+  // (b) exact range over the whole fixture, axes = the root + its direct children
+  // (root included so ALL of the fixture's dependencies -- including any touching
+  // the network module itself -- are attributed somewhere, making the collapsed-run
+  // total below exactly comparable)
+  const axisIds = [moduleTree.moduleId, ...childIds];
+  const exact = await session.handleEngineRequest(ElogMethods.scAdjacencyMatrix, {
+    moduleIds: axisIds,
+    startEventNumber: summary.firstEventNumber,
+    endEventNumber: summary.lastEventNumber,
+    messageSendWeight: 1,
+    messageReuseWeight: 0,
+  });
+  assert(exact.numberOfAxes === axisIds.length, 'smokeAxisU8: exact-range matrix reports one axis per module id');
+  assert(Array.isArray(exact.matrix) && exact.matrix.length === axisIds.length * axisIds.length, 'smokeAxisU8: exact-range matrix is row-major n*n');
+  const totalExact = exact.matrix.reduce((sum, w) => sum + w, 0);
+  assert(totalExact > 0, `smokeAxisU8: Fifo1 has message sends, so the exact matrix has nonzero weight (total ${totalExact})`);
+
+  // (a) manual moduleIdToAxisIndex mapping: collapse everything onto ONE axis (the
+  // root) by mapping every submodule to axis 0 -- weights must land in [0][0]... i.e.
+  // survive the mapping rather than being dropped for "unknown" module ids
+  const mapping = {};
+  for (const id of childIds) mapping[String(id)] = 0;
+  const collapsed = await session.handleEngineRequest(ElogMethods.scAdjacencyMatrix, {
+    moduleIds: [moduleTree.moduleId],
+    moduleIdToAxisIndex: mapping,
+    startEventNumber: summary.firstEventNumber,
+    endEventNumber: summary.lastEventNumber,
+    messageSendWeight: 1,
+    messageReuseWeight: 0,
+  });
+  assert(collapsed.numberOfAxes === 1, 'smokeAxisU8: collapsed mapping yields a single axis');
+  assert(collapsed.matrix.length === 1 && collapsed.matrix[0] === totalExact, `smokeAxisU8: every dependency lands on the one mapped axis (got ${collapsed.matrix[0]}, want ${totalExact})`);
+
+  // (c) approximate sampled path (what the chart's Minimize Crossings mode requests)
+  const approx = await session.handleEngineRequest(ElogMethods.scAdjacencyMatrix, {
+    moduleIds: childIds,
+    numberOfSamples: 1000,
+    messageSendWeight: 1,
+    messageReuseWeight: 0,
+  });
+  assert(approx.numberOfAxes === childIds.length && approx.matrix.length === childIds.length * childIds.length, 'smokeAxisU8: sampled matrix has the right shape');
+  assert(approx.matrix.reduce((sum, w) => sum + w, 0) > 0, 'smokeAxisU8: 1000 samples over the small fixture find dependencies');
 }

@@ -1,9 +1,11 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import type { LanguageClient } from 'vscode-languageclient/node';
 import type { EventLogUiSettings, HostToWebviewMessage, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
 import { handleToggleBookmarkMessage } from './bookmarks';
 import type { EventLogController } from './eventLogController';
 import type { EventLogSession } from './eventLogSession';
+import { resolveNedTypeProperties } from './nedTypeQuery';
 import { buildEventLogWebviewHtml } from './webviewHtml';
 
 const VIEW_TYPE = 'omnetpp.sequenceChart';
@@ -63,12 +65,14 @@ export class SequenceChartEditorProvider implements vscode.CustomReadonlyEditorP
     private readonly extensionUri: vscode.Uri,
     private readonly controller: EventLogController,
     private readonly workspaceState: vscode.Memento,
+    /** Phase U8 -- for `nedTypeQuery` messages (preset configurations' `@networkNode`/`@networkInterface` lookups via `nedTypeQuery.ts`); `undefined` degrades every lookup to `null`. */
+    private readonly languageClient?: LanguageClient,
   ) {}
 
-  static register(context: vscode.ExtensionContext, controller: EventLogController): vscode.Disposable {
+  static register(context: vscode.ExtensionContext, controller: EventLogController, languageClient?: LanguageClient): vscode.Disposable {
     return vscode.window.registerCustomEditorProvider(
       VIEW_TYPE,
-      new SequenceChartEditorProvider(context.extensionUri, controller, context.workspaceState),
+      new SequenceChartEditorProvider(context.extensionUri, controller, context.workspaceState, languageClient),
       { webviewOptions: { retainContextWhenHidden: true }, supportsMultipleEditorsPerDocument: false },
     );
   }
@@ -154,6 +158,15 @@ export class SequenceChartEditorProvider implements vscode.CustomReadonlyEditorP
       // same "intercept before the shared function" pattern as 'ready'/'stateChanged'.
       if (message.type === 'toggleBookmark') {
         void handleToggleBookmarkMessage(this.controller.getBookmarkStore(document.uri), session, message.candidate);
+        return;
+      }
+      // Phase U8: NED type-property lookup for the chart's preset configurations --
+      // needs the LanguageClient, which only this provider holds (same
+      // "intercept before the shared function" pattern as the cases above).
+      if (message.type === 'nedTypeQuery') {
+        void resolveNedTypeProperties(this.languageClient, message.typeNames).then((properties) => {
+          sink.postMessage({ type: 'nedTypeQueryResult', id: message.id, properties });
+        });
         return;
       }
       void handleWebviewMessage(session, sink, document.uri, message);
@@ -271,6 +284,11 @@ export async function handleWebviewMessage(
       // in `eventLogTableView.ts` (needs the controller to resolve/open a chart
       // editor). Present here only so this switch stays a complete map of every
       // message type.
+      break;
+    case 'nedTypeQuery':
+      // Phase U8: only ever sent by the Sequence Chart webview and always intercepted
+      // in `SequenceChartEditorProvider`'s own pump (needs the LanguageClient this
+      // shared function has no access to) -- present for switch completeness only.
       break;
   }
 }

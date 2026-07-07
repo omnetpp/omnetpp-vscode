@@ -450,6 +450,17 @@ export interface MapCoordsResult {
 export interface AdjacencyParams {
   /** Axis order: `moduleIds[i]` is axis index `i`. */
   moduleIds: number[];
+  /**
+   * ADDITIVE (phase U8, axis management): extra module-id -> axis-index mappings for
+   * modules that have NO axis of their own but whose events should count toward an
+   * ancestor's axis (Java's `moduleIdToAxisModuleIndexMap` maps EVERY module id in the
+   * tree to its nearest open-ancestor axis, `SequenceChart.calculateModuleIdToAxisModuleIndexMap()`
+   * -- without this, a collapsed compound module's inner traffic is invisible to the
+   * minimize-crossings weight matrix). Keys are module ids as strings (JSON object
+   * keys); values are indices into `moduleIds`. Entries for ids already in `moduleIds`
+   * are ignored (the positional mapping wins).
+   */
+  moduleIdToAxisIndex?: Record<string, number>;
   /** Exact range (mutually exclusive with `numberOfSamples`): every event from `startEventNumber` to `endEventNumber` is scanned. */
   startEventNumber?: number;
   endEventNumber?: number;

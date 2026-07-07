@@ -634,6 +634,15 @@ export class EngineSession {
   scAdjacencyMatrix(params: AdjacencyParams): AdjacencyResult {
     const facade = this.sc;
     const moduleIdToAxisIndexMap = new Map<number, number>();
+    // Phase U8 (additive): descendant-module -> ancestor-axis mappings first, so the
+    // positional `moduleIds` seeding below wins for any id present in both (see
+    // `AdjacencyParams.moduleIdToAxisIndex`'s doc comment in elogProtocol.ts).
+    if (params.moduleIdToAxisIndex) {
+      for (const [idString, axisIndex] of Object.entries(params.moduleIdToAxisIndex)) {
+        const id = Number(idString);
+        if (Number.isSafeInteger(id) && axisIndex >= 0 && axisIndex < params.moduleIds.length) moduleIdToAxisIndexMap.set(id, axisIndex);
+      }
+    }
     params.moduleIds.forEach((id, index) => moduleIdToAxisIndexMap.set(id, index));
     let matrix: number[];
     if (params.numberOfSamples !== undefined) {
