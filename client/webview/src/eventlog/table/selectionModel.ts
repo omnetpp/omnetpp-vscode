@@ -137,3 +137,15 @@ export function moveFocusTo(state: SelectionState, element: RowRef, options: Mov
 export function gotoElement(element: RowRef): SelectionState {
   return { anchor: element, focus: element, ranges: [{ from: element, to: element }] };
 }
+
+/**
+ * Phase U10 (cheap gap) -- Ctrl+A "select all". Ranges are ref pairs (see this file's
+ * header), so the whole table is exactly one range from its first to its last row --
+ * nothing in between needs to be fetched/materialized. Focus moves to `last` (mirroring
+ * `gotoElement()`'s "focus follows the operation" convention); `first` becomes the new
+ * anchor, so a subsequent Shift+click/arrow extends/shrinks from the top, matching how
+ * every other whole-range selection in this reducer anchors at its start.
+ */
+export function selectAll(first: RowRef, last: RowRef): SelectionState {
+  return { anchor: first, focus: last, ranges: [normalizeRange(first, last)] };
+}

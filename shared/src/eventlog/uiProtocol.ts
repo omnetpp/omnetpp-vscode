@@ -219,7 +219,24 @@ export type WebviewToHostMessage =
    * (`client/src/eventlog/eventLogDialogs.ts`) for the "table only, no chart open yet"
    * case.
    */
-  | { type: 'requestFilterPanel' };
+  | { type: 'requestFilterPanel' }
+  /**
+   * ADDITIVE (phase U10, "Go to NED Declaration"): both the Sequence Chart's axis
+   * context menu (any axis module, `chartContextMenu.ts`'s `axisSection()`) and the
+   * Event Log table's row context menu (a focused row whose entry is a
+   * `ModuleCreatedEntry`/`ModuleFoundEntry` -- both `ModuleDescriptionEntry` subtypes,
+   * see `shared/src/eventlog/entries.ts`) let the user jump straight to the module's
+   * NED type declaration, mirroring the Eclipse IDE's "Open NED Declaration" action
+   * reachable from the same object menus there. `typeName` is always already a fully-
+   * qualified NED type name (`ModuleDescriptionEntry.nedTypeName`'s own doc comment) --
+   * no client-side name resolution needed. The host
+   * (`client/src/eventlog/nedNavigation.ts`) resolves it via the language server's
+   * `get_ned_type` MCP tool (same path `nedTypeQuery.ts` uses) and opens the document at
+   * its `location` itself; no response message is needed since the webview has nothing
+   * further to do either way -- an unresolvable type or a missing language client
+   * degrades to a plain VS Code status message host-side.
+   */
+  | { type: 'gotoNedDeclaration'; typeName: string };
 
 // ---------------------------------------------------------------------------------
 // host -> webview

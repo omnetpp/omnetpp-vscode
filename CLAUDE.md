@@ -52,10 +52,24 @@ Four workspaces (monorepo, managed by Bun's workspaces), wired together by TypeS
   included). Uses `node16` module resolution because the MCP SDK ships subpaths via a
   package.json `exports` map (the client uses `bundler` resolution for the same reason).
 
+The **eventlog subsystem** (Sequence Chart custom editor for `*.elog` + Event Log table
+panel view) spans these workspaces: the engine in `shared/src/eventlog/` is a
+host-agnostic TypeScript port of the OMNeT++ Java eventlog library (indexed random
+access, bounded memory — built for multi-GB logs and live follow of a running
+simulation). Each open `.elog` gets its own worker child process (`client/worker/` →
+`dist/eventlogWorker.js`): JSON-RPC over stdio on the main thread, the synchronous
+engine on a `node:worker_threads` thread with real mid-scan cancellation. The two
+webview apps live under `client/webview/src/eventlog/` (browser IIFE bundles
+`dist/webview/sequenceChart.js` / `dist/webview/eventLogTable.js`, protocol in
+`shared/src/eventlog/uiProtocol.ts`). The `elog_*` MCP tools
+(`shared/src/mcp/elogTools.ts`) are served by the standalone `dist/opp_ide_mcp.js` only,
+not by the live LSP bridge.
+
 Data flow: `client` reads `omnetpp.*` settings → passes them to `server` via LSP
 `initializationOptions` → `server` builds the project index and answers requests using
-`shared`. **UI is tree views + input boxes + one webview** (the NED preview panel; keep
-any new webview code under `client/webview/` and browser-safe).
+`shared`. **UI is tree views + input boxes + webviews** (the NED preview panel, the
+Sequence Chart editor, and the Event Log table; keep any new webview code under
+`client/webview/` and browser-safe).
 
 ### Things that bite
 
@@ -151,7 +165,10 @@ For the MCP feature (after `bun run dev:build`):
 `preview-smoke.mjs` checks the `omnetpp/nedPreview` scene request shape the same way. Note: MCP stdio is
 **newline-delimited JSON**, not LSP `Content-Length` framing. `lint-cli-smoke.mjs` drives
 the bundled CLI linter (`dist/opp_lint.js`) over a throwaway project (diagnostics,
-suppression, JSON shape, exit codes).
+suppression, JSON shape, exit codes). For the eventlog feature (after `bun run dev:build`):
+`elog-worker-smoke.mjs` drives the bundled worker (`dist/eventlogWorker.js`) end to end
+over its JSON-RPC transport, `eventlog-ui-smoke.mjs` drives the client session layer
+headlessly; the manual F5 checklist is `docs/eventlog-manual-tests.md`.
 
 ## Conventions
 

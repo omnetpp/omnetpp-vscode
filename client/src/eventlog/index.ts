@@ -22,7 +22,10 @@ import {
  * point called from `extension.ts`. `client` (the `LanguageClient`) serves the
  * chart's NED type-property lookups (phase U8, `nedTypeQuery.ts` -- the
  * Network Node/Network Interface preset configurations); everything else in the
- * eventlog UI talks to its own worker processes, not the language server.
+ * eventlog UI talks to its own worker processes, not the language server. Phase U10
+ * additionally reuses `client` for both views' "Go to NED Declaration" action
+ * (`nedNavigation.ts`), so it is now threaded into `EventLogTableViewProvider` too, not
+ * just the Sequence Chart editor.
  */
 export function registerEventLog(context: vscode.ExtensionContext, client?: LanguageClient): void {
   const controller = new EventLogController(context);
@@ -30,7 +33,7 @@ export function registerEventLog(context: vscode.ExtensionContext, client?: Lang
 
   context.subscriptions.push(SequenceChartEditorProvider.register(context, controller, client));
 
-  const { provider: tableView, disposable: tableViewDisposable } = EventLogTableViewProvider.register(context, controller);
+  const { provider: tableView, disposable: tableViewDisposable } = EventLogTableViewProvider.register(context, controller, client);
   context.subscriptions.push(tableViewDisposable);
 
   // seed the pin toggle's context key (defaults to unpinned)

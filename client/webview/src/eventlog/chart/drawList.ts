@@ -297,10 +297,13 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
   primitives.push({ kind: 'gutter', part: 'left', x: 0, y: 0, w: GUTTER_LEFT_WIDTH, h: viewport.canvasHeight, color: theme.background });
 
   // ---- simtime ruler ticks (vertical hairlines spanning the content height; labels drawn separately as 'label') ----
+  // Phase U10 (cheap-gap fix): the hairline itself (`showHairlines`, Java's `drawGutters()`
+  // `SequenceChart.java:3939`) is gated separately from the tick LABEL, which is not a
+  // hairline and has no Java flag of its own -- it is the ruler text drawn regardless.
   for (const tick of ticks) {
     const x = contentX(tick.tc, viewport);
     if (x < GUTTER_LEFT_WIDTH || x > viewport.canvasWidth) continue;
-    primitives.push({ kind: 'tick', x, y0: GUTTER_TOP_HEIGHT, y1: viewport.canvasHeight, color: theme.border });
+    if (flags.showHairlines) primitives.push({ kind: 'tick', x, y0: GUTTER_TOP_HEIGHT, y1: viewport.canvasHeight, color: theme.border });
     primitives.push({ kind: 'label', x: x + 2, y: GUTTER_TOP_HEIGHT - 4, text: tick.label, color: theme.descriptionForeground, align: 'left' });
   }
 

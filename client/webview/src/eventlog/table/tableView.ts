@@ -44,11 +44,12 @@ import {
 } from '@omnetpp/shared/elog-protocol';
 import type { Bookmark, EventLogSelection, RevealTarget, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
 import type { EngineRpc } from '../common/rpc';
+import { loadPersistedBlob, withVersion } from '../common/persistedState';
 import { showContextMenu } from '../common/contextMenu';
 import { buildToolbar, type ToolbarHandle } from '../common/toolbar';
 import { createRowPool, computeTopIndex, type RowPool } from './rowPool';
 import { buildTableContextMenu, type TableMenuActions } from './tableContextMenu';
-import { compareRowRef, gotoElement, isSelected, moveFocusTo, refEquals, EMPTY_SELECTION, type SelectionState } from './selectionModel';
+import { compareRowRef, gotoElement, isSelected, moveFocusTo, refEquals, selectAll as selectAllRange, EMPTY_SELECTION, type SelectionState } from './selectionModel';
 import { computeScrollbarGeometry, computeScrollbarPercentage, percentageToScrollbarSelection } from './scrollMath';
 
 /** Java `EventLogTable`'s column defaults (Event# 120px, Time 200px, Details flexible). */
@@ -62,7 +63,12 @@ interface PersistedTableState {
   filterMode?: EventLogTableFilterMode;
   customFilterPattern?: string;
   colWidths?: { eventNo: number; time: number };
+  /** Phase U10 (GAP 2) -- the last anchor row's event number (`lastAnchorRef`), debounced-persisted on scroll/anchor changes (`notePositionActivity()`) so reopening the table resumes near where the user left it instead of always jumping back to row 0. `undefined` = never persisted (a fresh file, or an older blob) -- `start()` then falls back to `{kind: 'first'}`. */
+  lastEventNumber?: number;
 }
+
+/** Phase U10 -- bump whenever `PersistedTableState`'s shape changes in a way older code could misinterpret; see `client/webview/src/eventlog/common/persistedState.ts`'s header for the tolerant-load policy this gates. */
+const TABLE_STATE_VERSION = 1;
 
 export interface TableViewOptions {
   root: HTMLElement;
@@ -111,13 +117,9 @@ export interface TableViewHandle {
   dispose(): void;
 }
 
-function isPersistedTableState(v: unknown): v is PersistedTableState {
-  return typeof v === 'object' && v !== null;
-}
-
 export function createTableView(options: TableViewOptions): TableViewHandle {
   const { root, rpc, postToHost } = options;
-  const persisted = isPersistedTableState(options.persistedState) ? options.persistedState : {};
+  const persisted = loadPersistedBlob<PersistedTableState>(options.persistedState, TABLE_STATE_VERSION);
 
   let modes: TableRenderModes = { ...DEFAULT_TABLE_RENDER_MODES, ...persisted.modes };
   let filterMode: EventLogTableFilterMode = persisted.filterMode ?? EventLogTableFilterMode.ALL_ENTRIES;
@@ -180,6 +182,20 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
   /** Phase U6 -- event numbers with an `'Event'`-kind bookmark, for the row-background tint (the port plan's "table = row background tint" -- see this file's `renderRowInto()`). */
   let bookmarkedEventNumbers = new Set<number>(options.initialBookmarks?.filter((b) => b.kind === 'Event').map((b) => b.eventNumber!));
   let scrolledToEnd = false;
+  /**
+   * Phase U10 (cheap gap) -- `VirtualTable.java`'s ArrowLeft/ArrowRight horizontal
+   * scroll (10px/keystroke). The DOM table has no native horizontal scrollbar (the
+   * fixed-width Event#/Time columns + flexible Details column normally fit the
+   * viewport), but `.elog-rows`/`.elog-table` are both `overflow: hidden` (see
+   * `webviewHtml.ts`) and the two fixed columns have no upper resize bound
+   * (`wireResizer()` above), so wide columns or a narrow panel CAN clip content with no
+   * way to reach it -- this offset (applied as a per-row `translateX()` in `repaint()`)
+   * is that reach mechanism. Clamped only at the left edge (0); no measured
+   * right-edge clamp (Java's own is against the real content width, which this port's
+   * absolutely-positioned/virtualized rows don't cheaply expose) -- simplest faithful
+   * variant per the parity audit's cheap-gap work order.
+   */
+  let horizontalScrollPx = 0;
   let requestSeq = 0;
   let viewportRowCount = 1;
   let disposed = false;
@@ -309,6 +325,7 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
     scrolledToEnd = anchor.kind === 'last';
     repaint();
     void refreshScrollbar();
+    notePositionActivity(); // Phase U10 (GAP 2) -- lastAnchorRef just moved
   }
 
   let pendingScrollRows = 0;
@@ -345,9 +362,11 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
 
   function repaint(): void {
     const poolRows = rowPool.resize(viewportRowCount);
+    const transform = horizontalScrollPx > 0 ? `translateX(-${horizontalScrollPx}px)` : '';
     for (let i = 0; i < poolRows.length; i++) {
       const row = rows[topIndex + i];
       const el = poolRows[i];
+      el.style.transform = transform; // Phase U10 (cheap gap) -- horizontal scroll offset, see its own doc comment
       if (!row) {
         el.style.visibility = 'hidden';
         continue;
@@ -471,6 +490,7 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
       if (idx < topIndex) topIndex = idx;
       else if (idx > topIndex + viewportRowCount - 1) topIndex = idx - viewportRowCount + 1;
       lastAnchorRef = rows[topIndex]?.ref ?? lastAnchorRef;
+      notePositionActivity(); // Phase U10 (GAP 2) -- reused-window scroll, no reload() of its own to trigger this
       return;
     }
     if (rows.length === 0) {
@@ -491,6 +511,35 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
     if (ctrl && e.key.toLowerCase() === 'f') {
       e.preventDefault();
       openFindBar();
+      return;
+    }
+    // Phase U10 (cheap gap) -- F5 = Refresh, same `checkChanges` RPC the context-menu
+    // Refresh item and toolbar Refresh button already use (`EventLogTableContributor`
+    // plugin.xml binding; the chart canvas's own F5 handler is `interactions.ts`'s
+    // `onRefresh`, ported already -- this closes the table-side gap noted in the parity
+    // audit's "Cheap gaps" section).
+    if (e.key === 'F5') {
+      e.preventDefault();
+      void rpc.request(ElogMethods.checkChanges, undefined);
+      return;
+    }
+    // Phase U10 (cheap gap) -- Ctrl+Space: keyboard toggle-select of the focused row,
+    // port of `VirtualTable.java`'s key listener (`moveFocusBy(0, false, true, true)`):
+    // same distance-0 "stay on the focused row" move, ctrl set, but `click=true` so it
+    // goes through `moveFocusTo()`'s ctrl+mouse branch (toggle membership) rather than
+    // the ctrl+keyboard branch (which only moves focus, see that function's doc comment).
+    if (ctrl && e.key === ' ') {
+      e.preventDefault();
+      const focus = selection.focus;
+      if (focus) await applyMoveFocus(focus, false, true, true);
+      return;
+    }
+    // Phase U10 (cheap gap) -- Ctrl+A: select all. `SelectionRange`s are ref pairs (see
+    // `selectionModel.ts`'s header), so the whole table is representable as one range
+    // from the first to the last row -- no need to materialize/fetch every row.
+    if (ctrl && e.key.toLowerCase() === 'a') {
+      e.preventDefault();
+      await selectAll();
       return;
     }
     // Phase U6 -- the "Go To" family (`EventLogTableContributor.java`'s accelerators,
@@ -516,6 +565,16 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
     if (e.key === 'Enter') {
       e.preventDefault();
       requestRevealInChart();
+      return;
+    }
+    // Phase U10 (cheap gap) -- ArrowLeft/ArrowRight: horizontal scroll by 10px
+    // (`VirtualTable.java`'s key listener; see `horizontalScrollPx`'s own doc comment
+    // above for why this is reachable, not dead code, despite the table having no
+    // native scrollbar).
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      horizontalScrollPx = Math.max(0, horizontalScrollPx + (e.key === 'ArrowLeft' ? -10 : 10));
+      repaint();
       return;
     }
     let distance = 0;
@@ -587,6 +646,29 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
     const ref = selection.focus;
     if (!ref) return;
     postToHost({ type: 'revealRequest', target: { kind: 'event', eventNumber: ref.eventNumber, ref } });
+  }
+
+  /**
+   * Phase U10 (cheap gap) -- Ctrl+A "select all": fetches the table's first and last
+   * row refs (same `elog/table/getRows` edge lookups `gotoEdge()` uses) and hands them
+   * to `selectionModel.ts`'s `selectAll()`, which represents the whole table as a
+   * single `{from, to}` range -- no per-row materialization, matching that module's own
+   * "ranges are ref pairs" design (see its header). A no-op on an empty table.
+   */
+  async function selectAll(): Promise<void> {
+    const edge = async (kind: 'first' | 'last'): Promise<RowRef | undefined> => {
+      try {
+        const win = await rpc.request<RowWindow>(ElogMethods.tableGetRows, { anchor: { kind }, before: 0, after: 1, filterMode, customFilterPattern } satisfies RowWindowParams);
+        return win.rows[0]?.ref;
+      } catch {
+        return undefined;
+      }
+    };
+    const [first, last] = await Promise.all([edge('first'), edge('last')]);
+    if (!first || !last) return;
+    selection = selectAllRange(first, last);
+    repaint();
+    emitSelectionChanged();
   }
 
   async function gotoEdge(which: 'first' | 'last', e: KeyboardEvent): Promise<void> {
@@ -719,6 +801,24 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
     postToHost({ type: 'toggleBookmark', candidate: { kind: 'Event', eventNumber: ref.eventNumber } });
   }
 
+  /**
+   * Phase U10 -- "Go to NED Declaration": resolvable only for the currently-rendered
+   * window's rows (`rows`, the same set `handleContextMenu()`/`copySelection()` already
+   * work off of -- no reason to fetch a row outside the visible window just to check its
+   * type). A row is navigable exactly when its underlying entry is a
+   * `ModuleDescriptionEntry` subtype (`ModuleCreatedEntry`/`ModuleFoundEntry`, see
+   * `shared/src/eventlog/entries.ts`) -- both expose the module's fully-qualified NED
+   * type name through the same `'t'` attribute (`ModuleDescriptionEntry.getAsString('t')`),
+   * already present in `TableRow.fields` with no extra engine round trip needed.
+   */
+  function focusedRowNedTypeName(): string | null {
+    if (!selection.focus) return null;
+    const row = rows.find((r) => refEquals(r.ref, selection.focus!));
+    if (!row) return null;
+    if (row.entryClassName !== 'ModuleCreatedEntry' && row.entryClassName !== 'ModuleFoundEntry') return null;
+    return row.fields['t'] || null;
+  }
+
   function handleContextMenu(e: MouseEvent): void {
     e.preventDefault();
     const actions: TableMenuActions = {
@@ -735,16 +835,76 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
       openFindBar,
       refresh: () => void rpc.request(ElogMethods.checkChanges, undefined),
       openFilter: () => postToHost({ type: 'requestFilterPanel' }),
+      gotoNedDeclaration: () => {
+        const typeName = focusedRowNedTypeName();
+        if (typeName) postToHost({ type: 'gotoNedDeclaration', typeName });
+      },
+      setLineFilterMode,
+      setTypeMode,
+      setNameMode,
+      setDisplayMode,
     };
-    const entries = buildTableContextMenu({ hasFocus: selection.focus !== null, hasSelection: rows.some((r) => isSelected(selection, r.ref)), actions });
+    const entries = buildTableContextMenu({
+      hasFocus: selection.focus !== null,
+      hasSelection: rows.some((r) => isSelected(selection, r.ref)),
+      focusedRowNedTypeName: focusedRowNedTypeName(),
+      currentFilterMode: filterMode,
+      currentModes: modes,
+      actions,
+    });
     showContextMenu(e.clientX, e.clientY, entries);
   }
 
   // ---- persistence ------------------------------------------------------------------------
 
   function persistState(): void {
-    const state: PersistedTableState = { modes, filterMode, customFilterPattern, colWidths };
-    postToHost({ type: 'stateChanged', state });
+    const state: PersistedTableState = { modes, filterMode, customFilterPattern, colWidths, lastEventNumber: lastAnchorRef?.eventNumber };
+    postToHost({ type: 'stateChanged', state: withVersion(state, TABLE_STATE_VERSION) });
+  }
+
+  /** Phase U10 (GAP 2) -- debounces `persistState()` after scroll/anchor activity (`reload()`'s success path, `revealRef()`'s reused-window branch) so a scroll/PageDown spree doesn't spam a `stateChanged` postMessage per row; mirrors `chartMain.ts`'s `noteViewportActivity()` (same window, same "settle before persisting" intent). Mode/column-width changes still persist immediately via their own direct `persistState()` calls above -- only the high-frequency scroll-position updates go through this debounce. */
+  const POSITION_PERSIST_DEBOUNCE_MS = 400;
+  let positionPersistTimer: ReturnType<typeof setTimeout> | undefined;
+  function notePositionActivity(): void {
+    clearTimeout(positionPersistTimer);
+    positionPersistTimer = setTimeout(persistState, POSITION_PERSIST_DEBOUNCE_MS);
+  }
+
+  // ---- view-mode setters (phase U10 cheap gap) -----------------------------------------
+  // Shared by the toolbar dropdowns (below) AND the context menu's radio submenus
+  // (`handleContextMenu()`) -- one setter per mode, so both discoverable surfaces always
+  // stay in sync (same state, same reload path) rather than duplicating the mutation.
+
+  /** Handle of the toolbar built by `buildTableToolbar()`, kept so the setters below can update its dropdown display when a mode changes via the CONTEXT MENU (the toolbar's own `onChange` already reflects a toolbar-driven change for free). */
+  let toolbarHandle: ToolbarHandle | undefined;
+
+  function setLineFilterMode(mode: EventLogTableFilterMode): void {
+    filterMode = mode;
+    toolbarHandle?.setDropdownValue('lineFilter', mode === EventLogTableFilterMode.CUSTOM_ENTRIES ? 'CUSTOM' : mode);
+    toolbarHandle?.setItemVisible('customFilter', mode === EventLogTableFilterMode.CUSTOM_ENTRIES);
+    persistState();
+    void reload({ kind: 'ref', ref: lastAnchorRef ?? { eventNumber: 0, entryIndex: 0 } }, 0);
+  }
+
+  function setNameMode(mode: TableRenderModes['nameMode']): void {
+    modes = { ...modes, nameMode: mode };
+    toolbarHandle?.setDropdownValue('nameMode', mode);
+    persistState();
+    if (lastAnchorRef) void reload({ kind: 'ref', ref: lastAnchorRef }, 0);
+  }
+
+  function setTypeMode(mode: TableRenderModes['typeMode']): void {
+    modes = { ...modes, typeMode: mode };
+    toolbarHandle?.setDropdownValue('typeMode', mode);
+    persistState();
+    if (lastAnchorRef) void reload({ kind: 'ref', ref: lastAnchorRef }, 0);
+  }
+
+  function setDisplayMode(mode: TableRenderModes['displayMode']): void {
+    modes = { ...modes, displayMode: mode };
+    toolbarHandle?.setDropdownValue('displayMode', mode);
+    persistState();
+    if (lastAnchorRef) void reload({ kind: 'ref', ref: lastAnchorRef }, 0);
   }
 
   // ---- toolbar (Line Filter / Name / Type / Display + Refresh, mounted by tableMain.ts) ---
@@ -771,12 +931,7 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
             { value: EventLogTableFilterMode.EVENT_ENTRIES, label: 'Events only' },
             { value: 'CUSTOM', label: 'Custom…' },
           ],
-          onChange: (value) => {
-            filterMode = value === 'CUSTOM' ? EventLogTableFilterMode.CUSTOM_ENTRIES : (value as EventLogTableFilterMode);
-            handle.setItemVisible('customFilter', filterMode === EventLogTableFilterMode.CUSTOM_ENTRIES);
-            persistState();
-            void reload({ kind: 'ref', ref: lastAnchorRef ?? { eventNumber: 0, entryIndex: 0 } }, 0);
-          },
+          onChange: (value) => setLineFilterMode(value === 'CUSTOM' ? EventLogTableFilterMode.CUSTOM_ENTRIES : (value as EventLogTableFilterMode)),
         },
       },
       {
@@ -806,11 +961,7 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
             { value: 'FULL_NAME', label: 'Full name' },
             { value: 'FULL_PATH', label: 'Full path' },
           ],
-          onChange: (value) => {
-            modes = { ...modes, nameMode: value as TableRenderModes['nameMode'] };
-            persistState();
-            if (lastAnchorRef) void reload({ kind: 'ref', ref: lastAnchorRef }, 0);
-          },
+          onChange: (value) => setNameMode(value as TableRenderModes['nameMode']),
         },
       },
       {
@@ -823,11 +974,7 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
             { value: 'CPP', label: 'C++ type' },
             { value: 'NED', label: 'NED type' },
           ],
-          onChange: (value) => {
-            modes = { ...modes, typeMode: value as TableRenderModes['typeMode'] };
-            persistState();
-            if (lastAnchorRef) void reload({ kind: 'ref', ref: lastAnchorRef }, 0);
-          },
+          onChange: (value) => setTypeMode(value as TableRenderModes['typeMode']),
         },
       },
       {
@@ -840,11 +987,7 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
             { value: 'DESCRIPTIVE', label: 'Descriptive' },
             { value: 'RAW', label: 'Raw' },
           ],
-          onChange: (value) => {
-            modes = { ...modes, displayMode: value as TableRenderModes['displayMode'] };
-            persistState();
-            if (lastAnchorRef) void reload({ kind: 'ref', ref: lastAnchorRef }, 0);
-          },
+          onChange: (value) => setDisplayMode(value as TableRenderModes['displayMode']),
         },
       },
     ]);
@@ -856,11 +999,16 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
   // DOM (`#toolbar`, alongside the status strip U1 built) -- looked up lazily so this
   // module doesn't need to know tableMain.ts's exact DOM layout beyond that one id.
   const toolbarContainer = document.getElementById('toolbar');
-  if (toolbarContainer) buildTableToolbar(toolbarContainer, () => void rpc.request(ElogMethods.checkChanges, undefined));
+  if (toolbarContainer) toolbarHandle = buildTableToolbar(toolbarContainer, () => void rpc.request(ElogMethods.checkChanges, undefined));
 
   return {
     start(): void {
-      initialLoadPromise = reload({ kind: 'first' }, 0);
+      // Phase U10 (GAP 2) -- resume near the last remembered position instead of always
+      // jumping back to row 0; `'event'` finds the nearest still-existing row the same
+      // way `reanchorCurrent()`'s post-filter-change re-anchor already does. Falls back
+      // to `'first'` for a fresh file (no persisted anchor at all).
+      const anchor: RowAnchor = persisted.lastEventNumber !== undefined ? { kind: 'event', eventNumber: persisted.lastEventNumber } : { kind: 'first' };
+      initialLoadPromise = reload(anchor, 0);
     },
     onEngineChanged(change): void {
       if (change === 'overwritten') {

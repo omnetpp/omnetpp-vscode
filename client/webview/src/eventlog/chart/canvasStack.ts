@@ -152,13 +152,34 @@ export interface CanvasStackHandle {
    * status strip for transparency, but on today's all-vector primitive set it is
    * mostly inert -- documented rather than silently pretended-real.
    */
-  render(primitives: DrawPrimitive[], antialiasing: boolean): void;
+  /** Phase U10 -- `baseFontSizePx` threads `omnetpp.sequenceChart.fontSize` through to `drawPrimitiveToCanvas()` (see its own doc comment); omitted/`undefined` keeps this file's original hardcoded 12/11/10px sizes. */
+  render(primitives: DrawPrimitive[], antialiasing: boolean, baseFontSizePx?: number): void;
   dispose(): void;
 }
 
 const NONCACHEABLE_KINDS = new Set<DrawPrimitive['kind']>(['gutter', 'tick', 'axisLabel', 'label', 'selectionMark', 'bookmarkMark', 'infoPanel', 'timeDifferenceLabel', 'moduleAction']);
 
-export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrimitive): void {
+/**
+ * Phase U10 (cheap-gap closure) -- the base chart label font size in CSS px, driving
+ * every hardcoded font string below. `12` is this file's own long-standing default
+ * (every call site before this phase), so it doubles as the "0 = keep current
+ * defaults" value `omnetpp.sequenceChart.fontSize`'s markdownDescription promises
+ * (`sequenceChartEditor.ts`/`eventLogTableView.ts` already turn a `0` setting into
+ * `undefined` before it ever reaches here). The three sizes below (main labels /
+ * time-difference+info-panel labels / rotated axis-header labels) were always 12/11/10
+ * -- i.e. base, base-1, base-2 -- so scaling by that same fixed offset at any other
+ * base preserves their original relative proportions without a second set of magic
+ * numbers. HONEST LIMIT (noted in the setting's own doc, not just here): this is a
+ * uniform scale, not real font-metrics-aware relayout -- at far-from-12 sizes, label
+ * spacing/gutter widths sized for the 12px default may look slightly cramped or
+ * loose (no DPI/metrics work is in scope for this fix).
+ */
+export const DEFAULT_CHART_FONT_SIZE_PX = 12;
+
+export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrimitive, baseFontSizePx: number = DEFAULT_CHART_FONT_SIZE_PX): void {
+  const mainFont = `${baseFontSizePx}px var(--vscode-font-family, sans-serif)`;
+  const secondaryFont = `${baseFontSizePx - 1}px var(--vscode-font-family, sans-serif)`;
+  const axisHeaderFont = `${baseFontSizePx - 2}px var(--vscode-font-family, sans-serif)`;
   switch (p.kind) {
     case 'gutter':
       ctx.fillStyle = p.color;
@@ -176,12 +197,12 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       ctx.fillStyle = p.color;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.font = '12px var(--vscode-font-family, sans-serif)';
+      ctx.font = mainFont;
       ctx.fillText(p.text, p.x, p.y);
       break;
     case 'label':
       ctx.fillStyle = p.color;
-      ctx.font = '12px var(--vscode-font-family, sans-serif)';
+      ctx.font = mainFont;
       if (p.rotateDeg) {
         // Method-call names (Java: drawn rotated -90 along the call's left edge, SequenceChart.java:3775-3781).
         ctx.save();
@@ -201,7 +222,7 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       ctx.fillStyle = p.color;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.font = '11px var(--vscode-font-family, sans-serif)';
+      ctx.font = secondaryFont;
       ctx.fillText(p.text, p.x, p.y);
       break;
     case 'regionBand':
@@ -218,7 +239,7 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       if (p.y1 - p.y0 > 20) {
         ctx.save();
         ctx.fillStyle = '#000000';
-        ctx.font = '10px var(--vscode-font-family, sans-serif)';
+        ctx.font = axisHeaderFont;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.translate(p.x + w / 2, (p.y0 + p.y1) / 2);
@@ -274,7 +295,7 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       ctx.lineWidth = 1;
       ctx.strokeRect(p.x, p.y, p.w, p.h);
       ctx.fillStyle = p.color;
-      ctx.font = '11px var(--vscode-font-family, sans-serif)';
+      ctx.font = secondaryFont;
       ctx.textAlign = 'right';
       ctx.textBaseline = 'top';
       for (let i = 0; i < p.lines.length; i++) ctx.fillText(p.lines[i], p.x + p.w - 4, p.y + 3 + i * 15);
@@ -410,7 +431,7 @@ export function createCanvasStack(container: HTMLElement): CanvasStackHandle {
   }
 
 
-  function render(primitives: DrawPrimitive[], antialiasing: boolean): void {
+  function render(primitives: DrawPrimitive[], antialiasing: boolean, baseFontSizePx?: number): void {
     const contentCtx = content.getContext('2d')!;
     const overlayCtx = overlay.getContext('2d')!;
     for (const ctx of [contentCtx, overlayCtx]) {
@@ -419,7 +440,7 @@ export function createCanvasStack(container: HTMLElement): CanvasStackHandle {
       ctx.imageSmoothingEnabled = antialiasing;
       ctx.clearRect(0, 0, ctx.canvas.width / dpr, ctx.canvas.height / dpr);
     }
-    for (const p of primitives) drawPrimitiveToCanvas(NONCACHEABLE_KINDS.has(p.kind) ? overlayCtx : contentCtx, p);
+    for (const p of primitives) drawPrimitiveToCanvas(NONCACHEABLE_KINDS.has(p.kind) ? overlayCtx : contentCtx, p, baseFontSizePx);
     for (const ctx of [contentCtx, overlayCtx]) ctx.restore();
   }
 
@@ -441,7 +462,7 @@ export function createCanvasStack(container: HTMLElement): CanvasStackHandle {
  * identical to what the user already sees on screen, not a separate rasterization path
  * that could silently drift out of sync with it.
  */
-export function renderPrimitivesToCanvas(widthPx: number, heightPx: number, primitives: readonly DrawPrimitive[], backgroundColor: string, scale = 1): HTMLCanvasElement {
+export function renderPrimitivesToCanvas(widthPx: number, heightPx: number, primitives: readonly DrawPrimitive[], backgroundColor: string, scale = 1, baseFontSizePx?: number): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(widthPx * scale));
   canvas.height = Math.max(1, Math.round(heightPx * scale));
@@ -450,7 +471,7 @@ export function renderPrimitivesToCanvas(widthPx: number, heightPx: number, prim
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
   ctx.fillStyle = backgroundColor;
   ctx.fillRect(0, 0, widthPx, heightPx);
-  for (const p of primitives) drawPrimitiveToCanvas(ctx, p);
+  for (const p of primitives) drawPrimitiveToCanvas(ctx, p, baseFontSizePx);
   ctx.restore();
   return canvas;
 }

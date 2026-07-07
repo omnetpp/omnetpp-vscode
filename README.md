@@ -37,12 +37,17 @@ or build it locally.
 - **Graphical NED preview**: a read-only rendering of the type under the cursor with the
   Eclipse IDE's visualization — icons, display strings, inherited submodules, IDE-identical
   auto-layout — with click-to-navigate, zoom, and SVG/PNG export.
+- **Sequence Chart & Event Log** for `.elog` event logs (recorded with
+  `record-eventlog=true`): a zoomable graphical chart of events, module axes, and message
+  arrows at Eclipse-IDE feature parity, plus a virtual Event Log table panel — handles
+  multi-gigabyte logs with bounded memory, live-follows a still-running simulation, and
+  supports event filtering, bookmarks, and SVG export.
 - **Activity-bar views**: Configurations, Module Hierarchy, Module Parameters, NED
   Inheritance, and Used By.
 - **`opp_lint`** — a standalone CLI for CI, pre-commit hooks, and scripts (no OMNeT++
   install needed).
-- **MCP tools** — 22 read/refactor tools that let an AI agent query and safely refactor
-  your model.
+- **MCP tools** — 23 read/refactor tools that let an AI agent query and safely refactor
+  your model, plus 7 `elog_*` tools for reading event logs (standalone MCP server).
 
 See the [User Guide](docs/USER_GUIDE.md) for the full list and usage details.
 

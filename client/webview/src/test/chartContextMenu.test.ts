@@ -1,7 +1,7 @@
 import { test } from 'bun:test';
 import assert from 'node:assert';
 import { TimelineMode } from '@omnetpp/shared/elog-protocol';
-import { buildChartContextMenu, type AxisModuleMenuInfo, type ChartMenuActions, type ChartMenuBuildParams } from '../eventlog/chart/chartContextMenu';
+import { buildChartContextMenu, buildShowHideEntries, type AxisModuleMenuInfo, type ChartMenuActions, type ChartMenuBuildParams } from '../eventlog/chart/chartContextMenu';
 import { DEFAULT_DISPLAY_FLAGS } from '../eventlog/chart/displayFlags';
 import type { MenuEntry } from '../eventlog/common/contextMenu';
 import type { HitObject } from '../eventlog/chart/hitTest';
@@ -70,6 +70,7 @@ function fakeActions(): ChartMenuActions & Record<string, unknown> {
     releaseMemory: record('releaseMemory'),
     copyImage: record('copyImage'),
     exportSvg: record('exportSvg'),
+    gotoNedDeclaration: record('gotoNedDeclaration'),
   } as unknown as ChartMenuActions & Record<string, unknown>;
 }
 
@@ -172,7 +173,7 @@ test('buildChartContextMenu: unresolvable dependency label falls back to a gener
 test('buildChartContextMenu: axis hit -- full U8 action set wired, enablement from resolveAxisInfo', () => {
   const actions = fakeActions();
   const hits: HitObject[] = [{ kind: 'axis', moduleId: 7 }];
-  const info: AxisModuleMenuInfo = { label: 'net.host[7] (id = 7)', hasParent: true, canExpand: true, canCollapse: false };
+  const info: AxisModuleMenuInfo = { label: 'net.host[7] (id = 7)', hasParent: true, canExpand: true, canCollapse: false, nedTypeName: 'inet.node.Host' };
   const entries = buildChartContextMenu(makeParams(actions, { hits, resolveAxisInfo: () => info }));
   const axisEntry = findEntry(entries, 'axis-7')! as { label: string };
   assert.equal(axisEntry.label, 'net.host[7] (id = 7)');
@@ -181,6 +182,10 @@ test('buildChartContextMenu: axis hit -- full U8 action set wired, enablement fr
   assert.deepEqual(actions.calls.centerOnAxis, [7]);
   (findEntry(sub, 'toggleBookmark') as { onSelect: () => void }).onSelect();
   assert.deepEqual(actions.calls.toggleAxisBookmark, [7]);
+  const gotoNed = findEntry(sub, 'gotoNedDeclaration')! as { disabled?: boolean; onSelect: () => void };
+  assert.ok(!gotoNed.disabled, 'a resolvable nedTypeName enables Go to NED Declaration');
+  gotoNed.onSelect();
+  assert.deepEqual(actions.calls.gotoNedDeclaration, [7]);
 
   for (const [id, name] of [
     ['removeAxisModule', 'removeAxisModule'],
@@ -207,8 +212,19 @@ test('buildChartContextMenu: axis hit with NO module tree (resolveAxisInfo null)
   for (const id of ['removeAxisModule', 'openCompoundModule', 'openParentModule', 'expandAxisModule', 'expandAxisModuleRecursively', 'collapseAxisModule', 'collapseAxisModuleSubmodules']) {
     assert.ok((findEntry(sub, id) as { disabled: boolean }).disabled, `${id} should be disabled without a module tree`);
   }
+  assert.ok((findEntry(sub, 'gotoNedDeclaration') as { disabled: boolean }).disabled, 'Go to NED Declaration should be disabled without a module tree');
   (findEntry(sub, 'center') as { onSelect: () => void }).onSelect();
   assert.deepEqual(actions.calls.centerOnAxis, [7]);
+});
+
+test('buildChartContextMenu: axis hit with a resolved node but no NED type name -- "Go to NED Declaration" disabled, other axis-management items unaffected', () => {
+  const actions = fakeActions();
+  const hits: HitObject[] = [{ kind: 'axis', moduleId: 7 }];
+  const info: AxisModuleMenuInfo = { label: 'net.host[7] (id = 7)', hasParent: true, canExpand: true, canCollapse: false, nedTypeName: null };
+  const entries = buildChartContextMenu(makeParams(actions, { hits, resolveAxisInfo: () => info }));
+  const sub = submenuOf(entries, 'axis-7');
+  assert.ok((findEntry(sub, 'gotoNedDeclaration') as { disabled: boolean }).disabled);
+  assert.ok(!(findEntry(sub, 'removeAxisModule') as { disabled: boolean }).disabled);
 });
 
 test('buildChartContextMenu: methodCall hits do not get a dedicated section (matches Java -- verified no such submenu in SequenceChartContributor)', () => {
@@ -360,4 +376,15 @@ test('buildChartContextMenu: Show/Hide submenu lists every toggle, checked state
 
   const arrowHeadsEntry = findEntry(sub, 'flag-showArrowHeads')! as { checked: boolean };
   assert.equal(arrowHeadsEntry.checked, true);
+});
+
+test('buildShowHideEntries (phase U10, chart toolbar Show/Hide button): same item list as the context menu submenu, standalone', () => {
+  const flags = { ...DEFAULT_DISPLAY_FLAGS, showEventNumbers: false };
+  const calls: unknown[][] = [];
+  const entries = buildShowHideEntries(flags, { toggleDisplayFlag: (...args) => calls.push(args) });
+  assert.ok(entries.length >= 24, 'expected ~25 Show/Hide toggles');
+  const eventNumbersEntry = findEntry(entries, 'flag-showEventNumbers')! as { checked: boolean; onSelect: () => void };
+  assert.equal(eventNumbersEntry.checked, false);
+  eventNumbersEntry.onSelect();
+  assert.deepEqual(calls[0], ['showEventNumbers']);
 });

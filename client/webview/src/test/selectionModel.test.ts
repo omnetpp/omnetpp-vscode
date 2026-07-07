@@ -1,7 +1,7 @@
 import { test } from 'bun:test';
 import assert from 'node:assert';
 import type { RowRef } from '@omnetpp/shared/elog-protocol';
-import { compareRowRef, EMPTY_SELECTION, gotoElement, isSelected, moveFocusTo } from '../eventlog/table/selectionModel';
+import { compareRowRef, EMPTY_SELECTION, gotoElement, isSelected, moveFocusTo, selectAll } from '../eventlog/table/selectionModel';
 
 function ref(eventNumber: number, entryIndex = 0): RowRef {
   return { eventNumber, entryIndex };
@@ -123,4 +123,24 @@ test('gotoElement: selects exactly the target element, anchor === focus', () => 
 test('isSelected: EMPTY_SELECTION never reports anything selected', () => {
   assert.ok(!isSelected(EMPTY_SELECTION, ref(0)));
   assert.ok(!isSelected(EMPTY_SELECTION, ref(123)));
+});
+
+// ---------------------------------------------------------------------------------
+// selectAll() -- phase U10 (cheap gap): Ctrl+A, whole table as one ref-pair range
+// ---------------------------------------------------------------------------------
+
+test('selectAll: selects every row from first to last as a single range, anchored at first with focus on last', () => {
+  const s = selectAll(ref(1), ref(500));
+  assert.deepEqual(s.anchor, ref(1));
+  assert.deepEqual(s.focus, ref(500));
+  assert.equal(s.ranges.length, 1);
+  assert.ok(isSelected(s, ref(1)));
+  assert.ok(isSelected(s, ref(250)));
+  assert.ok(isSelected(s, ref(500)));
+});
+
+test('selectAll: a single-row table selects just that row', () => {
+  const s = selectAll(ref(7), ref(7));
+  assert.ok(isSelected(s, ref(7)));
+  assert.equal(s.ranges.length, 1);
 });

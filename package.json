@@ -699,6 +699,24 @@
         "key": "alt+right",
         "mac": "ctrl+shift+-",
         "when": "activeWebviewPanelId == 'omnetpp.nedPreview'"
+      },
+      {
+        "command": "omnetpp.eventlog.gotoEvent",
+        "key": "ctrl+g",
+        "mac": "cmd+g",
+        "when": "activeCustomEditorId == 'omnetpp.sequenceChart' || view == 'omnetppEventLogTable'"
+      },
+      {
+        "command": "omnetpp.eventlog.gotoSimulationTime",
+        "key": "ctrl+shift+g",
+        "mac": "cmd+shift+g",
+        "when": "activeCustomEditorId == 'omnetpp.sequenceChart' || view == 'omnetppEventLogTable'"
+      },
+      {
+        "command": "omnetpp.eventlog.findNext",
+        "key": "ctrl+alt+k",
+        "mac": "cmd+alt+k",
+        "when": "activeCustomEditorId == 'omnetpp.sequenceChart' || view == 'omnetppEventLogTable'"
       }
     ],
     "configuration": {
@@ -858,12 +876,12 @@
             "NONLINEAR"
           ],
           "default": "SIMULATION_TIME",
-          "markdownDescription": "The Sequence Chart's initial timeline mode for a freshly opened `.elog` file."
+          "markdownDescription": "The Sequence Chart's initial timeline mode for a freshly opened `.elog` file. Only applies until the user (or a previous session) picks a mode for that specific file -- a per-file remembered timeline mode always takes priority over this default."
         },
         "omnetpp.sequenceChart.fontSize": {
           "type": "number",
           "default": 0,
-          "markdownDescription": "Font size (px) used for chart labels; `0` follows the editor font size."
+          "markdownDescription": "Font size (px) used for chart labels (axis labels, message names, time-difference/info-panel text, rotated axis-header text); `0` keeps the chart's own built-in default (12px). This is a uniform scale of the built-in sizes, not real font-metrics-aware relayout -- at sizes far from the default, label spacing/gutter widths may look slightly cramped or loose."
         },
         "omnetpp.sequenceChart.styleRules": {
           "type": "array",
@@ -873,12 +891,17 @@
         "omnetpp.eventlog.followEndOnAppend": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "While viewing the end of a still-appending `.elog` file (a live simulation run), automatically scroll to follow newly appended events."
+          "markdownDescription": "When a `.elog` file is opened for the first time (no remembered scroll position for it yet), start already following the end of the log -- as if End had just been pressed -- so a still-appending live run stays in view without an extra keypress. Re-read on every Sequence Chart webview reload, so a change applies the next time the file is (re)opened."
         },
         "omnetpp.eventlog.maxEngineMemoryMB": {
           "type": "number",
           "default": 0,
-          "markdownDescription": "Soft memory budget (MB) for the per-file eventlog engine's caches; `0` uses the engine's built-in default."
+          "markdownDescription": "Soft memory budget (MB) for the per-file eventlog engine's parsed-event cache; `0` uses the engine's built-in default (roughly 50,000 events). This is a rough heuristic (~2 KB/cached event), not a hard ceiling. Takes effect the next time the file is opened (baked into the engine at open time, not live-pushed to an already-open file -- use \"Release Memory\" to shrink an already-open file's cache immediately)."
+        },
+        "omnetpp.eventlog.pollIntervalMs": {
+          "type": "number",
+          "default": 3000,
+          "markdownDescription": "Fallback poll interval (ms) for detecting `.elog` file changes when filesystem-watch events don't fire (e.g. some network mounts, or a rename/recreate during a live run). `0` disables polling (filesystem-watch events remain the only change signal). Takes effect the next time the file is opened."
         }
       }
     }

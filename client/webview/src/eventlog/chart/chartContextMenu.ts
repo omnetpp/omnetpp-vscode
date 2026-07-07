@@ -47,6 +47,12 @@
  *  - Phase U9 ADDS (port plan's "U9: Export + polish" row): Release Memory, Copy
  *    Image to Clipboard, Export to SVG... -- in the same relative order as Java's
  *    `menuManager` (`SequenceChartContributor.java` lines ~718-727).
+ *  - Phase U10 ADDS "Go to NED Declaration" to the per-axis section (grouped with
+ *    Center/Toggle Bookmark, since it's an info action rather than an axis-management
+ *    structural one) -- opens the module's NED type declaration; disabled when the
+ *    module tree hasn't loaded or the resolved node has no NED type name (see
+ *    `uiProtocol.ts`'s `gotoNedDeclaration` message doc for the resolution path, and the
+ *    Event Log table's equivalent item in `tableContextMenu.ts`).
  *  - STILL OMITTED (not even as disabled placeholders — genuinely later-phase
  *    ownership, or out of this port's scope entirely per the port plan's phase
  *    table): Filter (dropdown -- superseded by the in-webview filter panel, U7),
@@ -72,6 +78,8 @@ export interface AxisModuleMenuInfo {
   hasParent: boolean;
   canExpand: boolean;
   canCollapse: boolean;
+  /** Phase U10 -- the module's fully-qualified NED type name (`ElogModule.nedTypeName`), or `null` when unknown/empty (disables "Go to NED Declaration" -- there is nothing to resolve). */
+  nedTypeName: string | null;
 }
 
 export interface ChartMenuActions {
@@ -87,6 +95,8 @@ export interface ChartMenuActions {
   toggleDependencyBookmark(hit: Extract<HitObject, { kind: 'dependency' }>): void;
   toggleAxisBookmark(moduleId: number): void;
   centerOnAxis(moduleId: number): void;
+  /** Phase U10 -- "Go to NED Declaration": opens the module's NED type declaration (see `uiProtocol.ts`'s `gotoNedDeclaration` message doc); the caller re-resolves the module's `nedTypeName` (already known not to be `null`, since the menu item disables itself otherwise -- see `axisSection()`). */
+  gotoNedDeclaration(moduleId: number): void;
   /** Phase U7 -- "Filter Causes/Consequences..." (per-event section). */
   filterCausesConsequences(eventNumber: number): void;
   /** Phase U7 -- "Filter Message..." (per-dependency section); only invoked when the hit resolves to a `RenderDependency` with a non-null `messageId` (see `resolveDependencyLabel`'s sibling `resolveDependencyMessageId` below). */
@@ -197,6 +207,8 @@ function axisSection(hit: Extract<HitObject, { kind: 'axis' }>, info: AxisModule
     submenu: [
       { id: 'center', label: 'Center', onSelect: () => actions.centerOnAxis(hit.moduleId) },
       { id: 'toggleBookmark', label: 'Toggle Bookmark', onSelect: () => actions.toggleAxisBookmark(hit.moduleId) },
+      // Phase U10 -- disabled when the module tree hasn't loaded, or the resolved node has no (known) NED type name.
+      { id: 'gotoNedDeclaration', label: 'Go to NED Declaration', disabled: info?.nedTypeName == null, onSelect: () => actions.gotoNedDeclaration(hit.moduleId) },
       { separator: true },
       { id: 'removeAxisModule', label: 'Remove Axis Module', disabled: noTree, onSelect: () => actions.removeAxisModule(hit.moduleId) },
       { id: 'openCompoundModule', label: 'Open Compound Module', disabled: noTree, onSelect: () => actions.openCompoundModule(hit.moduleId) },
@@ -256,12 +268,24 @@ function spacingSection(actions: ChartMenuActions): MenuEntry {
   };
 }
 
+/**
+ * Phase U5 — the Show/Hide toggle list, one checkable item per `TOGGLE_ORDER` entry.
+ * Exported (phase U10, cheap-gap closure) so `chartMain.ts`'s toolbar Show/Hide button
+ * (Eclipse's `contributeToToolBar()` ends with a `showHideAction` drop-down, previously
+ * context-menu-only in this port) can open the exact same item list via
+ * `common/contextMenu.ts`'s `showContextMenu()`, anchored at the button instead of the
+ * mouse -- one source of truth for "what the 25 toggles are," not a second copy.
+ */
+export function buildShowHideEntries(displayFlags: ChartDisplayFlags, actions: Pick<ChartMenuActions, 'toggleDisplayFlag'>): MenuEntry[] {
+  return TOGGLE_ORDER.map(([key, label]): MenuEntry => ({ id: `flag-${key}`, label, checked: displayFlags[key], onSelect: () => actions.toggleDisplayFlag(key) }));
+}
+
 /** Phase U5 — the Show/Hide submenu, one checkable item per `TOGGLE_ORDER` entry. */
 function showHideSection(displayFlags: ChartDisplayFlags, actions: ChartMenuActions): MenuEntry {
   return {
     id: 'showHide',
     label: 'Show/Hide',
-    submenu: TOGGLE_ORDER.map(([key, label]): MenuEntry => ({ id: `flag-${key}`, label, checked: displayFlags[key], onSelect: () => actions.toggleDisplayFlag(key) })),
+    submenu: buildShowHideEntries(displayFlags, actions),
   };
 }
 

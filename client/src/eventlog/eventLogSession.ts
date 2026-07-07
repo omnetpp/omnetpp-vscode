@@ -26,6 +26,7 @@ import {
   type AdjacencyParams,
   type CheckChangesResult,
   type ElogChangedParams,
+  type ElogOpenOptions,
   type EventDetailParams,
   type FilterHints,
   type FilterParams,
@@ -79,6 +80,14 @@ export interface EventLogSessionOptions {
    * owned by either webview -- see `setFilter()`'s own doc comment).
    */
   onFilterChanged?: (params: FilterParams | null) => void;
+  /**
+   * Phase U10 -- `elog/open`'s engine-side options (poll interval, cache caps), read
+   * from `omnetpp.eventlog.pollIntervalMs`/`.maxEngineMemoryMB` by the controller
+   * (`eventLogController.ts`'s `openNewSession()`) and passed straight through here.
+   * `undefined` = engine defaults (matches every field's own optionality in
+   * `ElogOpenOptions`).
+   */
+  openOptions?: ElogOpenOptions;
 }
 
 export class EventLogSession {
@@ -132,7 +141,7 @@ export class EventLogSession {
    * would be a redundant, no-op `workspaceState.update()`).
    */
   async initialize(): Promise<LogSummary> {
-    const summary = await this.workerClientInstance.open({ path: this.filePath });
+    const summary = await this.workerClientInstance.open({ path: this.filePath, options: this.options.openOptions });
     this.lastSummary = summary;
     if (this.options.initialFilterParams) {
       try {

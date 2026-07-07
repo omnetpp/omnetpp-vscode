@@ -308,6 +308,17 @@ test('a burst of events sharing the same simulation time produces a regionBand s
   assert.strictEqual(bands.length, 1, 'the three same-simtime events merge into a single band');
 });
 
+test('displayFlags.showHairlines=false -> no tick primitives, but tick labels still draw (phase U10 cheap-gap fix)', () => {
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const ticks = [{ tc: 10, label: '10s' }];
+  const withHairlines = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: [], methodCalls: [], axesLayout, ticks, theme, displayFlags: { ...DEFAULT_DISPLAY_FLAGS, showHairlines: true } });
+  const withoutHairlines = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: [], methodCalls: [], axesLayout, ticks, theme, displayFlags: { ...DEFAULT_DISPLAY_FLAGS, showHairlines: false } });
+  assert.strictEqual(withHairlines.filter((p) => p.kind === 'tick').length, 1);
+  assert.strictEqual(withoutHairlines.filter((p) => p.kind === 'tick').length, 0);
+  assert.strictEqual(withoutHairlines.filter((p) => p.kind === 'label' && (p as { text: string }).text === '10s').length, 1, 'the ruler label itself is not a hairline and still draws');
+});
+
 test('displayFlags.showZeroSimulationTimeRegions=false -> no regionBand primitives', () => {
   const burstEvents: TimelineEvent[] = [event_(10, 1, 0, { simulationTime: '5' }), event_(11, 1, 4, { simulationTime: '5' })];
   const viewport = baseViewport();

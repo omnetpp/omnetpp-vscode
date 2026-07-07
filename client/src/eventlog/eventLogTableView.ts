@@ -1,9 +1,11 @@
 import * as vscode from 'vscode';
+import type { LanguageClient } from 'vscode-languageclient/node';
 import type { EventLogUiSettings, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
 import { handleToggleBookmarkMessage } from './bookmarks';
 import type { EventLogController } from './eventLogController';
 import { openFilterPanelForSession } from './eventLogDialogs';
 import type { EventLogSession } from './eventLogSession';
+import { gotoNedDeclaration } from './nedNavigation';
 import { handleWebviewMessage } from './sequenceChartEditor';
 import { buildEventLogWebviewHtml } from './webviewHtml';
 
@@ -64,14 +66,16 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
     private readonly extensionUri: vscode.Uri,
     private readonly controller: EventLogController,
     private readonly workspaceState: vscode.Memento,
+    /** Phase U10 -- for `gotoNedDeclaration` messages (`nedNavigation.ts`), same role `SequenceChartEditorProvider`'s own field plays; `undefined` degrades to a status message. */
+    private readonly languageClient?: LanguageClient,
   ) {
     controller.onDidChangeActiveSession((session) => {
       if (!this.pinned) this.rebind(session ? vscode.Uri.parse(session.uriString) : undefined);
     });
   }
 
-  static register(context: vscode.ExtensionContext, controller: EventLogController): { provider: EventLogTableViewProvider; disposable: vscode.Disposable } {
-    const provider = new EventLogTableViewProvider(context.extensionUri, controller, context.workspaceState);
+  static register(context: vscode.ExtensionContext, controller: EventLogController, languageClient?: LanguageClient): { provider: EventLogTableViewProvider; disposable: vscode.Disposable } {
+    const provider = new EventLogTableViewProvider(context.extensionUri, controller, context.workspaceState, languageClient);
     const disposable = vscode.window.registerWebviewViewProvider(EVENT_LOG_TABLE_VIEW_ID, provider, {
       webviewOptions: { retainContextWhenHidden: true },
     });
@@ -141,6 +145,13 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
       if (message.type === 'requestFilterPanel') {
         const session = this.currentSession();
         if (session) void openFilterPanelForSession(session);
+        return;
+      }
+      // Phase U10: "Go to NED Declaration" -- needs the LanguageClient, same
+      // "intercept before the shared function" pattern as the cases above (mirrors
+      // `sequenceChartEditor.ts`'s own `nedTypeQuery`/`gotoNedDeclaration` handling).
+      if (message.type === 'gotoNedDeclaration') {
+        void gotoNedDeclaration(this.languageClient, message.typeName);
         return;
       }
       const session = this.currentSession();

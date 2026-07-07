@@ -5,6 +5,7 @@ import type { EventLogUiSettings, HostToWebviewMessage, WebviewToHostMessage } f
 import { handleToggleBookmarkMessage } from './bookmarks';
 import type { EventLogController } from './eventLogController';
 import type { EventLogSession } from './eventLogSession';
+import { gotoNedDeclaration } from './nedNavigation';
 import { resolveNedTypeProperties } from './nedTypeQuery';
 import { buildEventLogWebviewHtml } from './webviewHtml';
 
@@ -65,7 +66,7 @@ export class SequenceChartEditorProvider implements vscode.CustomReadonlyEditorP
     private readonly extensionUri: vscode.Uri,
     private readonly controller: EventLogController,
     private readonly workspaceState: vscode.Memento,
-    /** Phase U8 -- for `nedTypeQuery` messages (preset configurations' `@networkNode`/`@networkInterface` lookups via `nedTypeQuery.ts`); `undefined` degrades every lookup to `null`. */
+    /** Phase U8 -- for `nedTypeQuery` messages (preset configurations' `@networkNode`/`@networkInterface` lookups via `nedTypeQuery.ts`); `undefined` degrades every lookup to `null`. Phase U10 also reuses it for `gotoNedDeclaration` (`nedNavigation.ts`); `undefined` there degrades to a status message instead of a silent no-op. */
     private readonly languageClient?: LanguageClient,
   ) {}
 
@@ -167,6 +168,13 @@ export class SequenceChartEditorProvider implements vscode.CustomReadonlyEditorP
         void resolveNedTypeProperties(this.languageClient, message.typeNames).then((properties) => {
           sink.postMessage({ type: 'nedTypeQueryResult', id: message.id, properties });
         });
+        return;
+      }
+      // Phase U10: "Go to NED Declaration" -- needs the LanguageClient, same pattern as
+      // 'nedTypeQuery' above; no reply is sent (the host does the whole resolve-and-open
+      // or resolve-and-degrade itself, see nedNavigation.ts).
+      if (message.type === 'gotoNedDeclaration') {
+        void gotoNedDeclaration(this.languageClient, message.typeName);
         return;
       }
       void handleWebviewMessage(session, sink, document.uri, message);
@@ -289,6 +297,11 @@ export async function handleWebviewMessage(
       // Phase U8: only ever sent by the Sequence Chart webview and always intercepted
       // in `SequenceChartEditorProvider`'s own pump (needs the LanguageClient this
       // shared function has no access to) -- present for switch completeness only.
+      break;
+    case 'gotoNedDeclaration':
+      // Phase U10: sent by both webviews, always intercepted in each provider's own
+      // pump (needs the LanguageClient this shared function has no access to, same as
+      // 'nedTypeQuery' above) -- present for switch completeness only.
       break;
   }
 }

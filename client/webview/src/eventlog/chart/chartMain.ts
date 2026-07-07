@@ -23,8 +23,9 @@ import {
   type ViewportModel,
   type ViewportParams,
 } from '@omnetpp/shared/elog-protocol';
-import type { Bookmark, BookmarkCandidate, HostToWebviewMessage, RevealTarget, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
+import type { Bookmark, BookmarkCandidate, EventLogUiSettings, HostToWebviewMessage, RevealTarget, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
 import { EngineRpc, RequestCancelledError } from '../common/rpc';
+import { loadPersistedBlob, withVersion } from '../common/persistedState';
 import { buildToolbar, type ToolbarHandle } from '../common/toolbar';
 import { renderSummaryStrip } from '../common/summary';
 import { readPalette, watchThemeChange, type EventLogPalette } from '../common/theme';
@@ -63,14 +64,14 @@ import {
   removeOpenAxisModule,
   removeOpenAxisModuleSubtree,
 } from './openAxisModules';
-import { buildChartContextMenu, type AxisModuleMenuInfo, type ChartMenuActions, type PresetConfiguration } from './chartContextMenu';
+import { buildChartContextMenu, buildShowHideEntries, type AxisModuleMenuInfo, type ChartMenuActions, type PresetConfiguration } from './chartContextMenu';
 import { buildSampleTable, pixelToTc, tcToSimTimeApprox, type TcSimSample } from './coords';
 import { mergeDisplayFlags, presetDefaultFlags, presetNetworkCommunicationFlags, showAllFlags, toggleFlag, type ChartDisplayFlags } from './displayFlags';
 import { bookmarkDependencyKey, buildDrawList, type DrawPrimitive, type InfoPanelText } from './drawList';
 import { openSelectModulesDialog } from './selectModulesDialog';
 import { openListReorderDialog } from './reorderDialog';
 import { calculateTicks, formatTickLabel } from './ticks';
-import { ANTIALIAS_TURN_OFF_AT_MSEC, ANTIALIAS_TURN_ON_AT_MSEC, createCanvasStack, renderPrimitivesToCanvas, type CanvasStackHandle } from './canvasStack';
+import { ANTIALIAS_TURN_OFF_AT_MSEC, ANTIALIAS_TURN_ON_AT_MSEC, createCanvasStack, DEFAULT_CHART_FONT_SIZE_PX, renderPrimitivesToCanvas, type CanvasStackHandle } from './canvasStack';
 import { openExportRangeDialog, type ExportDialogResult } from './exportDialog';
 import { buildChartSvg, computeExportWidthPx, resolveExportRange, type ExportRangeContext } from './svgExport';
 import { buildFilterPanel, type FilterPanelHandle } from './filterPanel';
@@ -156,14 +157,39 @@ interface PersistedChartState {
   /** Phase U8 -- `AxisSpacingMode` (`'auto'` = Balanced, `'manual'` = Dense/Increase/Decrease territory) + the manual spacing value (Java persists both, `SequenceChartSettings.axisSpacingMode`/`.axisSpacing`). */
   axisSpacingMode?: 'auto' | 'manual';
   axisSpacing?: number;
+  /**
+   * Phase U10 -- the horizontal viewport (as an origin EVENT + zoom, not a raw timeline
+   * coordinate -- tc is meaningless across a coordinate-system version bump, e.g. after
+   * a reopen) plus vertical scroll, debounced-persisted on every settled pan/zoom/
+   * vscroll (`noteViewportActivity()`/`persistViewportNow()`, ~400ms after the last
+   * mutation -- never mid-gesture). `undefined` = never persisted yet (a fresh file, or
+   * an older blob) -- the 'init' handler then falls back to `omnetpp.eventlog.
+   * followEndOnAppend` (goto-end) or the plain default (goto-begin). Deliberately does
+   * NOT carry `followEnd`: a restored viewport is always a specific FIXED position,
+   * never "keep following" -- re-establishing `followEnd` from a stale blob could
+   * silently start auto-scrolling a file the user had deliberately scrolled away from
+   * the end of.
+   */
+  viewport?: { originEventNumber: number; pixelsPerTc: number; vscroll: number };
 }
+
+/** Phase U10 -- bump whenever `PersistedChartState`'s shape changes in a way older code could misinterpret; see `persistedState.ts`'s header for the tolerant-load policy this gates. */
+const CHART_STATE_VERSION = 1;
 
 const vscode = acquireVsCodeApi();
 const rpc = new EngineRpc(vscode);
-let state: PersistedChartState = vscode.getState() ?? {};
+let state: PersistedChartState = loadPersistedBlob<PersistedChartState>(vscode.getState(), CHART_STATE_VERSION);
 let fileUri = '';
 let summary: LogSummary | null = null;
 let toolbar: ToolbarHandle;
+/** Phase U10 -- the `init` message's `EventLogUiSettings` DTO (`omnetpp.sequenceChart.*`/`omnetpp.eventlog.*`), re-sent fresh on every webview `ready` handshake (see `sequenceChartEditor.ts`'s `readEventLogUiSettings()`) -- `undefined` only for the instant between this webview's bootstrap and its first `init` reply. */
+let uiSettings: EventLogUiSettings | undefined;
+
+/** Phase U10 (cheap-gap closure) -- resolves `omnetpp.sequenceChart.fontSize` (`0`/unset = follow `canvasStack.ts`'s own DEFAULT_CHART_FONT_SIZE_PX) into the base px `canvasStack.render()`/`renderPrimitivesToCanvas()` scale their hardcoded label fonts from. Re-read on every call (not cached) so a live settings change (`onDidChangeConfiguration` -> a fresh `init`) takes effect on the very next frame. */
+function currentChartFontSizePx(): number {
+  const configured = uiSettings?.sequenceChart?.fontSize;
+  return configured && configured > 0 ? configured : DEFAULT_CHART_FONT_SIZE_PX;
+}
 /** Phase U9 -- the shared error/canceled/out-of-sync overlay (`common/notificationOverlay.ts`), mounted once `body`'s DOM exists (below). */
 let notificationOverlay: NotificationOverlayHandle;
 
@@ -177,6 +203,16 @@ let sampleTable: TcSimSample[] = [];
 let beginTc: number | null = null;
 let endTc: number | null = null;
 let hasInitializedViewport = false;
+/**
+ * Phase U10 -- `omnetpp.eventlog.followEndOnAppend`'s "or first append arrives" clause:
+ * set (in the 'init' handler) when this is a genuinely fresh file (no persisted
+ * viewport) and the setting is on; consumed either right there (if the file already has
+ * content) or later, the first time an `elog/changed` notification's summary goes from
+ * empty to non-empty (a live run whose file existed but had nothing recorded yet at
+ * open time) -- either way, exactly once, then behaves like the ordinary `followEnd`
+ * toggle from then on.
+ */
+let followEndOnOpenPending = false;
 /** The exact primitive list the last frame was drawn from -- fed to `hitTest.ts` (click/dblclick/context-menu/tooltip all hit-test against WHAT'S ON SCREEN, never a re-derived geometry). */
 let lastPrimitives: DrawPrimitive[] = [];
 /** Phase U4 selection state (events/dependencies/methodCalls/axes/timelineCoords + focus) -- see `selection.ts`. */
@@ -362,8 +398,9 @@ const labelProviderCtx: LabelProviderContext = {
  * ts`'s `TABLE_STATE_KEY` pattern). Call after any mutation to `state`.
  */
 function persistState(): void {
-  vscode.setState(state);
-  vscode.postMessage({ type: 'stateChanged', state });
+  const versioned = withVersion(state, CHART_STATE_VERSION);
+  vscode.setState(versioned);
+  vscode.postMessage({ type: 'stateChanged', state: versioned });
 }
 
 /** Phase U5 -- flips one Show/Hide toggle (Show/Hide submenu item, or the Tab key for `showTimeDifferences`), persists, and re-renders. */
@@ -444,12 +481,64 @@ function fileName(): string {
 
 let rafScheduled = false;
 function scheduleRender(): void {
+  // Phase U10 -- `scheduleRender()` is (by inspection) the one call every viewport-
+  // mutating code path in this file already makes right after touching `viewport`
+  // (drag/wheel/keyboard pan-zoom via interactions.ts's `onChanged`, goto/reveal/
+  // filter-reanchor's `relocateAndCenter`, double-click zoom-to-fit, the toolbar zoom
+  // buttons, the h-scrollbar drag, ...) -- piggybacking the viewport-persist debounce
+  // here (rather than threading a second call through every one of those sites)
+  // guarantees no mutation is ever missed, at the cost of also re-arming the timer on
+  // purely-cosmetic renders (selection clicks, theme flips) that don't actually move
+  // the viewport; `persistViewportNow()` below no-ops a write when the resolved
+  // viewport is unchanged from what's already persisted, so that slop costs an idle
+  // RPC round trip at most, never a spurious `workspaceState` write.
+  noteViewportActivity();
   if (rafScheduled) return;
   rafScheduled = true;
   requestAnimationFrame(() => {
     rafScheduled = false;
     renderFrame();
   });
+}
+
+// ---------------------------------------------------------------------------------
+// Phase U10 -- viewport persistence (origin event + zoom + vertical scroll)
+// ---------------------------------------------------------------------------------
+
+/** Debounce window: only persist once pan/zoom/vscroll activity has SETTLED (port plan: "do NOT persist mid-gesture") -- a drag/wheel gesture keeps calling `scheduleRender()` continuously, which keeps pushing this timer back out, so the actual write only fires this long after the LAST mutation. */
+const VIEWPORT_PERSIST_DEBOUNCE_MS = 400;
+let viewportPersistTimer: ReturnType<typeof setTimeout> | undefined;
+
+function noteViewportActivity(): void {
+  clearTimeout(viewportPersistTimer);
+  viewportPersistTimer = setTimeout(() => void persistViewportNow(), VIEWPORT_PERSIST_DEBOUNCE_MS);
+}
+
+/**
+ * Resolves the event number nearest the viewport's current horizontal center (the same
+ * `elog/sc/mapCoords` `tcToEventNumber` kind `applyTimelineMode()` already uses for its
+ * own re-anchor) and persists `{originEventNumber, pixelsPerTc, vscroll}` -- best-effort,
+ * matching every other engine round trip in this file: a busy/superseded mapping request
+ * just skips this persist cycle, the next settle retries. No-op before a file is open, or
+ * if the resolved position is identical to what's already persisted (avoids a redundant
+ * `workspaceState`/`vscode.setState` write on every idle re-render).
+ */
+async function persistViewportNow(): Promise<void> {
+  if (!summary || summary.isEmpty) return;
+  const centerTc = viewport.leftTc + contentWidth(viewport) / 2 / viewport.pixelsPerTc;
+  let originEventNumber: number;
+  try {
+    const mapped = await rpc.request<MapCoordsResult>(ElogMethods.scMapCoords, { kind: 'tcToEventNumber', tc: centerTc });
+    if (mapped.eventNumber === null) return; // no event at/near this tc (e.g. an empty visible range) -- nothing meaningful to remember
+    originEventNumber = mapped.eventNumber;
+  } catch {
+    return;
+  }
+  const next = { originEventNumber, pixelsPerTc: viewport.pixelsPerTc, vscroll: viewport.vscroll };
+  const prev = state.viewport;
+  if (prev && prev.originEventNumber === next.originEventNumber && prev.pixelsPerTc === next.pixelsPerTc && prev.vscroll === next.vscroll) return;
+  state = { ...state, viewport: next };
+  persistState();
 }
 
 function applyModel(model: ViewportModel): void {
@@ -524,7 +613,7 @@ function renderFrame(): void {
     headerGlyphs,
   });
   lastPrimitives = primitives;
-  canvasStack.render(primitives, antialiasEnabled);
+  canvasStack.render(primitives, antialiasEnabled, currentChartFontSizePx());
   const elapsedMs = performance.now() - t0;
   // Antialias auto-toggle hysteresis -- port of SequenceChart.java's drawWithAntialias
   // state machine (see canvasStack.ts's ANTIALIAS_* constants + CanvasStackHandle.render()'s doc).
@@ -676,7 +765,19 @@ async function relocateAndCenter(eventNumber: number, center = true): Promise<vo
   viewport = center ? revealAt(viewport, 0) : gotoBeginAt(viewport, 0);
 }
 
-async function applyTimelineMode(mode: string, isInitial: boolean): Promise<void> {
+/**
+ * Phase U10 -- a persisted viewport (GAP 1) to restore instead of the plain "goto begin"
+ * `applyTimelineMode()` otherwise applies on its very first (`isInitial`) call. Ignored
+ * on any later call (a live mode switch always re-anchors on the CURRENT viewport
+ * center, per this function's own long-standing behavior).
+ */
+interface RestoreViewportHint {
+  originEventNumber: number;
+  pixelsPerTc: number;
+  vscroll: number;
+}
+
+async function applyTimelineMode(mode: string, isInitial: boolean, restoreViewport?: RestoreViewportHint): Promise<void> {
   state = { ...state, timelineMode: mode };
   persistState();
   toolbar.setButtonState('refresh', { disabled: true });
@@ -698,8 +799,17 @@ async function applyTimelineMode(mode: string, isInitial: boolean): Promise<void
     toolbar.setDropdownValue('timelineMode', scState.timelineMode);
 
     if (summary && !summary.isEmpty) {
-      const target = anchorEventNumber ?? summary.firstEventNumber;
-      await relocateAndCenter(target, anchorEventNumber !== null);
+      // Phase U10 -- `isInitial` restore priority: a live re-anchor (`anchorEventNumber`)
+      // always wins (this isn't the first load at all); otherwise a persisted viewport
+      // (GAP 1) restores its remembered origin+zoom+vscroll; only with NEITHER does this
+      // fall back to the original "goto begin" default (the 'init' handler's own
+      // followEndOnAppend fallback, if any, runs AFTER this resolves -- see its call site).
+      const target = anchorEventNumber ?? restoreViewport?.originEventNumber ?? summary.firstEventNumber;
+      const center = anchorEventNumber !== null || restoreViewport !== undefined;
+      await relocateAndCenter(target, center);
+      if (isInitial && restoreViewport && anchorEventNumber === null) {
+        viewport = { ...viewport, pixelsPerTc: restoreViewport.pixelsPerTc, vscroll: restoreViewport.vscroll };
+      }
     } else {
       viewport = { ...viewport, coordinateSystemVersion: scState.coordinateSystemVersion };
     }
@@ -870,7 +980,7 @@ async function performExportSvg(result: ExportDialogResult, ctxBase: ExportRange
 function doCopyImage(): void {
   if (!summary || summary.isEmpty || lastPrimitives.length === 0) return;
   const scale = window.devicePixelRatio || 1;
-  const canvas = renderPrimitivesToCanvas(viewport.canvasWidth, viewport.canvasHeight, lastPrimitives, palette.background, scale);
+  const canvas = renderPrimitivesToCanvas(viewport.canvasWidth, viewport.canvasHeight, lastPrimitives, palette.background, scale, currentChartFontSizePx());
   canvas.toBlob((blob) => {
     if (blob) void copyBlobToClipboardOrSave(blob);
   }, 'image/png');
@@ -1375,6 +1485,8 @@ function resolveAxisMenuInfo(moduleId: number): AxisModuleMenuInfo | null {
     hasParent: parentId !== null && parentId !== undefined,
     canExpand: glyphs.expand,
     canCollapse: glyphs.collapse,
+    // Phase U10 -- "Go to NED Declaration"; `nedTypeName` defaults to '' when the log never recorded one, treated as unresolvable.
+    nedTypeName: node.nedTypeName || null,
   };
 }
 
@@ -1408,6 +1520,14 @@ function openChartContextMenu(clientX: number, clientY: number, hits: HitObject[
     },
     toggleAxisBookmark,
     centerOnAxis,
+    // Phase U10 -- "Go to NED Declaration": re-resolves the module node rather than
+    // threading a value through, since the menu item itself already disabled the entry
+    // when `resolveAxisMenuInfo()` found nothing resolvable (see `chartContextMenu.ts`'s
+    // `axisSection()`).
+    gotoNedDeclaration: (moduleId) => {
+      const typeName = resolveAxisMenuInfo(moduleId)?.nedTypeName;
+      if (typeName) vscode.postMessage({ type: 'gotoNedDeclaration', typeName });
+    },
     filterCausesConsequences: filterCausesConsequencesFor,
     filterMessage: (hit) => {
       const dep = findDependency(hit);
@@ -1606,6 +1726,27 @@ toolbar = buildToolbar(document.getElementById('toolbar')!, [
     },
   },
   { kind: 'dropdown', dropdown: { id: 'timelineMode', title: 'Timeline Mode', options: TIMELINE_MODE_OPTIONS, value: currentTimelineMode, onChange: (v) => void applyTimelineMode(v, false) } },
+  { kind: 'separator' },
+  // Phase U10 (cheap gap) -- Eclipse's toolbar ends with a `showHideAction` drop-down
+  // (`contributeToToolBar()`); this port had the ~25 toggles context-menu-only until
+  // now. `common/toolbar.ts` has no "checkable dropdown menu" item kind (only a plain
+  // HTML `<select>`, a single-value picker unsuited to 25 independent booleans) -- the
+  // cheapest faithful equivalent is a plain button that opens the SAME `MenuEntry[]`
+  // the context menu's Show/Hide submenu uses (`buildShowHideEntries()`), anchored at
+  // this button via `common/contextMenu.ts`'s `showContextMenu()` (which only needs an
+  // (x, y), not a real mouse event -- see that function's signature).
+  {
+    kind: 'button',
+    button: {
+      id: 'showHide',
+      icon: 'eye',
+      title: 'Show/Hide…',
+      onClick: () => {
+        const rect = document.getElementById('showHide')!.getBoundingClientRect();
+        showContextMenu(rect.left, rect.bottom, buildShowHideEntries(displayFlags, { toggleDisplayFlag: (key) => setDisplayFlags(toggleFlag(displayFlags, key)) }));
+      },
+    },
+  },
 ]);
 
 watchThemeChange((p) => {
@@ -1866,6 +2007,7 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
       fileUri = message.fileUri;
       summary = message.summary;
       bookmarks = message.bookmarks;
+      uiSettings = message.settings; // Phase U10 -- see this file's `uiSettings` doc comment
       recomputeBookmarkIndexes();
       if (message.selection.eventNumbers.length > 0) {
         // Phase U6: seed the session's current selection right away (repaints with the
@@ -1876,9 +2018,8 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
         const eventNumbers = message.selection.eventNumbers;
         selection = { ...EMPTY_CHART_SELECTION, events: new Set(eventNumbers), focusEventNumber: eventNumbers[eventNumbers.length - 1] };
       }
-      if (message.persistedState && typeof message.persistedState === 'object') {
-        state = { ...state, ...(message.persistedState as PersistedChartState) };
-        toolbar.setDropdownValue('timelineMode', state.timelineMode ?? TimelineMode.SIMULATION_TIME);
+      if (message.persistedState !== undefined) {
+        state = { ...state, ...loadPersistedBlob<PersistedChartState>(message.persistedState, CHART_STATE_VERSION) };
         displayFlags = mergeDisplayFlags(state.displayFlags);
         filterPanel.setState(mergeFilterPanelState(state.filterPanel));
         // phase U8 -- axis management state (open set itself resolves from paths once
@@ -1889,6 +2030,14 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
         if (state.axisSpacing !== undefined) axisSpacingManual = clampAxisSpacing(state.axisSpacing);
         toolbar.setDropdownValue('axisOrdering', axisOrderingMode);
       }
+      // Phase U10 -- `omnetpp.sequenceChart.defaultTimelineMode`: a per-file persisted
+      // mode always wins (the user's own last choice for THIS file); with none, the
+      // setting is the fallback, and only with NEITHER does this drop to the original
+      // hardcoded default. Applied unconditionally (not just inside the persistedState
+      // branch above) so the setting still takes effect on a genuinely fresh file, which
+      // has no persisted blob to merge at all.
+      const initialTimelineMode = state.timelineMode ?? uiSettings?.sequenceChart?.defaultTimelineMode ?? TimelineMode.SIMULATION_TIME;
+      toolbar.setDropdownValue('timelineMode', initialTimelineMode);
       // Phase U7: seed the chart's mirror of the session's currently-active filter (may
       // be non-null even on THIS webview's very first `init` -- a filter persisted by a
       // previous session and rehydrated on file reopen, see
@@ -1905,8 +2054,24 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
           recomputeBookmarkIndexes();
           scheduleRender();
         });
-        void applyTimelineMode(state.timelineMode ?? TimelineMode.SIMULATION_TIME, !hasInitializedViewport).then(() => {
-          if (selection.focusEventNumber !== null) centerOnEvent(selection.focusEventNumber);
+        const isInitialLoad = !hasInitializedViewport;
+        // Phase U10 -- `omnetpp.eventlog.followEndOnAppend`'s "no persisted viewport at
+        // all" gate: armed only on a genuinely fresh file (GAP 1's restore always takes
+        // priority when there IS a remembered position). Consumed either right below (if
+        // the file already has content) or later, on the first `elog/changed` that takes
+        // it from empty to non-empty (see the `engineNotify` handler).
+        if (isInitialLoad) followEndOnOpenPending = !state.viewport && uiSettings?.eventlog?.followEndOnAppend === true;
+        void applyTimelineMode(initialTimelineMode, isInitialLoad, state.viewport).then(async () => {
+          if (selection.focusEventNumber !== null) {
+            centerOnEvent(selection.focusEventNumber);
+          } else if (followEndOnOpenPending && summary && !summary.isEmpty) {
+            // Phase U10 -- INITIAL semantics: the file already has content right at open
+            // time, so the "as if End had just been pressed" behavior applies immediately
+            // (an inbound selection focus, handled above, takes priority instead).
+            followEndOnOpenPending = false;
+            await goToEnd();
+            scheduleRender();
+          }
         });
       }
       break;
@@ -1957,9 +2122,19 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
               scheduleRender();
             });
           }
-          void refreshEndpointsTc().then(() => {
-            if (viewport.followEnd) void goToEnd();
-            else scheduleRender();
+          void refreshEndpointsTc().then(async () => {
+            if (followEndOnOpenPending && !payload.summary!.isEmpty) {
+              // Phase U10 -- `followEndOnAppend`'s "or first append arrives" clause: the
+              // file was empty at open time (nothing to follow to yet), and this is the
+              // very first notification that gives it real content -- treat it exactly
+              // like the initial-open case (see the 'init' handler's own comment).
+              followEndOnOpenPending = false;
+              await goToEnd();
+            } else if (viewport.followEnd) {
+              void goToEnd();
+            } else {
+              scheduleRender();
+            }
           });
         }
         renderFrame();

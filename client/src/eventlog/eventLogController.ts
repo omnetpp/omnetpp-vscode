@@ -10,9 +10,34 @@
  */
 
 import * as vscode from 'vscode';
-import type { FilterParams, LogSummary } from '@omnetpp/shared/elog-protocol';
+import type { ElogOpenOptions, FilterParams, LogSummary } from '@omnetpp/shared/elog-protocol';
 import { BookmarkStore } from './bookmarks';
 import { EventLogSession, eventlogWorkerBundlePath, type AttachmentKind, type MessageSink } from './eventLogSession';
+
+/**
+ * Phase U10 -- `omnetpp.eventlog.maxEngineMemoryMB` -> `ElogOpenOptions.eventCacheLimit`
+ * (an EVENT COUNT, the only cache-cap knob the phase-E7 in-memory `EventLog` LRU
+ * exposes -- see `shared/src/eventlog/eventLog.ts`'s header, default 50_000 events). No
+ * API reports actual per-event heap size, so this is a documented ROUGH heuristic
+ * (~2 KB/cached `Event`, covering its parsed entries + strings for a typical log) rather
+ * than a measured conversion -- the setting is an order-of-magnitude control, not a hard
+ * memory ceiling. Clamped to a sane floor so a tiny MB value can't starve the viewport
+ * (which pins its own visible window regardless of the LRU cap).
+ */
+const BYTES_PER_CACHED_EVENT = 2000;
+const MIN_EVENT_CACHE_LIMIT = 1000;
+function mbToEventCacheLimit(maxEngineMemoryMB: number): number {
+  return Math.max(MIN_EVENT_CACHE_LIMIT, Math.round((maxEngineMemoryMB * 1_000_000) / BYTES_PER_CACHED_EVENT));
+}
+
+/** Phase U10 -- builds `elog/open`'s options from the live `omnetpp.eventlog.*` settings at the moment a session is opened (settings changes apply on the FILE's next open, not live -- unlike the webview-side `EventLogUiSettings`, these bake into the worker's already-open engine). */
+function readOpenOptions(): ElogOpenOptions {
+  const config = vscode.workspace.getConfiguration('omnetpp');
+  const options: ElogOpenOptions = { pollIntervalMs: config.get<number>('eventlog.pollIntervalMs', 3000) };
+  const maxEngineMemoryMB = config.get<number>('eventlog.maxEngineMemoryMB', 0);
+  if (maxEngineMemoryMB > 0) options.eventCacheLimit = mbToEventCacheLimit(maxEngineMemoryMB);
+  return options;
+}
 
 /** Context key kept true while at least one `.elog` session is open -- gates the panel's webview view (`when: omnetpp.eventlogOpen`, package.json). */
 const CONTEXT_EVENTLOG_OPEN = 'omnetpp.eventlogOpen';
@@ -84,6 +109,7 @@ export class EventLogController {
       onIdle: () => this.removeSession(key),
       initialFilterParams: this.getPersistedFilterParams(key),
       onFilterChanged: (params) => void this.setPersistedFilterParams(key, params),
+      openOptions: readOpenOptions(),
     });
     this.sessions.set(key, session);
     this.syncOpenContext();
