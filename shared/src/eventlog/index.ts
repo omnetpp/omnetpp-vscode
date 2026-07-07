@@ -65,6 +65,10 @@ export { SequenceChartFacade } from './sequenceChartFacade';
 export { EventLogTableFacade } from './eventLogTableFacade';
 export { buildModuleTree, type ElogModule } from './moduleTree';
 
+// phase U2: the Event Log table's row DTO builder (pure: EventLogEntry + modes ->
+// styled spans, ported from EventLogTableRowRenderer.java).
+export { renderTableRow, secondsToTimeString, UnsupportedTableEntryError, type TableRowRenderContext } from './tableRowRenderer';
+
 // phase U1: the host<->webview UI envelope (see uiProtocol.ts's file header).
 // Type-only, so re-exporting it here has no bearing on the barrel's runtime
 // footprint -- browser bundles should still prefer the dedicated

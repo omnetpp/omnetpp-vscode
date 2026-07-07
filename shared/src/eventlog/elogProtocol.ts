@@ -27,21 +27,21 @@
  * types, never the engine itself (which stays worker-thread-only).
  */
 
-import type { EventLogTableFilterMode } from './enums';
-// MatchKind/TimelineMode are imported as VALUES (not `import type`) and
-// re-exported below -- phase U1 callers (`client/src/eventlog/
+// MatchKind/TimelineMode/EventLogTableFilterMode are imported as VALUES (not `import
+// type`) and re-exported below -- phase U1 callers (`client/src/eventlog/
 // eventLogDialogs.ts`'s goto commands, `client/webview/src/eventlog/chart/
-// chartMain.ts`'s timeline-mode dropdown) need the actual enum members, not
-// just the type, and (per this file's header) are only supposed to depend on
-// `@omnetpp/shared/elog-protocol`, never the full `@omnetpp/shared/eventlog`
+// chartMain.ts`'s timeline-mode dropdown) and phase U2's table (the Line Filter
+// dropdown, `client/webview/src/eventlog/table/tableView.ts`) need the actual enum
+// members, not just the type, and (per this file's header) are only supposed to
+// depend on `@omnetpp/shared/elog-protocol`, never the full `@omnetpp/shared/eventlog`
 // barrel (too heavy for the browser bundle). `enums.ts` itself has zero
-// dependencies and is a handful of small enums, so re-exporting these two
-// here keeps this subpath's "browser-safe, type-light" contract intact.
-import { MatchKind, TimelineMode } from './enums';
+// dependencies and is a handful of small enums, so re-exporting these here keeps this
+// subpath's "browser-safe, type-light" contract intact.
+import { EventLogTableFilterMode, MatchKind, TimelineMode } from './enums';
 import type { ElogModule } from './moduleTree';
 
 export type { ElogModule };
-export { MatchKind, TimelineMode };
+export { EventLogTableFilterMode, MatchKind, TimelineMode };
 
 // ---------------------------------------------------------------------------------
 // Method names
@@ -403,6 +403,15 @@ export interface RowWindowParams {
   filterMode?: EventLogTableFilterMode;
   /** Only meaningful with `filterMode: 'CUSTOM_ENTRIES'` (`EventLogTableFacade.setCustomFilter()`). */
   customFilterPattern?: string;
+  /**
+   * ADDITIVE (phase U2): when present, every returned `TableRow.rendered` is populated
+   * (styled-span text for the table's "Details" column plus pre-formatted Event#/Time
+   * cells) using these display/name/type modes -- see `tableRowRenderer.ts`. Omitted
+   * for `tableNavigate`/`tablePosition` callers that only need the raw fields (e.g.
+   * resolving a fix point), and for any caller that wants to avoid the extra
+   * rendering cost on a window it is only using for bookkeeping.
+   */
+  render?: TableRenderModes;
 }
 
 /** One raw table row -- the U2 row renderer builds styled spans from this; no presentation/formatting decisions are made here. */
@@ -422,6 +431,75 @@ export interface TableRow {
   fields: Record<string, string | null>;
   /** Non-null only for `EventLogMessageEntry` ("-" log lines): its free-text content. */
   text: string | null;
+  /** ADDITIVE (phase U2): present iff the request's `RowWindowParams.render` was set -- see `tableRowRenderer.ts`. */
+  rendered?: RenderedTableRow;
+}
+
+// ---------------------------------------------------------------------------------
+// Event Log table row rendering (phase U2) -- styled-span row DTOs the webview paints
+// directly. Built engine-side (shared/src/eventlog/tableRowRenderer.ts, a pure
+// `EventLogEntry` + modes -> DTO function) from a port of
+// EventLogTableRowRenderer.java's `getDescriptiveStyledText()`/`getRawStyledText()`.
+// No presentation-only state (font, selection highlight, focus) travels here -- the
+// webview owns all of that; only content-driven style *tokens* do.
+// ---------------------------------------------------------------------------------
+
+/** Port of `EventLogTable.NameMode`. */
+export type TableNameMode = 'SMART_NAME' | 'FULL_NAME' | 'FULL_PATH';
+/** Port of `EventLogTable.TypeMode`. */
+export type TableTypeMode = 'CPP' | 'NED';
+/** Port of `EventLogTable.DisplayMode`. */
+export type TableDisplayMode = 'DESCRIPTIVE' | 'RAW';
+
+export interface TableRenderModes {
+  displayMode: TableDisplayMode;
+  nameMode: TableNameMode;
+  typeMode: TableTypeMode;
+}
+
+/** `EventLogTable`'s own field initializers (constructor defaults). */
+export const DEFAULT_TABLE_RENDER_MODES: TableRenderModes = { displayMode: 'DESCRIPTIVE', nameMode: 'SMART_NAME', typeMode: 'CPP' };
+
+/**
+ * Style token for one span of styled text. Ported from `EventLogTableRowRenderer.java`'s
+ * `Styler` constants (~lines 79-96): `const`/`constBold` = `CONSTANT_TEXT_STYLE`/
+ * `BOLD_CONSTANT_TEXT_STYLE` (the leading entry-code token in RAW mode is the only bold
+ * constant), `raw` = `RAW_VALUE_STYLE` (an attribute's value in RAW mode), `type` =
+ * `TYPE_STYLE` (a `(NedTypeOrClassName)` parenthesized tag), `name` = `NAME_STYLE`
+ * (always bold in Java -- module/gate/message names), `msg` = `EVENT_LOG_MESSAGE_STYLE`
+ * ("-" free-text lines), `bubble` = `BUBBLE_ENTRY_STYLE`, `faint` =
+ * `FAINT_FOREGROUND_COLOR`/`EVENT_LOG_ENTRY_*_STYLE` (dimmed Event#/Time on a non-"E"
+ * row -- "duplicated event# dimming for non-first rows of an event"), `eventNo`/
+ * `simtime` = `EVENT_ENTRY_EVENT_NUMBER_STYLE`/`EVENT_ENTRY_SIMULATION_TIME_STYLE` (the
+ * "E" row's own Event#/Time cells), `data` = `DATA_STYLE`/`HIGHLIGHT_COLOR` (a raw
+ * value embedded in descriptive text, e.g. a message kind or delay). The
+ * selected-row foreground flip (`Builder.selectedStyle()`) is deliberately NOT part of
+ * this token set -- it is pure presentation state the webview applies via CSS on the
+ * whole selected row, so rendered rows never need to be regenerated when only the
+ * selection changes.
+ */
+export type TableSpanStyle = 'const' | 'constBold' | 'raw' | 'type' | 'name' | 'msg' | 'bubble' | 'faint' | 'eventNo' | 'simtime' | 'data';
+
+export interface TableSpan {
+  text: string;
+  style: TableSpanStyle;
+}
+
+/** Styled-row DTO: the "Details" column's spans, plus the pre-formatted Event#/Time cells (so the webview never needs to reformat a `BigDecimal` simulation time itself). */
+export interface RenderedTableRow {
+  /**
+   * Indentation, in indent units (multiply by the webview's own pixel constant to get
+   * a left offset). Port of `getIndentation()`'s `eventLogEntry.getLevel() *
+   * INDENT_SPACING` term, PLUS one indent unit for any non-`EventEntry` row (Java:
+   * `if (!(eventLogEntry instanceof EventEntry)) indent += INDENT_SPACING`), PLUS one
+   * more for a `SendHopEntry`/`SendDirectEntry` row. Java's base `HORIZONTAL_SPACING`
+   * (4px, added regardless of level) is NOT part of this unit count -- the webview
+   * adds it once as a fixed per-row base offset.
+   */
+  indentUnits: number;
+  eventNumberSpan: TableSpan;
+  simTimeSpan: TableSpan;
+  detailSpans: TableSpan[];
 }
 
 export interface RowWindow {

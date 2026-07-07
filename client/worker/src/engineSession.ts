@@ -43,7 +43,9 @@ import {
   type IEventLog,
   type IMessageDependency,
   MessageReuseDependency,
+  renderTableRow,
   SequenceChartFacade,
+  type TableRowRenderContext,
 } from '@omnetpp/shared/eventlog';
 import { NodeRandomAccessFile } from '@omnetpp/shared/node';
 import type {
@@ -628,21 +630,26 @@ export class EngineSession {
       return { rows: [], anchorIndex: -1, approximatePercentage: 0, approximateNumberOfEntries: table.getApproximateNumberOfEntries(), hasMoreBefore: false, hasMoreAfter: false };
     }
 
+    // Phase U2: build the row-rendering context/modes once per call (not per row) --
+    // see toTableRow()/tableRowRenderer.ts. `undefined` when the caller didn't ask for
+    // `render` (e.g. tableNavigate/tablePosition's internal bookkeeping fetches).
+    const render = params.render;
+
     const before: TableRow[] = [];
     let cursor: EventLogEntry | null = anchor;
     for (let i = 0; i < params.before; i++) {
       cursor = table.getNeighbourEntry(cursor, -1);
       if (cursor === null) break;
-      before.unshift(toTableRow(cursor));
+      before.unshift(this.toTableRow(cursor, render));
     }
     const hasMoreBefore = cursor !== null && table.getNeighbourEntry(cursor, -1) !== null;
 
-    const after: TableRow[] = [toTableRow(anchor)];
+    const after: TableRow[] = [this.toTableRow(anchor, render)];
     cursor = anchor;
     for (let i = 1; i < params.after; i++) {
       cursor = table.getNeighbourEntry(cursor, 1);
       if (cursor === null) break;
-      after.push(toTableRow(cursor));
+      after.push(this.toTableRow(cursor, render));
     }
     const hasMoreAfter = cursor !== null && table.getNeighbourEntry(cursor, 1) !== null;
 
@@ -654,6 +661,21 @@ export class EngineSession {
       hasMoreBefore,
       hasMoreAfter,
     };
+  }
+
+  /** Phase U2: `toTableRow()` plus, when `render` is given, a populated `TableRow.rendered` (see tableRowRenderer.ts). */
+  private toTableRow(entry: EventLogEntry, render: RowWindowParams['render']): TableRow {
+    const row = toTableRow(entry);
+    if (render === undefined) return row;
+    const table = this.table;
+    const ctx: TableRowRenderContext = {
+      getModuleDescriptionEntry: (moduleId) => this.log.getEventLogEntryCache().getModuleDescriptionEntry(moduleId),
+      getGateDescriptionEntry: (moduleId, gateId) => this.log.getEventLogEntryCache().getGateDescriptionEntry(moduleId, gateId),
+      getModuleFullPath: (moduleDescriptionEntry) => table.ModuleDescriptionEntry_getModuleFullPath(moduleDescriptionEntry),
+      getEventForEventNumber: (eventNumber) => this.log.getEventForEventNumber(eventNumber),
+    };
+    row.rendered = renderTableRow(entry, ctx, render);
+    return row;
   }
 
   tableNavigate(params: TableNavigateParams): RowRef | null {

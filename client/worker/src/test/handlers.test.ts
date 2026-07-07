@@ -115,6 +115,54 @@ test('handlers: elog/table/getRows anchored at a ref includes rows both before a
   assert.deepEqual(window.rows[2].ref, midRef);
 });
 
+test('handlers: elog/table/getRows omits `rendered` when `render` is not requested (tableNavigate/tablePosition\'s bookkeeping-only use case)', () => {
+  const session = new EngineSession();
+  openFixture(session);
+  const window = call<RowWindow>(session, ElogMethods.tableGetRows, { anchor: { kind: 'first' }, before: 0, after: 3 });
+  for (const row of window.rows) assert.equal(row.rendered, undefined);
+});
+
+test('handlers: elog/table/getRows with `render` populates `rendered` (styled spans) on every row, first row is the descriptive "E" text', () => {
+  const session = new EngineSession();
+  openFixture(session);
+  const window = call<RowWindow>(session, ElogMethods.tableGetRows, {
+    anchor: { kind: 'first' },
+    before: 0,
+    after: 6,
+    render: { displayMode: 'DESCRIPTIVE', nameMode: 'SMART_NAME', typeMode: 'CPP' },
+  });
+  assert.equal(window.rows.length, 6);
+  for (const row of window.rows) {
+    assert.ok(row.rendered, `row ${row.entryClassCode} should have a rendered DTO`);
+    assert.equal(typeof row.rendered!.indentUnits, 'number');
+    assert.equal(row.rendered!.eventNumberSpan.text, `#${row.eventNumber}`);
+    assert.ok(row.rendered!.detailSpans.length > 0);
+  }
+  // The very first row is event #0's "E" line -- eventNumber 0 is special-cased by the
+  // renderer ("Initializing ...") rather than the general "Event in module ..." text.
+  assert.equal(window.rows[0].entryClassCode, 'E');
+  assert.equal(window.rows[0].rendered!.eventNumberSpan.style, 'eventNo');
+  assert.match(
+    window.rows[0].rendered!.detailSpans.map((s) => s.text).join(''),
+    /^Initializing module/,
+  );
+});
+
+test('handlers: elog/table/getRows with `render` in RAW mode reproduces the entry\'s attribute dump', () => {
+  const session = new EngineSession();
+  openFixture(session);
+  const window = call<RowWindow>(session, ElogMethods.tableGetRows, {
+    anchor: { kind: 'first' },
+    before: 0,
+    after: 1,
+    render: { displayMode: 'RAW', nameMode: 'SMART_NAME', typeMode: 'CPP' },
+  });
+  const row = window.rows[0];
+  const rawText = row.rendered!.detailSpans.map((s) => s.text).join('');
+  assert.ok(rawText.startsWith(`${row.entryClassCode} `));
+  for (const name of Object.keys(row.fields)) assert.ok(rawText.includes(`${name} `), `raw text should mention attribute "${name}"`);
+});
+
 test('handlers: elog/gotoEvent and elog/gotoSimTime resolve the same first event', () => {
   const session = new EngineSession();
   const summary = openFixture(session);

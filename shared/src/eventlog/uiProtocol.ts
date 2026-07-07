@@ -102,6 +102,14 @@ export type WebviewToHostMessage =
   | { type: 'stateChanged'; state: unknown }
   /** Export request (U9) -- mirrors `nedPreviewPanel.ts`'s `export` message shape. */
   | { type: 'export'; format: 'svg' | 'png'; data: string; suggestedName: string }
+  /**
+   * ADDITIVE (phase U2, Event Log table Ctrl+C): the webview has already assembled the
+   * selected rows' plain text (from its own already-rendered spans -- no engine round
+   * trip needed for text it already has on screen/in its row cache) and asks the host
+   * to put it on the system clipboard (`vscode.env.clipboard.writeText()`), since a
+   * webview has no clipboard API of its own for arbitrary text under VS Code's CSP.
+   */
+  | { type: 'copyText'; text: string }
   /** Ask the host to set a `setContext` key (e.g. to gate a command's `when` clause off webview-local state such as "has a selection"). */
   | { type: 'contextValue'; key: string; value: string | boolean | undefined };
 

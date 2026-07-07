@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
+import type { EventLogUiSettings, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
 import type { EventLogController } from './eventLogController';
 import type { EventLogSession } from './eventLogSession';
 import { handleWebviewMessage } from './sequenceChartEditor';
@@ -9,6 +9,37 @@ export const EVENT_LOG_TABLE_VIEW_ID = 'omnetppEventLogTable';
 
 /** Context key mirroring the pin toggle's own state -- gates which view/title icon (pin vs. unpin) is shown. */
 const CONTEXT_TABLE_PINNED = 'omnetpp.eventlogTablePinned';
+
+/**
+ * Phase U2: `workspaceState` key for the table's persisted UI state (Line Filter/Name/
+ * Type/Display mode dropdowns), keyed by file URI string -- a plain `Record<string,
+ * unknown>` blob per uri, matching uiProtocol.ts's `stateChanged`/`persistedState`
+ * contract ("opaque per-webview UI state to persist"). Kept local to this file
+ * (not shared with the Sequence Chart editor, which has no comparable per-uri state
+ * yet) so this phase does not need to touch `sequenceChartEditor.ts`.
+ */
+const TABLE_STATE_KEY = 'omnetpp.eventlog.tableState';
+
+/**
+ * Duplicates `sequenceChartEditor.ts`'s private `readEventLogUiSettings()` (a handful
+ * of `omnetpp.*` config reads) rather than exporting/importing it -- this phase's
+ * concurrency contract keeps `sequenceChartEditor.ts` untouched (a concurrent agent may
+ * be editing chart-side files), and the duplication is a few lines of pure config
+ * reads, not worth a shared-module edit to save.
+ */
+function readEventLogUiSettingsForTable(): EventLogUiSettings {
+  const config = vscode.workspace.getConfiguration('omnetpp');
+  return {
+    sequenceChart: {
+      defaultTimelineMode: config.get<string>('sequenceChart.defaultTimelineMode', 'SIMULATION_TIME'),
+      fontSize: config.get<number>('sequenceChart.fontSize', 0) || undefined,
+    },
+    eventlog: {
+      followEndOnAppend: config.get<boolean>('eventlog.followEndOnAppend', true),
+      maxEngineMemoryMB: config.get<number>('eventlog.maxEngineMemoryMB', 0) || undefined,
+    },
+  };
+}
 
 /**
  * The "OMNeT++ Event Log" panel's table webview view. Per the port plan: "binds
@@ -30,6 +61,7 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly controller: EventLogController,
+    private readonly workspaceState: vscode.Memento,
   ) {
     controller.onDidChangeActiveSession((session) => {
       if (!this.pinned) this.rebind(session ? vscode.Uri.parse(session.uriString) : undefined);
@@ -37,11 +69,22 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
   }
 
   static register(context: vscode.ExtensionContext, controller: EventLogController): { provider: EventLogTableViewProvider; disposable: vscode.Disposable } {
-    const provider = new EventLogTableViewProvider(context.extensionUri, controller);
+    const provider = new EventLogTableViewProvider(context.extensionUri, controller, context.workspaceState);
     const disposable = vscode.window.registerWebviewViewProvider(EVENT_LOG_TABLE_VIEW_ID, provider, {
       webviewOptions: { retainContextWhenHidden: true },
     });
     return { provider, disposable };
+  }
+
+  // ---- persisted table UI state (phase U2) -------------------------------------------
+
+  private getPersistedState(uriString: string): unknown {
+    return this.workspaceState.get<Record<string, unknown>>(TABLE_STATE_KEY, {})[uriString];
+  }
+
+  private async setPersistedState(uriString: string, state: unknown): Promise<void> {
+    const all = this.workspaceState.get<Record<string, unknown>>(TABLE_STATE_KEY, {});
+    await this.workspaceState.update(TABLE_STATE_KEY, { ...all, [uriString]: state });
   }
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
@@ -53,6 +96,31 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = buildEventLogWebviewHtml(webviewView.webview, this.extensionUri, 'eventLogTable.js', 'OMNeT++ Event Log');
 
     webviewView.webview.onDidReceiveMessage((message: WebviewToHostMessage) => {
+      // Phase U2: 'copyText' (Ctrl+C) and 'stateChanged' (mode-dropdown persistence)
+      // are table-specific enough to handle right here rather than growing the
+      // chart/table-shared `handleWebviewMessage()` -- see this file's header on why
+      // `sequenceChartEditor.ts` stays untouched this phase.
+      if (message.type === 'copyText') {
+        void vscode.env.clipboard.writeText(message.text);
+        return;
+      }
+      if (message.type === 'stateChanged') {
+        if (this.boundUri) void this.setPersistedState(this.boundUri.toString(), message.state);
+        return;
+      }
+      if (message.type === 'ready') {
+        // Bypass handleWebviewMessage()'s generic 'ready' case (which always sends
+        // `persistedState: undefined` -- U1 had no persistence matrix yet) so a fresh
+        // webview reload picks the table's own remembered modes back up immediately.
+        void webviewView.webview.postMessage({
+          type: 'init',
+          fileUri: this.boundUri?.toString() ?? '',
+          persistedState: this.boundUri ? this.getPersistedState(this.boundUri.toString()) : undefined,
+          settings: readEventLogUiSettingsForTable(),
+          summary: this.currentSession()?.summary ?? null,
+        });
+        return;
+      }
       const session = this.currentSession();
       if (!session) return;
       void handleWebviewMessage(session, webviewView.webview, this.boundUri!, message);
@@ -87,7 +155,7 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
     else if (this.view) {
       // No active session anymore (e.g. all chart editors closed while unpinned) --
       // let the webview fall back to its own empty state.
-      void this.view.webview.postMessage({ type: 'init', fileUri: '', persistedState: undefined, settings: {}, summary: null });
+      void this.view.webview.postMessage({ type: 'init', fileUri: '', persistedState: undefined, settings: readEventLogUiSettingsForTable(), summary: null });
     }
   }
 
@@ -99,8 +167,8 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
     void this.view.webview.postMessage({
       type: 'init',
       fileUri: this.boundUri.toString(),
-      persistedState: undefined,
-      settings: {},
+      persistedState: this.getPersistedState(this.boundUri.toString()),
+      settings: readEventLogUiSettingsForTable(),
       summary: session.summary,
     });
   }

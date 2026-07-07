@@ -47,6 +47,39 @@ export function buildEventLogWebviewHtml(webview: vscode.Webview, extensionUri: 
   .elog-body { flex: 1 1 auto; overflow: auto; position: relative; }
   .elog-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     color: var(--vscode-descriptionForeground); font-size: 13px; text-align: center; padding: 0 24px; }
+
+  /* Event Log table (phase U2) -- a custom approximate scrollbar replaces the native
+     one (millions of filtered rows make an exact native scrollbar range infeasible),
+     so .elog-table itself never scrolls natively. */
+  .elog-table { position: relative; height: 100%; overflow: hidden; outline: none; }
+  .elog-table-header { display: flex; flex: 0 0 auto; font-weight: bold; font-size: 11px;
+    color: var(--vscode-descriptionForeground); border-bottom: 1px solid var(--vscode-editorWidget-border, transparent);
+    user-select: none; }
+  .elog-table-header .elog-col { padding: 2px 4px; overflow: hidden; white-space: nowrap; position: relative; box-sizing: border-box; }
+  .elog-col-resizer { position: absolute; top: 0; bottom: 0; right: -3px; width: 6px; cursor: col-resize; z-index: 2; }
+  .elog-rows { position: absolute; left: 0; right: 14px; top: 0; bottom: 0; overflow: hidden; }
+  .elog-row { display: flex; align-items: center; white-space: pre; box-sizing: border-box;
+    font-family: var(--vscode-editor-font-family, monospace); font-size: var(--vscode-editor-font-size, 13px); }
+  .elog-row .elog-col { padding: 0 4px; overflow: hidden; text-overflow: ellipsis; box-sizing: border-box; }
+  .elog-row.selected { background: var(--vscode-list-inactiveSelectionBackground); }
+  .elog-table.focused .elog-row.selected { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+  .elog-row.focus-row { outline: 1px solid var(--vscode-list-focusOutline, transparent); outline-offset: -1px; }
+  .elog-span-const { color: var(--vscode-foreground); }
+  .elog-span-constBold { color: var(--vscode-foreground); font-weight: bold; }
+  .elog-span-raw, .elog-span-type, .elog-span-data { color: var(--vscode-charts-blue, #4daafc); }
+  .elog-span-name { color: var(--vscode-charts-blue, #4daafc); font-weight: bold; }
+  .elog-span-msg { color: var(--vscode-charts-purple, #b180d7); }
+  .elog-span-bubble { color: var(--vscode-charts-red, #f14c4c); font-weight: bold; }
+  .elog-span-faint { color: var(--vscode-descriptionForeground); }
+  .elog-span-eventNo, .elog-span-simtime { color: var(--vscode-foreground); }
+  .elog-scrollbar { position: absolute; top: 0; right: 0; width: 14px; bottom: 0; }
+  .elog-scrollbar-thumb { position: absolute; left: 2px; right: 2px; background: var(--vscode-scrollbarSlider-background); border-radius: 2px; cursor: default; min-height: 16px; }
+  .elog-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground); }
+  .elog-findbar { display: none; flex: 0 0 auto; align-items: center; gap: 4px; padding: 2px 6px;
+    background: var(--vscode-editorWidget-background); border-bottom: 1px solid var(--vscode-editorWidget-border, transparent); }
+  .elog-findbar.open { display: flex; }
+  .elog-findbar input { flex: 1 1 auto; background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, transparent); border-radius: 3px; padding: 2px 4px; font: inherit; }
 </style>
 </head>
 <body>
