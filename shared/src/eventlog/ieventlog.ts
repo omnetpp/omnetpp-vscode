@@ -67,7 +67,6 @@ import type {
 import type { EventLogEntryCache } from './eventLogEntryCache';
 import type { FileReader } from './fileReader';
 import type { Index, Snapshot } from './chunks';
-import type { MessageSendDependency } from './messageDependency';
 
 // ---------------------------------------------------------------------------------
 // ProgressCallback -- the injectable long-running-operation hook (port plan: every
@@ -134,7 +133,14 @@ export interface IEvent extends IChunk {
 
   getCauseEvent(): IEvent | null;
   getCauseBeginSendEntry(): BeginSendEntry | null;
-  getCause(): MessageSendDependency | null;
+  /**
+   * Port of `IEvent.getCause()`. Typed as the broad `IMessageDependency` (matching the
+   * Java interface exactly), not the narrower `MessageSendDependency` a plain `Event`
+   * always happens to return -- `FilteredEvent` (phase E5) can return a
+   * `FilteredMessageDependency` here (spanning a gap of filtered-out intermediate
+   * events), which is not a `MessageSendDependency`.
+   */
+  getCause(): IMessageDependency | null;
   getCauses(): IMessageDependency[];
   getConsequences(): IMessageDependency[];
 

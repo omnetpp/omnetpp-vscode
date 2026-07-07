@@ -43,6 +43,16 @@ export { MessageDependencyBase, MessageSendDependency, MessageReuseDependency, F
 export { EventLogBase, EventLogIndex } from './eventLogIndex';
 export { EventLog, type EventLogOptions } from './eventLog';
 
+// phase E5: match infra (ported from C++, no Java source -- see shared/src/match/'s
+// file headers) + the filtered view (cause/consequence tracing, module/message/event
+// filters). Re-exported here too (alongside the dedicated '@omnetpp/shared/match'
+// subpath) since FilteredEventLog's filter setters take `Matchable`-driven match
+// expressions directly.
+export { PatternMatcher } from '../match/patternMatcher';
+export { MatchExpression, MatchableString, MatchableStringMap, type Matchable } from '../match/matchExpression';
+export { FilteredEventLog } from './filteredEventLog';
+export { FilteredEvent } from './filteredEvent';
+
 import type { IChunk } from './ieventlog';
 import { parseEventLogEntry } from './eventLogEntry';
 import { createEntry } from './entries';
