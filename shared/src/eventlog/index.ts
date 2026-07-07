@@ -12,6 +12,10 @@
 //   - phase E4: the EventLog manager itself -- EventLogBase/EventLogIndex (the
 //     cached/binary/linear offset-search engine, eventLogIndex.ts) and the concrete
 //     EventLog class (parsing/caching/parse-policy/synchronize, eventLog.ts).
+//   - phase E6: the two facades the UI consumes -- EventLogFacade (base),
+//     SequenceChartFacade (timeline coordinate systems, facade.ts/sequenceChartFacade.ts)
+//     and EventLogTableFacade (virtual-table row enumeration, eventLogTableFacade.ts) --
+//     plus moduleTree.ts's buildModuleTree(), a pure module-hierarchy DTO builder.
 // Host-agnostic: no vscode or Node imports (the RandomAccessFile it reads through
 // is injected by the caller — see shared/src/fs/randomAccess.ts and
 // shared/src/node/nodeRandomAccessFile.ts for the Node-backed implementation).
@@ -52,6 +56,14 @@ export { PatternMatcher } from '../match/patternMatcher';
 export { MatchExpression, MatchableString, MatchableStringMap, type Matchable } from '../match/matchExpression';
 export { FilteredEventLog } from './filteredEventLog';
 export { FilteredEvent } from './filteredEvent';
+
+// phase E6: the two facades the UI consumes (timeline coordinate systems for the
+// Sequence Chart, virtual-table row enumeration for the Event Log table) plus the
+// module-tree DTO builder.
+export { EventLogFacade } from './facade';
+export { SequenceChartFacade } from './sequenceChartFacade';
+export { EventLogTableFacade } from './eventLogTableFacade';
+export { buildModuleTree, type ElogModule } from './moduleTree';
 
 import type { IChunk } from './ieventlog';
 import { parseEventLogEntry } from './eventLogEntry';
