@@ -126,7 +126,7 @@ export interface CanvasStackHandle {
   dispose(): void;
 }
 
-const NONCACHEABLE_KINDS = new Set<DrawPrimitive['kind']>(['gutter', 'tick', 'axisLabel', 'label']);
+const NONCACHEABLE_KINDS = new Set<DrawPrimitive['kind']>(['gutter', 'tick', 'axisLabel', 'label', 'selectionMark']);
 
 export function createCanvasStack(container: HTMLElement): CanvasStackHandle {
   const content = document.createElement('canvas');
@@ -236,6 +236,14 @@ export function createCanvasStack(container: HTMLElement): CanvasStackHandle {
         ctx.stroke();
         break;
       }
+      case 'selectionMark':
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius, 0, 2 * Math.PI);
+        ctx.stroke();
+        break;
     }
   }
 

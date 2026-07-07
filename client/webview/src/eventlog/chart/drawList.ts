@@ -56,6 +56,21 @@ export const MAX_EVENT_MARKS_PER_COLUMN = 20;
 
 export type ArrowKind = 'send' | 'reuse' | 'filtered' | 'method';
 
+/**
+ * Stable identity carried by arrow/hairpin primitives so `hitTest.ts` (phase U4) can
+ * report WHAT was hit without re-deriving it from pixel geometry. A message
+ * dependency's identity is its `(kind, causeEventNumber, consequenceEventNumber)`
+ * triple (the protocol has no separate dependency id); a method call's is
+ * `(eventNumber, sourceModuleId, targetModuleId, tc)` (`RenderMethodCall` has no id
+ * either, but this tuple is unique per the engine's own one-call-per-event-pair-per-tc
+ * invariant). `causeTc`/`consequenceTc` ride along so a hit result (or a "zoom to
+ * message" double-click, U4) never needs a second round trip just to re-learn the tc
+ * span it already had at draw time.
+ */
+export type ArrowRef =
+  | { kind: 'dependency'; dependencyKind: ArrowKind & ('send' | 'reuse' | 'filtered'); causeEventNumber: number; consequenceEventNumber: number; causeTc: number; consequenceTc: number }
+  | { kind: 'methodCall'; eventNumber: number; sourceModuleId: number; targetModuleId: number; tc: number };
+
 export type DrawPrimitive =
   | { kind: 'gutter'; part: 'top' | 'left'; x: number; y: number; w: number; h: number; color: string }
   | { kind: 'axisLine'; moduleId: number; x1: number; x2: number; y: number; lineHeight: number; color: string }
@@ -64,10 +79,12 @@ export type DrawPrimitive =
   | { kind: 'eventMark'; eventNumber: number; moduleId: number; x: number; y: number; radius: number; color: string }
   | { kind: 'selfEventMark'; eventNumber: number; moduleId: number; x: number; y: number; radius: number; color: string }
   | { kind: 'eventDensityLine'; x: number; y0: number; y1: number; color: string }
-  | { kind: 'arrow'; arrowKind: ArrowKind; x1: number; y1: number; x2: number; y2: number; color: string; dash?: number[] }
+  | { kind: 'arrow'; arrowKind: ArrowKind; x1: number; y1: number; x2: number; y2: number; color: string; dash?: number[]; ref?: ArrowRef }
   | { kind: 'arrowHead'; x: number; y: number; angle: number; color: string; length: number; width: number }
-  | { kind: 'hairpin'; x1: number; x2: number; y: number; height: number; color: string }
-  | { kind: 'label'; x: number; y: number; text: string; color: string; align?: 'left' | 'center' | 'right' };
+  | { kind: 'hairpin'; x1: number; x2: number; y: number; height: number; color: string; ref?: ArrowRef }
+  | { kind: 'label'; x: number; y: number; text: string; color: string; align?: 'left' | 'center' | 'right' }
+  /** Phase U4 — a selection ring around a selected event (Eclipse's `drawSelectionMarks`, ported as a fixed red ring rather than reading a style-provider color, since this port has no separate style-provider config yet). */
+  | { kind: 'selectionMark'; x: number; y: number; radius: number; color: string };
 
 /** Colors this module needs beyond `EventLogPalette` (reuse/filtered-dependency dash colors) — derived locally from the imported palette rather than editing `common/theme.ts` (out of this phase's file ownership). */
 export function deriveArrowColors(theme: EventLogPalette): Record<ArrowKind, string> {
@@ -121,6 +138,8 @@ class VLineBuffer {
   }
 }
 
+export const SELECTION_MARK_COLOR = '#ff3b30';
+
 export interface BuildDrawListParams {
   timelineMode: TimelineMode;
   viewport: ViewportState;
@@ -130,10 +149,12 @@ export interface BuildDrawListParams {
   axesLayout: AxesLayout;
   ticks: Tick[];
   theme: EventLogPalette;
+  /** Phase U4 — event numbers currently selected (`selection.ts`'s `ChartSelectionState.events`); each gets a `'selectionMark'` ring around its event mark. Omitted/undefined = no selection marks (e.g. a caller that doesn't track selection yet). */
+  selectedEventNumbers?: ReadonlySet<number>;
 }
 
 export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
-  const { viewport, events, dependencies, methodCalls, axesLayout, ticks, theme } = params;
+  const { viewport, events, dependencies, methodCalls, axesLayout, ticks, theme, selectedEventNumbers } = params;
   const primitives: DrawPrimitive[] = [];
   const arrowColors = deriveArrowColors(theme);
   const axisByModuleId = new Map(axesLayout.axes.map((a) => [a.moduleId, a]));
@@ -184,6 +205,7 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
           ? { kind: 'selfEventMark', eventNumber: event.eventNumber, moduleId: event.moduleId, x, y, radius: EVENT_RADIUS, color: theme.isDark ? '#6fcf6f' : '#00ee00' }
           : { kind: 'eventMark', eventNumber: event.eventNumber, moduleId: event.moduleId, x, y, radius: EVENT_RADIUS, color: theme.eventColor },
       );
+      if (selectedEventNumbers?.has(event.eventNumber)) primitives.push({ kind: 'selectionMark', x, y, radius: EVENT_RADIUS + 3, color: SELECTION_MARK_COLOR });
     }
   }
   for (const [xKey, col] of columnDensity) {
@@ -206,15 +228,17 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
     const x2 = contentX(dep.consequenceTc, viewport);
     const y2 = axisRowY(consequenceAxis.y, viewport);
 
+    const depRef: ArrowRef = { kind: 'dependency', dependencyKind: arrowKind as 'send' | 'reuse' | 'filtered', causeEventNumber: dep.causeEventNumber, consequenceEventNumber: dep.consequenceEventNumber, causeTc: dep.causeTc, consequenceTc: dep.consequenceTc };
+
     if (dep.causeModuleId === dep.consequenceModuleId) {
       // self-message -- simple hairpin placeholder (see this file's header)
-      primitives.push({ kind: 'hairpin', x1, x2, y: y1, height: HAIRPIN_HEIGHT, color });
+      primitives.push({ kind: 'hairpin', x1, x2, y: y1, height: HAIRPIN_HEIGHT, color, ref: depRef });
       continue;
     }
 
     if (Math.abs(x2 - x1) < 1 && !vlineBuffer.addAndCheck((x1 + x2) / 2, y1, y2)) continue;
 
-    primitives.push({ kind: 'arrow', arrowKind, x1, y1, x2, y2, color, dash: ARROW_DASH[arrowKind] });
+    primitives.push({ kind: 'arrow', arrowKind, x1, y1, x2, y2, color, dash: ARROW_DASH[arrowKind], ref: depRef });
     const angle = Math.atan2(y2 - y1, x2 - x1);
     primitives.push({ kind: 'arrowHead', x: x2, y: y2, angle, color, length: ARROWHEAD_LENGTH, width: ARROWHEAD_WIDTH });
   }
@@ -230,7 +254,8 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
     const color = arrowColors.method;
     // method calls are drawn between two axes at the same tc -- a vertical arrow, still deduped like any other near-vertical segment
     if (!vlineBuffer.addAndCheck(x, y1, y2)) continue;
-    primitives.push({ kind: 'arrow', arrowKind: 'method', x1: x, y1, x2: x, y2, color });
+    const callRef: ArrowRef = { kind: 'methodCall', eventNumber: call.eventNumber, sourceModuleId: call.sourceModuleId, targetModuleId: call.targetModuleId, tc: call.tc };
+    primitives.push({ kind: 'arrow', arrowKind: 'method', x1: x, y1, x2: x, y2, color, ref: callRef });
     const angle = Math.atan2(y2 - y1, 0);
     primitives.push({ kind: 'arrowHead', x, y: y2, angle, color, length: ARROWHEAD_LENGTH, width: ARROWHEAD_WIDTH });
     primitives.push({ kind: 'label', x: x + 4, y: (y1 + y2) / 2, text: call.methodName, color, align: 'left' });

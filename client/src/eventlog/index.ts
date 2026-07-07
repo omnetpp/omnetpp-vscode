@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { EventLogController } from './eventLogController';
 import { EventLogTableViewProvider } from './eventLogTableView';
 import { SequenceChartEditorProvider } from './sequenceChartEditor';
-import { gotoEventCommand, gotoSimulationTimeCommand, openFilterCommand, findTextCommand } from './eventLogDialogs';
+import { gotoEventCommand, gotoSimulationTimeCommand, openFilterCommand, findTextCommand, findNextCommand } from './eventLogDialogs';
 
 /**
  * Registers the Sequence Chart custom editor + Event Log panel view + their
@@ -38,7 +38,8 @@ export function registerEventLog(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('omnetpp.eventlog.openFilter', () => openFilterCommand()),
     vscode.commands.registerCommand('omnetpp.eventlog.gotoEvent', () => gotoEventCommand(controller)),
     vscode.commands.registerCommand('omnetpp.eventlog.gotoSimulationTime', () => gotoSimulationTimeCommand(controller)),
-    vscode.commands.registerCommand('omnetpp.eventlog.findText', () => findTextCommand()),
+    vscode.commands.registerCommand('omnetpp.eventlog.findText', () => findTextCommand(controller)),
+    vscode.commands.registerCommand('omnetpp.eventlog.findNext', () => findNextCommand(controller)),
     // pin/unpin follows this codebase's established pattern for the other
     // pinnable views (pinType/unpinType, pinModule/unpinModule, ...): one
     // command per icon state, gated by the `omnetpp.eventlogTablePinned`

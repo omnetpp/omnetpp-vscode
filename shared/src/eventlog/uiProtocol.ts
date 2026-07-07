@@ -94,6 +94,15 @@ export type WebviewToHostMessage =
    * verbatim on the matching `engineResponse`.
    */
   | { type: 'engineRequest'; id: number; method: string; params: unknown }
+  /**
+   * ADDITIVE (phase U4): asks the host to actually abandon the in-flight
+   * `engineRequest` numbered `id` (a real `$/cancelRequest`, not just "ignore the
+   * eventual answer" -- see `common/rpc.ts`'s `EngineRpc.cancel()`). No-op host-side
+   * if `id` already resolved or was never issued (`sequenceChartEditor.ts`'s message
+   * pump only tracks a `CancellationTokenSource` while the matching `engineRequest`
+   * is still in flight).
+   */
+  | { type: 'cancelRequest'; id: number }
   /** The webview's local selection changed (U6); `selection.originId` identifies which webview this came from. */
   | { type: 'selectionChanged'; selection: EventLogSelection }
   /** The webview wants the *other* view (or itself) to reveal something it already resolved locally (U6). */

@@ -31,24 +31,23 @@
  *  - LRU: capped at `maxWindows` (default 8); the least-recently-accessed window is
  *    evicted first once the cap is exceeded.
  *
- * NOTE ON REAL CANCELLATION (protocol-gap workaround, flagged per this phase's
- * report): `common/rpc.ts`'s `EngineRpc.cancel()` only drops the LOCAL pending-map
- * entry — it does not send `$/cancelRequest` to the worker (its own doc comment
- * calls real cancellation "a U3/U4 concern", but `rpc.ts` is outside this phase's
- * file ownership, so wiring cancellation through it is not done here). The
- * consequence: a superseded `elog/sc/getViewport` request keeps running to
- * completion on the engine's serial job queue even after this cache has stopped
- * caring about its answer — wasted engine work, not a correctness problem (the
- * generation check above still discards the result). A future phase that owns
- * `rpc.ts` could plumb a real `CancellationToken` through `engineRequest` to reclaim
- * that wasted work.
+ * REAL CANCELLATION (phase U4 — resolves the U3 "Known follow-up"): `common/rpc.ts`'s
+ * `EngineRpc.requestCancelable()` now sends an actual `$/cancelRequest` to the worker
+ * when cancelled (verified to reach the engine's own `progress()`-hook cancellation
+ * checks, ~60ms turnaround per phase E8's measurement) — `EngineViewportSource.
+ * getViewport()` below returns `{ promise, cancel }` instead of a bare `Promise` so
+ * this cache can actually reclaim wasted engine work, not just discard a result it no
+ * longer wants: `bumpGeneration()`/`invalidateAll()` now cancel every in-flight fetch
+ * whose waiters are ALL already stale (nobody registered against the new generation),
+ * rather than leaving it to complete unwatched. A fetch that still has at least one
+ * current-generation waiter is left running (its result is still wanted).
  */
 
 import type { TimelineMode, ViewportModel, ViewportParams } from '@omnetpp/shared/elog-protocol';
 
-/** What `renderModelCache.ts` needs from the RPC layer — kept minimal so tests can supply a fake without touching `common/rpc.ts`. */
+/** What `renderModelCache.ts` needs from the RPC layer — kept minimal so tests can supply a fake without touching `common/rpc.ts`. `cancel()` must be safe to call even after the promise has already settled (a no-op then). */
 export interface EngineViewportSource {
-  getViewport(params: ViewportParams): Promise<ViewportModel>;
+  getViewport(params: ViewportParams): { promise: Promise<ViewportModel>; cancel: () => void };
 }
 
 export interface RenderModelCacheOptions {
@@ -87,6 +86,8 @@ interface Waiter {
 
 interface InFlightEntry {
   waiters: Waiter[];
+  /** Cancels the underlying engine request (see this file's header) — no-op if it already settled. */
+  cancel: () => void;
 }
 
 export class RenderModelCache {
@@ -100,9 +101,26 @@ export class RenderModelCache {
     private readonly options: RenderModelCacheOptions = {},
   ) {}
 
-  /** Call whenever pan/zoom/mode/filter changes in a way that makes any in-flight fetch's eventual answer no longer worth applying blindly (it may still be cached once it lands, just not auto-delivered to a stale waiter). */
+  /**
+   * Call whenever pan/zoom/mode/filter changes in a way that makes any in-flight
+   * fetch's eventual answer no longer worth applying blindly (it may still be cached
+   * once it lands, just not auto-delivered to a stale waiter). Phase U4: also
+   * actually CANCELS (see this file's header) every in-flight fetch that has no
+   * waiter at the new generation — i.e. every fetch nobody has re-registered
+   * interest in since the bump, which in practice (every call site bumps generation
+   * BEFORE any caller has had a chance to `request()` again) means "every fetch
+   * in flight at the moment of the bump", freeing the engine's serial job queue
+   * instead of leaving it to grind through a now-useless viewport fetch.
+   */
   bumpGeneration(): number {
-    return ++this.generation;
+    const newGeneration = ++this.generation;
+    for (const [key, entry] of this.inFlight) {
+      if (!entry.waiters.some((w) => w.generation === newGeneration)) {
+        entry.cancel();
+        this.inFlight.delete(key);
+      }
+    }
+    return newGeneration;
   }
 
   currentGeneration(): number {
@@ -146,22 +164,30 @@ export class RenderModelCache {
 
     let entry = this.inFlight.get(key);
     if (!entry) {
-      entry = { waiters: [] };
-      this.inFlight.set(key, entry);
       const params: ViewportParams = {
         range: { kind: 'tc', tcBegin: fetchLeft, tcEnd: fetchRight },
         includeModuleIds: this.options.includeModuleIds,
         maxEvents: this.options.maxEvents,
       };
-      void this.source.getViewport(params).then((model) => {
-        this.inFlight.delete(key);
-        if (model.coordinateSystemVersion === req.coordinateSystemVersion) {
-          this.addWindow({ leftTc: fetchLeft, rightTc: fetchRight, mode: req.timelineMode, version: model.coordinateSystemVersion, filterGeneration, model, lastAccess: ++this.accessCounter });
-        }
-        for (const w of entry!.waiters) {
-          if (w.generation === this.generation && w.expectedVersion === model.coordinateSystemVersion) w.onReady(model);
-        }
-      });
+      const { promise, cancel } = this.source.getViewport(params);
+      entry = { waiters: [], cancel };
+      this.inFlight.set(key, entry);
+      promise
+        .then((model) => {
+          this.inFlight.delete(key);
+          if (model.coordinateSystemVersion === req.coordinateSystemVersion) {
+            this.addWindow({ leftTc: fetchLeft, rightTc: fetchRight, mode: req.timelineMode, version: model.coordinateSystemVersion, filterGeneration, model, lastAccess: ++this.accessCounter });
+          }
+          for (const w of entry!.waiters) {
+            if (w.generation === this.generation && w.expectedVersion === model.coordinateSystemVersion) w.onReady(model);
+          }
+        })
+        .catch(() => {
+          // cancelled (see `cancel()` above) or a real engine error -- either way, stop tracking it;
+          // there is no waiter left to usefully notify of a rejection (`request()` only ever hands
+          // back a value via `onReady`/the synchronous cache-hit return, never a rejection).
+          this.inFlight.delete(key);
+        });
     }
     entry.waiters.push(waiter);
     return null;

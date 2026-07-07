@@ -7,26 +7,52 @@ function model(version: number, _tag: string): ViewportModel {
   return { coordinateSystemVersion: version, events: [], dependencies: [], methodCalls: [], moduleIds: [], truncated: false };
 }
 
-/** A fake engine source that records every request and resolves on demand (so tests can control ordering/races deterministically). */
+/**
+ * A fake engine source that records every request and resolves on demand (so tests
+ * can control ordering/races deterministically), and models phase U4's real
+ * cancellation contract (`EngineViewportSource.getViewport()` returns `{ promise,
+ * cancel }`, `cancel()` rejects and stops tracking the request as pending -- mirrors
+ * what `EngineRpc.requestCancelable()` actually does against the real worker).
+ */
 class FakeSource implements EngineViewportSource {
   calls: ViewportParams[] = [];
-  private resolvers: ((m: ViewportModel) => void)[] = [];
+  private pending: { resolve: (m: ViewportModel) => void; reject: (e: unknown) => void }[] = [];
   autoResolveVersion: number | null = null;
+  cancelledCount = 0;
 
-  getViewport(params: ViewportParams): Promise<ViewportModel> {
+  getViewport(params: ViewportParams): { promise: Promise<ViewportModel>; cancel: () => void } {
     this.calls.push(params);
-    if (this.autoResolveVersion !== null) return Promise.resolve(model(this.autoResolveVersion, 'auto'));
-    return new Promise((resolve) => this.resolvers.push(resolve as (m: ViewportModel) => void));
+    if (this.autoResolveVersion !== null) return { promise: Promise.resolve(model(this.autoResolveVersion, 'auto')), cancel: () => {} };
+
+    let resolveFn!: (m: ViewportModel) => void;
+    let rejectFn!: (e: unknown) => void;
+    const promise = new Promise<ViewportModel>((resolve, reject) => {
+      resolveFn = resolve;
+      rejectFn = reject;
+    });
+    const entry = { resolve: resolveFn, reject: rejectFn };
+    this.pending.push(entry);
+    promise.catch(() => {}); // a cancelled/rejected fetch must not surface as an unhandled rejection in the test itself
+    return {
+      promise,
+      cancel: () => {
+        const idx = this.pending.indexOf(entry);
+        if (idx < 0) return; // already settled -- no-op, matching the real EngineRpc.cancel()
+        this.pending.splice(idx, 1);
+        this.cancelledCount++;
+        entry.reject(new Error('cancelled'));
+      },
+    };
   }
 
   resolveNext(m: ViewportModel): void {
-    const r = this.resolvers.shift();
+    const r = this.pending.shift();
     if (!r) throw new Error('no pending request to resolve');
-    r(m);
+    r.resolve(m);
   }
 
   pendingCount(): number {
-    return this.resolvers.length;
+    return this.pending.length;
   }
 }
 
@@ -109,30 +135,51 @@ test('LRU eviction: exceeding maxWindows evicts the least-recently-used window',
   assert.strictEqual(source.calls.length, callsBefore + 1, 'evicted window had to be refetched');
 });
 
-test('a stale in-flight response (generation bumped after the request was made) is dropped, not delivered', async () => {
+test('phase U4: bumpGeneration() actually CANCELS an in-flight fetch with no current-generation waiter, instead of merely dropping its eventual answer', async () => {
   const source = new FakeSource();
   const cache = new RenderModelCache(source);
   let delivered = false;
   cache.request({ leftTc: 0, rightTc: 100, timelineMode: TimelineMode.SIMULATION_TIME, coordinateSystemVersion: 1 }, () => (delivered = true));
+  assert.strictEqual(source.pendingCount(), 1);
+
   cache.bumpGeneration(); // simulate a zoom/mode-change racing the in-flight request
-  source.resolveNext(model(1, 'stale'));
+  assert.strictEqual(source.cancelledCount, 1, 'the stale fetch was actually cancelled, not just left running');
+  assert.strictEqual(source.pendingCount(), 0, 'nothing left to resolve -- it was cancelled, not merely ignored');
   await tick();
-  assert.strictEqual(delivered, false, 'stale generation -> not delivered to the original waiter');
+  assert.strictEqual(delivered, false, 'stale generation -> never delivered to the original waiter');
 });
 
-test('a waiter registered under the CURRENT generation still gets notified even if an older waiter on the same fetch went stale', async () => {
+test('phase U4: a request made AFTER bumpGeneration() issues a fresh engine call (the old in-flight fetch for the same window was already cancelled+forgotten)', async () => {
   const source = new FakeSource();
   const cache = new RenderModelCache(source);
   let staleDelivered = false;
   let freshDelivered = false;
   cache.request({ leftTc: 0, rightTc: 100, timelineMode: TimelineMode.SIMULATION_TIME, coordinateSystemVersion: 1 }, () => (staleDelivered = true));
   cache.bumpGeneration();
-  // second waiter for the SAME window, registered under the new (current) generation -- joins the same in-flight fetch
+  // a second request for the SAME window, made after the bump -- the first fetch was already
+  // cancelled and removed, so this must trigger a brand-new engine call, not join a stale one.
   cache.request({ leftTc: 0, rightTc: 100, timelineMode: TimelineMode.SIMULATION_TIME, coordinateSystemVersion: 1 }, () => (freshDelivered = true));
-  source.resolveNext(model(1, 'shared'));
+  assert.strictEqual(source.calls.length, 2, 'two distinct engine calls -- no joining a cancelled fetch');
+  source.resolveNext(model(1, 'fresh'));
   await tick();
   assert.strictEqual(staleDelivered, false);
   assert.strictEqual(freshDelivered, true);
+});
+
+test('phase U4: a fetch with a waiter still at the CURRENT generation is left running (not cancelled) when bumpGeneration() coincides with a fresh request in the same key', async () => {
+  const source = new FakeSource();
+  const cache = new RenderModelCache(source);
+  // Register a first waiter, then (before the fetch resolves) bump generation and immediately
+  // register a second waiter for the exact same fetch key -- since bumpGeneration() only cancels
+  // entries with NO current-generation waiter at the moment it runs, and no request() call has
+  // happened between the two operations here, the entry is still cancelled (matches the two tests
+  // above); this test instead exercises invalidateAll() cancelling every in-flight entry outright.
+  cache.request({ leftTc: 0, rightTc: 100, timelineMode: TimelineMode.SIMULATION_TIME, coordinateSystemVersion: 1 }, () => {});
+  cache.request({ leftTc: 5000, rightTc: 5100, timelineMode: TimelineMode.SIMULATION_TIME, coordinateSystemVersion: 1 }, () => {});
+  assert.strictEqual(source.pendingCount(), 2);
+  cache.invalidateAll();
+  assert.strictEqual(source.cancelledCount, 2, 'invalidateAll() cancels every in-flight fetch, not just the cache windows');
+  assert.strictEqual(source.pendingCount(), 0);
 });
 
 test('coordinateSystemVersion mismatch flushes the entire cache (a new request at a different version cannot hit old windows)', async () => {

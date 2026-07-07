@@ -45,6 +45,11 @@ export function buildEventLogWebviewHtml(webview: vscode.Webview, extensionUri: 
     border-bottom: 1px solid var(--vscode-editorWidget-border, transparent); }
   .elog-status .placeholder { font-style: italic; }
   .elog-body { flex: 1 1 auto; overflow: auto; position: relative; }
+  /* Sequence Chart canvas container is the keyboard-interactive surface (phase U4:
+     pan/zoom/select/navigate all happen via its keydown handler) -- a visible focus
+     ring is the minimal a11y requirement for a focusable, non-native-control element. */
+  #chartCanvasContainer { outline: none; }
+  #chartCanvasContainer:focus-visible { outline: 1px solid var(--vscode-focusBorder, #007fd4); outline-offset: -1px; }
   .elog-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     color: var(--vscode-descriptionForeground); font-size: 13px; text-align: center; padding: 0 24px; }
 
@@ -80,6 +85,53 @@ export function buildEventLogWebviewHtml(webview: vscode.Webview, extensionUri: 
   .elog-findbar.open { display: flex; }
   .elog-findbar input { flex: 1 1 auto; background: var(--vscode-input-background); color: var(--vscode-input-foreground);
     border: 1px solid var(--vscode-input-border, transparent); border-radius: 3px; padding: 2px 4px; font: inherit; }
+
+  /* Sequence Chart hover tooltip (phase U4, chart/tooltip.ts) */
+  .elog-tooltip { position: fixed; z-index: 1000; max-width: 480px; padding: 6px 8px; font-size: 12px; line-height: 1.5;
+    background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background));
+    color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
+    border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-editorWidget-border, transparent));
+    border-radius: 3px; box-shadow: 0 2px 8px rgba(0,0,0,0.35); pointer-events: none; white-space: normal; word-break: break-word; }
+  .elog-tooltip pre { margin: 4px 0 0; white-space: pre-wrap; font-family: var(--vscode-editor-font-family, monospace); }
+
+  /* Context menu framework (phase U4, common/contextMenu.ts) -- reused by the Event
+     Log table in a later phase per that file's header. */
+  .elog-menu { position: fixed; z-index: 1000; min-width: 180px; max-width: 360px; padding: 3px;
+    background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
+    color: var(--vscode-menu-foreground, var(--vscode-foreground));
+    border: 1px solid var(--vscode-menu-border, var(--vscode-editorWidget-border, transparent));
+    border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.35); font-size: 13px; user-select: none; }
+  .elog-menu-item { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 3px; cursor: pointer; white-space: nowrap; }
+  .elog-menu-item.highlighted, .elog-menu-item:hover:not(.disabled) {
+    background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground));
+    color: var(--vscode-menu-selectionForeground, var(--vscode-foreground)); }
+  .elog-menu-item.disabled { opacity: 0.45; cursor: default; }
+  .elog-menu-check { width: 14px; flex: 0 0 auto; text-align: center; font-size: 11px; }
+  .elog-menu-icon { flex: 0 0 auto; }
+  .elog-menu-label { flex: 1 1 auto; }
+  .elog-menu-arrow { flex: 0 0 auto; opacity: 0.7; }
+  .elog-menu-separator { height: 1px; margin: 3px 4px; background: var(--vscode-menu-separatorBackground, var(--vscode-editorWidget-border, rgba(128,128,128,0.4))); }
+
+  /* Goto/Find dialogs (phase U4, common/dialogs.ts) */
+  .elog-dialog-overlay { position: fixed; inset: 0; z-index: 1001; background: rgba(0,0,0,0.25);
+    display: flex; align-items: flex-start; justify-content: center; padding-top: 15vh; }
+  .elog-dialog { min-width: 320px; max-width: 480px; padding: 12px 14px;
+    background: var(--vscode-editorWidget-background); color: var(--vscode-foreground);
+    border: 1px solid var(--vscode-editorWidget-border, transparent); border-radius: 5px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4); font-size: 13px; }
+  .elog-dialog-title { font-weight: bold; margin-bottom: 8px; }
+  .elog-dialog-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .elog-dialog-row label { flex: 1 1 auto; }
+  .elog-dialog-row input[type="text"] { flex: 1 1 auto; min-width: 160px; background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent);
+    border-radius: 3px; padding: 3px 6px; font: inherit; }
+  .elog-dialog-row input[type="checkbox"] { flex: 0 0 auto; }
+  .elog-dialog-error { min-height: 16px; color: var(--vscode-errorForeground, #f14c4c); font-size: 12px; margin-bottom: 6px; }
+  .elog-dialog-buttons { display: flex; justify-content: flex-end; gap: 6px; }
+  .elog-dialog-buttons button { padding: 4px 12px; border-radius: 3px; border: 1px solid var(--vscode-button-border, transparent);
+    background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); cursor: pointer; }
+  .elog-dialog-buttons button:last-child { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+  .elog-dialog-buttons button:disabled { opacity: 0.5; cursor: default; }
 </style>
 </head>
 <body>

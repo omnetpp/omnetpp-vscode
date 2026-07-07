@@ -20,6 +20,7 @@
  */
 
 import * as path from 'node:path';
+import type { CancellationToken } from 'vscode-jsonrpc/node';
 import {
   ElogMethods,
   type AdjacencyParams,
@@ -120,6 +121,11 @@ export class EventLogSession {
     return this.chartSinks.size === 0 && this.tableSinks.size === 0;
   }
 
+  /** `true` iff at least one Sequence Chart webview is currently attached -- used by `eventLogDialogs.ts` (phase U4) to decide whether the native goto/find commands should forward into the webview's own in-webview dialogs instead of showing a native input box (see that file's header). */
+  hasChartAttachment(): boolean {
+    return this.chartSinks.size > 0;
+  }
+
   private disposeNow(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -194,8 +200,15 @@ export class EventLogSession {
    * the "proxying engineRequest -> session.workerClient" the port plan's
    * `sequenceChartEditor.ts`/`eventLogTableView.ts` entries describe --
    * centralized here so both webviews share one dispatch table.
+   *
+   * `token` (phase U4, real RPC cancellation -- see `common/rpc.ts`'s header and the
+   * "Known follow-up" in the U3 commit message): threaded through to every
+   * `WorkerClient` call unchanged; `sequenceChartEditor.ts`'s message pump supplies a
+   * fresh `vscode.CancellationTokenSource` per `engineRequest` and cancels it when a
+   * matching `cancelRequest` arrives, which `vscode-jsonrpc` turns into a real
+   * `$/cancelRequest` to the worker.
    */
-  async handleEngineRequest(method: string, params: unknown): Promise<unknown> {
+  async handleEngineRequest(method: string, params: unknown, token?: CancellationToken): Promise<unknown> {
     const wc = this.workerClientInstance;
     switch (method) {
       case ElogMethods.open:
@@ -205,39 +218,39 @@ export class EventLogSession {
         // different path through this channel.
         throw new Error('EventLogSession: elog/open must not be proxied from a webview; the session already owns its file.');
       case ElogMethods.getSummary:
-        return wc.getSummary();
+        return wc.getSummary(token);
       case ElogMethods.checkChanges:
         return this.refresh();
       case ElogMethods.getModuleTree:
-        return wc.getModuleTree();
+        return wc.getModuleTree(token);
       case ElogMethods.setFilter:
-        return wc.setFilter(params as FilterParams | null);
+        return wc.setFilter(params as FilterParams | null, token);
       case ElogMethods.scSetTimelineMode:
-        return wc.scSetTimelineMode(params as ScSetTimelineModeParams);
+        return wc.scSetTimelineMode(params as ScSetTimelineModeParams, token);
       case ElogMethods.scRelocateOrigin:
-        return wc.scRelocateOrigin(params as ScRelocateOriginParams);
+        return wc.scRelocateOrigin(params as ScRelocateOriginParams, token);
       case ElogMethods.scGetViewport:
-        return wc.scGetViewport(params as ViewportParams);
+        return wc.scGetViewport(params as ViewportParams, token);
       case ElogMethods.scMapCoords:
-        return wc.scMapCoords(params as MapCoordsParams);
+        return wc.scMapCoords(params as MapCoordsParams, token);
       case ElogMethods.scAdjacencyMatrix:
-        return wc.scAdjacencyMatrix(params as AdjacencyParams);
+        return wc.scAdjacencyMatrix(params as AdjacencyParams, token);
       case ElogMethods.tableGetRows:
-        return wc.tableGetRows(params as RowWindowParams);
+        return wc.tableGetRows(params as RowWindowParams, token);
       case ElogMethods.tableNavigate:
-        return wc.tableNavigate(params as TableNavigateParams);
+        return wc.tableNavigate(params as TableNavigateParams, token);
       case ElogMethods.tablePosition:
-        return wc.tablePosition(params as TablePositionParams);
+        return wc.tablePosition(params as TablePositionParams, token);
       case ElogMethods.gotoEvent:
-        return this.gotoEvent(params as GotoEventParams);
+        return this.gotoEvent(params as GotoEventParams, token);
       case ElogMethods.gotoSimTime:
-        return this.gotoSimTime(params as GotoSimTimeParams);
+        return this.gotoSimTime(params as GotoSimTimeParams, token);
       case ElogMethods.findText:
-        return wc.findText(params as FindTextParams);
+        return wc.findText(params as FindTextParams, token);
       case ElogMethods.getEventDetail:
-        return wc.getEventDetail(params as EventDetailParams);
+        return wc.getEventDetail(params as EventDetailParams, token);
       case ElogMethods.close:
-        return wc.close();
+        return wc.close(token);
       default:
         throw new Error(`EventLogSession: unknown engine method "${method}"`);
     }
@@ -246,15 +259,15 @@ export class EventLogSession {
   // ---- goto (wired end-to-end this phase; also called directly by eventLogDialogs.ts) ----
 
   /** Resolves a goto-event request AND reveals it in every attached webview (dialogs call this directly; the generic proxy above routes here too so a webview-initiated goto behaves identically). */
-  async gotoEvent(params: GotoEventParams): Promise<GotoResult> {
-    const result = await this.workerClientInstance.gotoEvent(params);
+  async gotoEvent(params: GotoEventParams, token?: CancellationToken): Promise<GotoResult> {
+    const result = await this.workerClientInstance.gotoEvent(params, token);
     if (result.found) this.reveal({ kind: 'event', eventNumber: result.eventNumber!, ref: result.ref });
     return result;
   }
 
   /** Same as `gotoEvent()` for simulation-time targets. */
-  async gotoSimTime(params: GotoSimTimeParams): Promise<GotoResult> {
-    const result = await this.workerClientInstance.gotoSimTime(params);
+  async gotoSimTime(params: GotoSimTimeParams, token?: CancellationToken): Promise<GotoResult> {
+    const result = await this.workerClientInstance.gotoSimTime(params, token);
     if (result.found) this.reveal({ kind: 'simTime', simulationTime: params.simulationTime, ref: result.ref });
     return result;
   }

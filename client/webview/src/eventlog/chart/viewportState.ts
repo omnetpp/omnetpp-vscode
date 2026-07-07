@@ -151,3 +151,23 @@ export function revealAt(v: ViewportState, targetTc: number, atContentX?: number
   const x = atContentX ?? contentWidth(v) / 2;
   return panTo(v, targetTc - x / v.pixelsPerTc);
 }
+
+/**
+ * Zooms/pans so `[beginTc, endTc]` fills the content area with `paddingFactor` extra
+ * room on each side (default 10%) — phase U4's "double-click a message dependency ->
+ * zoom to fit its cause/consequence span" (port of `zoomToMessageDependency`) and the
+ * context menu's "Zoom to Fit" (port of `zoomToFit()`, which in Java fits the whole
+ * log's begin/end range — this same helper serves both callers, just with different
+ * `[beginTc, endTc]` arguments). A zero-width span (both endpoints equal, e.g. a
+ * same-tc self-message) falls back to keeping the CURRENT scale and just re-centering
+ * on the point, rather than dividing by zero / zooming to infinity. Clears `followEnd`
+ * (an explicit navigation, like any other `revealAt`/`panTo`).
+ */
+export function zoomToFit(v: ViewportState, beginTc: number, endTc: number, paddingFactor = 0.1): ViewportState {
+  const width = endTc - beginTc;
+  if (width <= 0) return revealAt(v, beginTc);
+  const padded = width * (1 + 2 * paddingFactor);
+  const pixelsPerTc = clampScale(contentWidth(v) / padded);
+  const leftTc = beginTc - width * paddingFactor;
+  return { ...v, leftTc, pixelsPerTc, followEnd: false };
+}

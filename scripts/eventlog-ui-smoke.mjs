@@ -11,8 +11,11 @@
 //
 // Usage: bun scripts/eventlog-ui-smoke.mjs   (after `bun run dev:build`)
 import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CancellationTokenSource } from 'vscode-jsonrpc/node';
 import { EventLogSession } from '../client/src/eventlog/eventLogSession.ts';
 
 // This script lives in scripts/, which (unlike client/, server/, mcp/) has no
@@ -23,6 +26,7 @@ import { EventLogSession } from '../client/src/eventlog/eventLogSession.ts';
 // resolves the import fine (its own directory IS inside client/'s workspace),
 // this restriction only applies to this script's own top-level imports.
 const ElogMethods = {
+  getSummary: 'elog/getSummary',
   scSetTimelineMode: 'elog/sc/setTimelineMode',
   scRelocateOrigin: 'elog/sc/relocateOrigin',
   scGetViewport: 'elog/sc/getViewport',
@@ -31,6 +35,7 @@ const ElogMethods = {
   tableGetRows: 'elog/table/getRows',
   tableNavigate: 'elog/table/navigate',
   tablePosition: 'elog/table/position',
+  findText: 'elog/findText',
 };
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -92,6 +97,9 @@ async function main() {
 
   // ---- U2: Event Log table row-rendering round trips (before teardown) --------------
   await smokeTableU2(session, summary);
+
+  // ---- U4: real RPC cancellation end-to-end through the actual worker ---------------
+  await smokeCancellationU4(bundlePath);
 
   // ---- refcounting: detaching the only sink disposes the worker ----------------------
   session.detach('chart', sink);
@@ -198,4 +206,78 @@ async function smokeTableU2(session, summary) {
   assert(position.approximateNumberOfEntries === rendered.approximateNumberOfEntries, 'smokeTableU2: tablePosition\'s approximateNumberOfEntries agrees with getRows()\'s');
 
   void summary;
+}
+
+/** Streams a large, plain synthetic .elog -- same shape as scripts/elog-worker-smoke.mjs's own fixture generator -- so a findText miss forces a genuinely long full-file scan (needed to measure cancellation latency meaningfully; a tiny fixture like Fifo1 finishes before a cancelRequest notification could ever land, which is exactly why this needs its own big file + its own session/worker rather than reusing the one above). */
+function writeSyntheticEventLog(file, eventCount) {
+  const fd = fs.openSync(file, 'w');
+  try {
+    fs.writeSync(fd, 'SB ov 1536 ev 2 rid Smoke-0\n\n');
+    for (let i = 0; i < eventCount; i++) {
+      fs.writeSync(fd, `E # ${i} t ${i} m 1 ce -1 msg -1\n`);
+      if (i === 0) fs.writeSync(fd, 'MC id 1 c C t T n root cm 1\n');
+      fs.writeSync(fd, '\n');
+    }
+    fs.writeSync(fd, 'SE e 0 c 9 m "done"\n');
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+// ---------------------------------------------------------------------------------
+// U4 (chart interactions): real RPC cancellation end to end -- resolves the U3 "Known
+// follow-up" (`common/rpc.ts`'s `EngineRpc.cancel()` now sends an actual
+// `$/cancelRequest`, not just a local no-op). `EventLogSession.handleEngineRequest()`
+// threads an optional `vscode-jsonrpc` `CancellationToken` straight through to
+// `WorkerClient`'s (already-token-aware) methods -- `sequenceChartEditor.ts`'s real
+// host wires a fresh `vscode.CancellationTokenSource` per `engineRequest` and cancels
+// it on a matching `cancelRequest`. This script drives the same `CancellationToken`
+// contract directly against the real bundled worker (no fake webview panel needed),
+// asserting a cancelled `elog/findText` actually REJECTS PROMPTLY (not just "never
+// resolves", and not merely because the whole scan finished first) -- mirrors
+// scripts/elog-worker-smoke.mjs's own cancellation scenario almost exactly, just
+// through `EventLogSession`'s proxy instead of a raw `vscode-jsonrpc` connection.
+// ---------------------------------------------------------------------------------
+async function smokeCancellationU4(bundlePath) {
+  const bigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omnetpp-eventlog-ui-smoke-'));
+  const bigFile = path.join(bigDir, 'big.elog');
+  let bigSession;
+  try {
+    writeSyntheticEventLog(bigFile, 400_000);
+    bigSession = new EventLogSession('elog:eventlog-ui-smoke-cancel', bigFile, bundlePath);
+    await bigSession.initialize();
+
+    const cts = new CancellationTokenSource();
+    const start = performance.now();
+    const longRequest = bigSession.handleEngineRequest(
+      ElogMethods.findText,
+      { start: null, search: 'ThisNeverMatchesAnythingInTheSyntheticLog', forward: true, caseSensitive: false },
+      cts.token,
+    );
+    // give it a moment to actually start scanning, then cancel well before a full
+    // 400k-event scan could possibly finish on its own
+    await new Promise((r) => setTimeout(r, 50));
+    cts.cancel();
+
+    let cancelledInTime = false;
+    let elapsedMs = -1;
+    let code;
+    try {
+      await longRequest;
+    } catch (err) {
+      elapsedMs = performance.now() - start;
+      code = err && typeof err.code === 'number' ? err.code : undefined;
+      cancelledInTime = elapsedMs < 500 && /cancel/i.test(err.message ?? '');
+      if (!cancelledInTime) console.error(`  (cancellation error: code=${code} message=${err.message} elapsedMs=${elapsedMs.toFixed(1)})`);
+    }
+    assert(cancelledInTime, `smokeCancellationU4: a cancelled long-running elog/findText scan rejects promptly (elapsed ${elapsedMs.toFixed(1)}ms, budget 500ms)`);
+    assert(code === -32800, `smokeCancellationU4: rejection carries the standard RequestCancelled JSON-RPC error code (-32800), got ${code}`);
+
+    // the session/worker must stay healthy afterwards -- an ordinary request right after a cancellation succeeds normally
+    const followUp = await bigSession.handleEngineRequest(ElogMethods.getSummary, undefined);
+    assert(followUp.isEmpty === false, 'smokeCancellationU4: the session keeps working normally after a cancelled request');
+  } finally {
+    bigSession?.dispose();
+    fs.rmSync(bigDir, { recursive: true, force: true });
+  }
 }

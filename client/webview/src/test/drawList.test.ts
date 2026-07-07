@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { TimelineMode, type RenderDependency, type RenderMethodCall, type TimelineEvent } from '@omnetpp/shared/elog-protocol';
 import type { EventLogPalette } from '../eventlog/common/theme';
 import { deriveAxes } from '../eventlog/chart/axes';
-import { buildDrawList, MAX_EVENT_MARKS_PER_COLUMN } from '../eventlog/chart/drawList';
+import { buildDrawList, MAX_EVENT_MARKS_PER_COLUMN, SELECTION_MARK_COLOR } from '../eventlog/chart/drawList';
 import { GUTTER_LEFT_WIDTH, GUTTER_TOP_HEIGHT, createViewportState, resize } from '../eventlog/chart/viewportState';
 
 const theme: EventLogPalette = {
@@ -145,4 +145,32 @@ test('gutter backgrounds are always emitted, sized to the top/left gutter dimens
   assert.strictEqual(top.h, GUTTER_TOP_HEIGHT);
   assert.strictEqual(left.w, GUTTER_LEFT_WIDTH);
   assert.strictEqual(left.h, v.canvasHeight);
+});
+
+// ---------------------------------------------------------------------------------
+// selectionMark -- phase U4 (Eclipse's drawSelectionMarks port)
+// ---------------------------------------------------------------------------------
+
+test('selectedEventNumbers: a selected event gets an extra selectionMark ring at the same position', () => {
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: events3, dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, selectedEventNumbers: new Set([2]) });
+  const mark = primitives.find((p) => p.kind === 'eventMark' && p.eventNumber === 2) as { x: number; y: number };
+  const selectionMarks = primitives.filter((p) => p.kind === 'selectionMark') as { x: number; y: number; color: string }[];
+  assert.strictEqual(selectionMarks.length, 1);
+  assert.strictEqual(selectionMarks[0].x, mark.x);
+  assert.strictEqual(selectionMarks[0].y, mark.y);
+  assert.strictEqual(selectionMarks[0].color, SELECTION_MARK_COLOR);
+});
+
+test('selectedEventNumbers omitted/empty: no selectionMark primitives at all', () => {
+  const primitives = draw();
+  assert.strictEqual(primitives.filter((p) => p.kind === 'selectionMark').length, 0);
+});
+
+test('selectedEventNumbers: an event number not present in the viewport is simply not drawn (no crash, no stray mark)', () => {
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: events3, dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, selectedEventNumbers: new Set([999]) });
+  assert.strictEqual(primitives.filter((p) => p.kind === 'selectionMark').length, 0);
 });

@@ -14,6 +14,7 @@ import {
   visibleTcRange,
   zoomAt,
   zoomAtCenter,
+  zoomToFit,
   GUTTER_LEFT_WIDTH,
   GUTTER_TOP_HEIGHT,
 } from '../eventlog/chart/viewportState';
@@ -123,4 +124,30 @@ test('scrollVerticalTo clamps to [0, maxScroll]', () => {
   assert.strictEqual(scrollVerticalTo(v, -50, 100).vscroll, 0);
   assert.strictEqual(scrollVerticalTo(v, 500, 100).vscroll, 100);
   assert.strictEqual(scrollVerticalTo(v, 50, 100).vscroll, 50);
+});
+
+// ---------------------------------------------------------------------------------
+// zoomToFit -- U4's "double-click a message dependency -> zoom to its span" /
+// "Zoom to Fit" context-menu action
+// ---------------------------------------------------------------------------------
+
+test('zoomToFit: the requested [beginTc, endTc] span (plus padding) exactly fills the content width', () => {
+  const v = sized(800, 600);
+  const fitted = zoomToFit(v, 1000, 2000, 0.1);
+  const range = visibleTcRange(fitted);
+  assert.ok(Math.abs(range.leftTc - (1000 - 100)) < 1e-6, 'left edge is beginTc minus the 10% padding');
+  assert.ok(Math.abs(range.rightTc - (2000 + 100)) < 1e-6, 'right edge is endTc plus the 10% padding');
+});
+
+test('zoomToFit: clears followEnd (an explicit navigation)', () => {
+  const v = { ...sized(800, 600), followEnd: true };
+  assert.strictEqual(zoomToFit(v, 0, 1000).followEnd, false);
+});
+
+test('zoomToFit: a zero-width span (beginTc === endTc) re-centers without changing scale', () => {
+  const v = sized(800, 600);
+  const fitted = zoomToFit(v, 500, 500);
+  assert.strictEqual(fitted.pixelsPerTc, v.pixelsPerTc);
+  const range = visibleTcRange(fitted);
+  assert.ok(range.leftTc < 500 && range.rightTc > 500, '500 lands inside the (re-centered) visible range');
 });

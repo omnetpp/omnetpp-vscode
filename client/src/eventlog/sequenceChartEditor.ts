@@ -106,6 +106,25 @@ function basename(uri: vscode.Uri): string {
 }
 
 /**
+ * Per-sink table of `CancellationTokenSource`s for currently-in-flight `engineRequest`
+ * ids (phase U4, real RPC cancellation -- see `common/rpc.ts`'s header). Keyed by
+ * `sink` (each webview's own `EngineRpc` numbers its requests independently starting
+ * at 1, so two different webviews' ids collide; a `WeakMap` scopes the id table to the
+ * sink it belongs to, and lets an unreferenced sink's table be GC'd once the webview is
+ * disposed without any explicit cleanup code needed here).
+ */
+const cancellationSources = new WeakMap<object, Map<number, vscode.CancellationTokenSource>>();
+
+function sourcesFor(sink: object): Map<number, vscode.CancellationTokenSource> {
+  let map = cancellationSources.get(sink);
+  if (!map) {
+    map = new Map();
+    cancellationSources.set(sink, map);
+  }
+  return map;
+}
+
+/**
  * Shared message-pump body (used verbatim by `eventLogTableView.ts` too): the
  * `ready`/`engineRequest`/`selectionChanged`/`stateChanged` handling is
  * identical regardless of which webview (chart or table) sent it -- only the
@@ -132,8 +151,11 @@ export async function handleWebviewMessage(
       break;
     }
     case 'engineRequest': {
+      const sources = sourcesFor(sink);
+      const cts = new vscode.CancellationTokenSource();
+      sources.set(message.id, cts);
       try {
-        const result = await session.handleEngineRequest(message.method, message.params);
+        const result = await session.handleEngineRequest(message.method, message.params, cts.token);
         sink.postMessage({ type: 'engineResponse', id: message.id, result });
       } catch (err) {
         sink.postMessage({
@@ -141,7 +163,15 @@ export async function handleWebviewMessage(
           id: message.id,
           error: { message: err instanceof Error ? err.message : String(err) },
         });
+      } finally {
+        sources.delete(message.id);
+        cts.dispose();
       }
+      break;
+    }
+    case 'cancelRequest': {
+      const cts = sourcesFor(sink).get(message.id);
+      cts?.cancel(); // no-op if the id already finished/was never issued (see the WeakMap's own doc comment)
       break;
     }
     case 'selectionChanged':

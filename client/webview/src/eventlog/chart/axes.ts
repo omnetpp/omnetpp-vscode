@@ -40,15 +40,21 @@ export interface AxesLayout {
   spacing: number;
 }
 
-function findModuleName(moduleId: number, tree: ElogModule | null): { label: string; compound: boolean } | null {
+/** Finds `moduleId`'s node in the module tree, or `null` if not (yet) known. Exported for reuse by `labelProvider.ts` (U4), which needs the same lookup for tooltip module names/types. */
+export function findModuleNode(moduleId: number, tree: ElogModule | null): ElogModule | null {
   if (tree === null) return null;
   const stack: ElogModule[] = [tree];
   while (stack.length > 0) {
     const node = stack.pop()!;
-    if (node.moduleId === moduleId) return { label: node.fullName, compound: node.compound };
+    if (node.moduleId === moduleId) return node;
     stack.push(...node.children);
   }
   return null;
+}
+
+function findModuleName(moduleId: number, tree: ElogModule | null): { label: string; compound: boolean } | null {
+  const node = findModuleNode(moduleId, tree);
+  return node ? { label: node.fullName, compound: node.compound } : null;
 }
 
 /**

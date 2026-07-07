@@ -308,6 +308,11 @@
         "category": "OMNeT++"
       },
       {
+        "command": "omnetpp.eventlog.findNext",
+        "title": "Find Next in Event Log",
+        "category": "OMNeT++"
+      },
+      {
         "command": "omnetpp.eventlog.pinEventLogTable",
         "title": "Pin to This Event Log",
         "category": "OMNeT++",
