@@ -47,13 +47,20 @@
  *    upstream generator bug, carries no information, and has no callers in the ported
  *    subsystem, so this is a deliberate omission rather than an oversight.
  *
- *  - chunk/event back-reference is typed as `unknown` for now. `Event`/`IChunk` are
- *    introduced in phase E3; `getEvent()`/`getEventNumber()`/`getSimulationTime()`
- *    (which in Java delegate to the owning chunk) are deferred until then.
+ *  - chunk/event back-reference: phase E3 (Event/IChunk) completes what was deferred
+ *    here in E2. `getEvent()` ports `chunk instanceof Event ? (Event)chunk : null` as
+ *    the `isIEvent()` type guard from ieventlog.ts instead of a value-level `instanceof
+ *    Event` check, specifically to avoid a real circular module dependency: `Event`
+ *    (event.ts) needs to import `EventLogEntry`/`EventLogMessageEntry` from *this* file
+ *    at the value level (for `instanceof` checks against parsed entries), so this file
+ *    cannot in turn import the concrete `Event` class as a value. `isIEvent()` only
+ *    needs the `IEvent` *type* (safe, `import type`, erased at compile time) plus a
+ *    duck-typed marker method (`getEventEntry`, unique to `IEvent`) checked at runtime.
  */
 
 import { BigDecimal } from './bigDecimal';
 import { tokenizeLine } from './lineTokenizer';
+import { isIEvent, type IChunk, type IEvent } from './ieventlog';
 
 /** Port of org.omnetpp.eventlog.EventLogEntry — abstract base for every entry kind. */
 export abstract class EventLogEntry {
@@ -64,8 +71,15 @@ export abstract class EventLogEntry {
 
   /** Absolute byte offset of this entry's line in the .elog file. */
   offset = -1;
-  /** Back-reference to the owning Event/Snapshot/Index chunk (typed loosely until phase E3). */
-  chunk: unknown = null;
+  /**
+   * Back-reference to the owning Event/Snapshot/Index chunk. `null` both for entries
+   * that genuinely have none yet (not parsed through `parseEventLogEntry()`) and for
+   * entries Java parses with a `null` chunk on purpose: `Index.parse()`/
+   * `Snapshot.parse()` call `EventLogEntry.parseEntry(eventLog, null, ...)` (chunk
+   * argument literally `null`) for every entry inside an "I"/"S" chunk — ported
+   * faithfully in chunks.ts.
+   */
+  chunk: IChunk | null = null;
   /** Index of this entry within its owning chunk. */
   entryIndex = -1;
 
@@ -84,11 +98,46 @@ export abstract class EventLogEntry {
   getOffset(): number {
     return this.offset;
   }
-  getChunk(): unknown {
+  getChunk(): IChunk | null {
     return this.chunk;
+  }
+  /** Port of `EventLogEntry.getEvent()` — see this file's header for why this uses `isIEvent()` rather than `instanceof Event`. */
+  getEvent(): IEvent | null {
+    return this.chunk !== null && isIEvent(this.chunk) ? this.chunk : null;
+  }
+  /** Port of `EventLogEntry.getEventNumber()`. Throws (like Java's implicit NPE) if `chunk` is `null`. */
+  getEventNumber(): number {
+    return this.chunk!.getEventNumber();
+  }
+  /** Port of `EventLogEntry.getSimulationTime()`. Throws (like Java's implicit NPE) if `chunk` is `null`. */
+  getSimulationTime(): BigDecimal {
+    return this.chunk!.getSimulationTime();
   }
   getEntryIndex(): number {
     return this.entryIndex;
+  }
+
+  /**
+   * Port of `EventLogEntry.getPreviousEventLogEntry()`. Requires `getEvent()` to be
+   * non-null (like Java, which dereferences the cast unconditionally).
+   */
+  getPreviousEventLogEntry(): EventLogEntry | null {
+    const event = this.getEvent()!;
+    if (this.entryIndex === 0) {
+      const previousEvent = event.getPreviousEvent();
+      return previousEvent !== null ? previousEvent.getEventLogEntry(previousEvent.getNumEventLogEntries() - 1) : null;
+    }
+    return event.getEventLogEntry(this.entryIndex - 1);
+  }
+
+  /** Port of `EventLogEntry.getNextEventLogEntry()`. Requires `getEvent()` to be non-null (see above). */
+  getNextEventLogEntry(): EventLogEntry | null {
+    const event = this.getEvent()!;
+    if (this.entryIndex === event.getNumEventLogEntries() - 1) {
+      const nextEvent = event.getNextEvent();
+      return nextEvent !== null ? nextEvent.getEventLogEntry(0) : null;
+    }
+    return event.getEventLogEntry(this.entryIndex + 1);
   }
 
   /** Port of `EventLogEntry.parseEventNumber(String)`. */
@@ -108,7 +157,7 @@ export abstract class EventLogEntry {
 export class EventLogMessageEntry extends EventLogEntry {
   text: string | null = null;
 
-  constructor(chunk: unknown = null, entryIndex = -1) {
+  constructor(chunk: IChunk | null = null, entryIndex = -1) {
     super();
     this.chunk = chunk;
     this.entryIndex = entryIndex;
@@ -279,7 +328,7 @@ export type EntryFactory = (code: string) => EventLogTokenBasedEntry | null;
  */
 export function parseEventLogEntry(
   createEntry: EntryFactory,
-  chunk: unknown,
+  chunk: IChunk | null,
   entryIndex: number,
   offset: number,
   line: string,

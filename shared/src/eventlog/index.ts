@@ -1,11 +1,14 @@
 // Public surface of the '@omnetpp/shared/eventlog' subpath (see shared/package.json
-// "exports"). This is the foundation + parsing layer of the OMNeT++ eventlog
-// library port:
+// "exports"). This is the foundation + parsing + event/chunk/dependency layer of the
+// OMNeT++ eventlog library port:
 //   - phase E1: exact-precision simulation time, line tokenization, a TreeMap
 //     replacement, and a buffered bidirectional file reader with change detection.
 //   - phase E2: the entry parsing layer — the ~56 eventlog entry classes (generated
 //     from resources/eventlog/eventlogentries.txt by scripts/gen-eventlog-entries.mjs)
 //     plus their hand-written base classes and factory dispatch.
+//   - phase E3: the Event object model (EventBase/Event), the Index/Snapshot chunk
+//     types, the bounded per-category entry cache, message dependencies, and the
+//     IEventLog/IEventLogContext interfaces E4's EventLog manager will implement.
 // Host-agnostic: no vscode or Node imports (the RandomAccessFile it reads through
 // is injected by the caller — see shared/src/fs/randomAccess.ts and
 // shared/src/node/nodeRandomAccessFile.ts for the Node-backed implementation).
@@ -19,6 +22,22 @@ export { FileReader, FileChangedError, type Line } from './fileReader';
 export { EventLogEntry, EventLogMessageEntry, EventLogTokenBasedEntry, type EntryFactory, parseEventLogEntry } from './eventLogEntry';
 export * from './entries';
 
+export {
+  type IChunk,
+  type IEvent,
+  type IMessageDependency,
+  type IEventLog,
+  type IEventLogContext,
+  type ProgressCallback,
+  type ReadToEventLineResult,
+  isIEvent,
+} from './ieventlog';
+export { EventBase, Event } from './event';
+export { Index, Snapshot } from './chunks';
+export { EventLogEntryCache } from './eventLogEntryCache';
+export { MessageDependencyBase, MessageSendDependency, MessageReuseDependency, FilteredMessageDependency } from './messageDependency';
+
+import type { IChunk } from './ieventlog';
 import { parseEventLogEntry } from './eventLogEntry';
 import { createEntry } from './entries';
 
@@ -29,6 +48,6 @@ import { createEntry } from './entries';
  * module dependency between the hand-written base classes and the generated file
  * that extends them).
  */
-export function parseEventLogLine(chunk: unknown, entryIndex: number, offset: number, line: string) {
+export function parseEventLogLine(chunk: IChunk | null, entryIndex: number, offset: number, line: string) {
   return parseEventLogEntry(createEntry, chunk, entryIndex, offset, line);
 }

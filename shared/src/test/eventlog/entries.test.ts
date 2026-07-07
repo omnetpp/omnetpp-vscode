@@ -169,7 +169,9 @@ test('entries: parseEventLogEntry returns null for blank lines and unknown codes
 });
 
 test('entries: parseEventLogEntry sets chunk/entryIndex/offset on the parsed entry', () => {
-  const chunk = { marker: true };
+  // A minimal stand-in chunk: this test only checks identity pass-through, not IChunk
+  // semantics (IChunk itself is introduced in phase E3, after this test was written).
+  const chunk = { marker: true } as unknown as import('../../eventlog/ieventlog').IChunk;
   const result = parseEventLogEntry(createEntry, chunk, 3, 456, 'MC id 1 c C t T n n');
   assert.ok(result);
   assert.equal(result!.getChunk(), chunk);
