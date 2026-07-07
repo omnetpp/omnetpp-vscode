@@ -30,16 +30,17 @@
  * into a return value, because `getEntryAndDistance()`'s loop needs to thread the same
  * mutable index through many successive calls exactly like Java's `RefObject` does).
  *
- * Object-identity note (port plan risk #3): `getEntryAndDistance()`'s target-reached
- * check compares two `EventLogEntry` references with `!==` (Java: `!=`), matching Java
- * literally. Unlike `IEvent` (which already exposes a stable `getEventNumber()` key,
- * used everywhere else in this port instead of object identity), `EventLogEntry` has no
- * such key of its own here; this is safe today because phase E6 has no event/entry LRU
- * yet. Flagged for phase E7 (bounded Event LRU): once an evicted-then-re-parsed `Event`
- * can hand back a fresh `EventLogEntry` object for the same logical (event number, entry
- * index), this comparison will need to become a compound-key comparison instead --
- * tracked at the call site below, not fixed now (matches the "port BEHAVIOR" mandate:
- * there is no eviction to be unsafe against yet).
+ * Object-identity note (port plan risk #3), FIXED in phase E7: `getEntryAndDistance()`'s
+ * target-reached check compares two `EventLogEntry` references (Java: `!=`, matching
+ * Java literally in earlier phases). Unlike `IEvent` (which already exposes a stable
+ * `getEventNumber()` key, used everywhere else in this port instead of object
+ * identity), `EventLogEntry` has no such key of its own -- so once phase E7's bounded
+ * Event LRU can evict and later re-parse an `Event`, a fresh `EventLogEntry` object can
+ * come back for the same logical (event number, entry index), and a plain `!==`
+ * comparison against a `targetEventLogEntry` captured before that eviction would never
+ * match, walking past the real target. Fixed by comparing the compound
+ * `(eventNumber, entryIndex)` key instead (`entryKey()`, below) -- same fix applied to
+ * `getEntryIndexInEvent()`'s analogous `===` check.
  */
 
 import { BeginSendEntry, EventEntry } from './entries';
@@ -49,6 +50,16 @@ import { EventLogTableFilterMode, FileChange } from './enums';
 import { EventLogFacade } from './facade';
 import type { IEvent, IEventLog } from './ieventlog';
 import { MatchExpression } from '../match/matchExpression';
+
+/**
+ * Logical identity for an `EventLogEntry` that survives Event eviction/reparse (phase
+ * E7) -- see this file's header. Assumes `entry.getEvent()` is non-null, true for
+ * every `EventLogEntry` this facade ever hands out (they all originate from
+ * `event.getEventLogEntry(index)`, never from an Index/Snapshot chunk).
+ */
+function entryKey(entry: EventLogEntry): string {
+  return `${entry.getEvent()!.getEventNumber()}:${entry.getEntryIndex()}`;
+}
 
 export class EventLogTableFacade extends EventLogFacade {
   protected approximateNumberOfEntries = -1; // cached value, -1 means not yet calculated
@@ -167,10 +178,12 @@ export class EventLogTableFacade extends EventLogFacade {
     if (event === null) throw new Error('EventLogTableFacade.getEntryIndexInEvent: eventLogEntry does not belong to an event');
     let index = 0;
     const num = event.getNumEventLogEntries();
+    const targetEntryIndex = eventLogEntry.getEntryIndex();
     for (let i = 0; i < num; i++) {
       const currentEventLogEntry = event.getEventLogEntry(i);
       if (this.matchesFilter(currentEventLogEntry)) {
-        if (currentEventLogEntry === eventLogEntry) return index;
+        // compound-key comparison, not object identity (phase E7 -- see this file's header)
+        if (i === targetEntryIndex) return index;
         else index++;
       }
     }
@@ -321,9 +334,9 @@ export class EventLogTableFacade extends EventLogFacade {
     let reachedDistance = 0;
     const indexRef = { value: this.getEntryIndexInEvent(eventLogEntry) };
     if (!(indexRef.value >= 0)) throw new Error('EventLogTableFacade.getEntryAndDistance: assertion failed (index < 0)');
-    // Object-identity comparison against targetEventLogEntry -- see this file's header
-    // (flagged for phase E7, safe today: no Event/entry LRU eviction exists yet).
-    while (distance !== 0 && eventLogEntry !== null && eventLogEntry !== targetEventLogEntry) {
+    // Compound-key comparison against targetEventLogEntry, not object identity (phase E7 -- see this file's header).
+    const targetKey = targetEventLogEntry === null ? null : entryKey(targetEventLogEntry);
+    while (distance !== 0 && eventLogEntry !== null && (targetKey === null || entryKey(eventLogEntry) !== targetKey)) {
       if (distance > 0) {
         eventLogEntry = this.getNextEntry(eventLogEntry, indexRef);
         distance--;

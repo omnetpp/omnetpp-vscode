@@ -19,16 +19,19 @@
  * `ui/` tree) no caller outside these two files ever calls the method, so nothing
  * downstream depends on the richer shape.
  *
- * Object-identity caveat (port plan risk #3): `getFoundEventLogEntries()`'s merge step
- * removes a "removed" entry from the running array by reference identity (`Array#
- * indexOf`+`splice`, matching Java's `ArrayList.remove(Object)`, which is reference
- * equality since `EventLogEntry` never overrides `equals()`). This is safe as long as
- * the same `Event` object (and hence the same `EventLogEntry` instances within it) is
- * returned for a given event number every time -- true in this phase (no eviction
- * exists yet) but not guaranteed once E7's bounded LRU can evict and later recreate an
- * `Event` for the same event number. E7 must revisit this if it turns out a chunk's
- * merge can span an eviction (in practice unlikely, since chunks summarize forward from
- * the previous chunk in the same pass, but worth re-checking then).
+ * Object-identity caveat (port plan risk #3), FIXED in phase E7: `getFoundEventLogEntries()`'s
+ * merge step removes a "removed" entry from the running array. Java does this by
+ * reference identity (`ArrayList.remove(Object)`, matching `EventLogEntry`'s default
+ * `equals()`); an earlier draft of this port matched that literally
+ * (`Array#indexOf`+`splice`), which was safe only as long as the same `Event` object
+ * (and hence the same `EventLogEntry` instances within it) is returned for a given
+ * event number every time. Phase E7's bounded Event LRU breaks that assumption: an
+ * evicted-then-reparsed `Event` hands back a *fresh* `EventLogEntry` object for the
+ * same logical (event number, entry index) -- a plain `===`/`indexOf` comparison could
+ * then silently fail to find-and-remove an entry it logically should, corrupting the
+ * merged "found" set. Fixed by comparing the stable `(getEventNumber(), getEntryIndex())`
+ * key instead (`entryLogicalKey()`, below) -- unaffected by which physical object
+ * happens to represent that entry at lookup time.
  *
  * `getEvent()`/`getPreviousEvent()`/`getNextEvent()` return the concrete `Event` type
  * (not `IEvent`), narrowing (covariantly, same as Java's `Event`-returning overrides)
@@ -46,6 +49,15 @@ import { parseEventLogEntry } from './eventLogEntry';
 import type { FileReader } from './fileReader';
 import type { IChunk, IEventLogContext } from './ieventlog';
 import type { Event } from './event';
+
+/**
+ * Logical identity for an `EventLogEntry` that survives Event eviction/reparse (phase
+ * E7): the same (event number, entry index) pair always denotes the same source line,
+ * even if eviction produced a fresh object instance for it. See this file's header.
+ */
+function entryLogicalKey(entry: EventLogEntry): string {
+  return `${entry.getEventNumber()}:${entry.getEntryIndex()}`;
+}
 
 // ---------------------------------------------------------------------------------
 // Index — "I" chunk (incremental snapshot: added/removed references since the
@@ -288,8 +300,9 @@ export class Index implements IChunk {
       else if (this.previousIndex !== null) previousFound = this.previousIndex.getFoundEventLogEntries();
       if (previousFound !== null) for (const entry of previousFound) found.push(entry);
       for (const entry of this.getRemovedEventLogEntries()) {
-        // Java: ArrayList.remove(Object) — reference-identity removal (see this file's header note on risk #3).
-        const idx = found.indexOf(entry);
+        // Removal by logical (eventNumber, entryIndex) key, not object identity -- see this file's header (risk #3, fixed in E7).
+        const key = entryLogicalKey(entry);
+        const idx = found.findIndex((candidate) => entryLogicalKey(candidate) === key);
         if (idx >= 0) found.splice(idx, 1);
       }
       for (const entry of this.getAddedEventLogEntries()) found.push(entry);

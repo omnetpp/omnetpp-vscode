@@ -67,11 +67,30 @@
  * work exactly as expected) -- so it is ported literally; see
  * filteredEventLog.test.ts's "compound-ancestor match" tests for the exact asserted
  * (quirky) behavior.
+ *
+ * MANDATED DEVIATION, phase E7 ("Memory bounding" in the port plan): Java retains
+ * `eventNumberToFilteredEventMap`/`eventNumberToFilterMatchesFlagMap`/
+ * `eventNumberToTraceableEventFlagMap` forever, same leak class as `EventLog`'s own
+ * event cache. This port bounds all three:
+ *  - `eventNumberToFilteredEventMap` (the `FilteredEvent` proxy cache) gets the same
+ *    LRU treatment as `EventLog.eventNumberToEventMap` (see eventLog.ts's header):
+ *    a plain `Map` doubling as LRU order, `firstMatchingEvent`/`lastMatchingEvent`
+ *    (and any event number a host pins via `pinEvent()`) protected from eviction --
+ *    exactly the property `FilteredEvent.getPreviousEvent()`/`getNextEvent()`'s
+ *    `filteredEventLog.getFirstEvent() !== this` identity check relies on (see
+ *    filteredEvent.ts's header) -- and eviction unlinks neighbour links the same way.
+ *    `filteredEventCacheLimit`, default 50_000.
+ *  - `eventNumberToFilterMatchesFlagMap`/`eventNumberToTraceableEventFlagMap` are pure
+ *    memoization of boolean predicates (`matchesFilter()`/`isCauseOfTracedEvent()`/
+ *    `isConsequenceOfTracedEvent()`) -- cheap to recompute, so per the plan's own
+ *    guidance they are simply cleared wholesale once either exceeds
+ *    `filteredFlagCacheLimit` (default 2_000_000), rather than LRU-tracked.
  */
 
 import { BigDecimal } from './bigDecimal';
 import { FileChange, MatchKind } from './enums';
 import { BeginSendEntry, type ModuleDescriptionEntry, type SimulationBeginEntry, type SimulationEndEntry } from './entries';
+import { EventBase } from './event';
 import { EventLogBase } from './eventLogIndex';
 import type { EventLogEntry } from './eventLogEntry';
 import type { EventLogEntryCache } from './eventLogEntryCache';
@@ -82,13 +101,20 @@ import type { IEvent, IEventLog, IMessageDependency } from './ieventlog';
 import { MatchExpression } from '../match/matchExpression';
 import { PatternMatcher } from '../match/patternMatcher';
 import { MessageReuseDependency } from './messageDependency';
-import { SortedMap } from './sortedMap';
 
 function isMessageReuseDependency(messageDependency: IMessageDependency): boolean {
   return messageDependency instanceof MessageReuseDependency;
 }
 
 const numberCompare = (a: number, b: number): number => a - b;
+
+/** Constructor options for `FilteredEventLog` -- see this file's header, "MANDATED DEVIATION". */
+export interface FilteredEventLogOptions {
+  /** Max number of `FilteredEvent` proxy objects retained (LRU eviction). Default 50_000. */
+  filteredEventCacheLimit?: number;
+  /** Max size either boolean memoization map (`matchesFilter()`'s / the trace filter's) may reach before it is wholesale-cleared. Default 2_000_000. */
+  filteredFlagCacheLimit?: number;
+}
 
 /** Port of `FilteredEventLog`. */
 export class FilteredEventLog extends EventLogBase implements IEventLog {
@@ -136,19 +162,30 @@ export class FilteredEventLog extends EventLogBase implements IEventLog {
   private maximumNumberOfConsequences = 5;
   private maximumConsequenceCollectionTime = 100; // ms
 
-  // internal state
-  private readonly eventNumberToFilteredEventMap = new SortedMap<number, FilteredEvent>(numberCompare);
-  private readonly eventNumberToFilterMatchesFlagMap = new SortedMap<number, boolean>(numberCompare); // memoizes matchesFilter()
-  private readonly eventNumberToTraceableEventFlagMap = new SortedMap<number, boolean>(numberCompare); // memoizes isCauseOfTracedEvent()/isConsequenceOfTracedEvent()
+  // internal state -- phase E7: plain `Map`s (not `SortedMap`s -- checked: only
+  // `.get`/`.set`/`.delete`/`.clear`/`.values()` are ever called on these three, no
+  // floor/ceiling navigation), so `eventNumberToFilteredEventMap`'s insertion order
+  // doubles as LRU order, same convention as `EventLog.eventNumberToEventMap` (see
+  // eventLog.ts's header and this file's header, "MANDATED DEVIATION").
+  private readonly eventNumberToFilteredEventMap = new Map<number, FilteredEvent>();
+  private readonly eventNumberToFilterMatchesFlagMap = new Map<number, boolean>(); // memoizes matchesFilter()
+  private readonly eventNumberToTraceableEventFlagMap = new Map<number, boolean>(); // memoizes isCauseOfTracedEvent()/isConsequenceOfTracedEvent()
   private unseenTracedEventCauseEventNumbers: number[] = []; // remaining cause event numbers of the traced event still to be visited (kept sorted ascending, like Java's re-sorted LinkedList)
   private unseenTracedEventConsequenceEventNumbers: number[] = [];
 
   private firstMatchingEvent: FilteredEvent | null = null;
   private lastMatchingEvent: FilteredEvent | null = null;
 
-  constructor(eventLog: IEventLog) {
+  private readonly filteredEventCacheLimit: number;
+  private readonly filteredFlagCacheLimit: number;
+  /** Event numbers a host (E8's worker) has asked to protect from eviction -- mirrors `EventLog.pinnedEventNumbers`. */
+  private readonly pinnedEventNumbers = new Set<number>();
+
+  constructor(eventLog: IEventLog, options: FilteredEventLogOptions = {}) {
     super();
     this.eventLog = eventLog;
+    this.filteredEventCacheLimit = options.filteredEventCacheLimit ?? 50_000;
+    this.filteredFlagCacheLimit = options.filteredFlagCacheLimit ?? 2_000_000;
     this.setModuleExpression('');
     this.setMessageExpression('');
     this.clearInternalState();
@@ -156,6 +193,72 @@ export class FilteredEventLog extends EventLogBase implements IEventLog {
 
   close(): void {
     this.deleteAllocatedObjects();
+  }
+
+  // ---- phase E7: bounded FilteredEvent LRU + pinning API (see this file's header) ----
+
+  /** Protects `eventNumber`'s `FilteredEvent` proxy from eviction -- see `EventLog.pinEvent()`'s doc comment (same contract, mirrored here). */
+  pinEvent(eventNumber: number): void {
+    if (eventNumber < 0) throw new Error('FilteredEventLog.pinEvent: eventNumber must be >= 0');
+    this.pinnedEventNumbers.add(eventNumber);
+  }
+
+  unpinEvent(eventNumber: number): void {
+    this.pinnedEventNumbers.delete(eventNumber);
+  }
+
+  isEventPinned(eventNumber: number): boolean {
+    return this.pinnedEventNumbers.has(eventNumber);
+  }
+
+  /** Number of `FilteredEvent` proxies currently retained -- exposed for tests/instrumentation. */
+  getFilteredEventCacheSize(): number {
+    return this.eventNumberToFilteredEventMap.size;
+  }
+
+  getFilteredEventCacheLimit(): number {
+    return this.filteredEventCacheLimit;
+  }
+
+  private isFilteredEventEvictable(eventNumber: number): boolean {
+    if (this.pinnedEventNumbers.has(eventNumber)) return false;
+    if (this.firstMatchingEvent !== null && this.firstMatchingEvent.getEventNumber() === eventNumber) return false;
+    if (this.lastMatchingEvent !== null && this.lastMatchingEvent.getEventNumber() === eventNumber) return false;
+    return true;
+  }
+
+  private touchCachedFilteredEvent(eventNumber: number, filteredEvent: FilteredEvent): void {
+    this.eventNumberToFilteredEventMap.delete(eventNumber);
+    this.eventNumberToFilteredEventMap.set(eventNumber, filteredEvent);
+  }
+
+  /** Evicts least-recently-used, non-pinned `FilteredEvent`s until back at/under `filteredEventCacheLimit` (mirrors `EventLog.enforceEventCacheLimit()`). */
+  private enforceFilteredEventCacheLimit(): void {
+    while (this.eventNumberToFilteredEventMap.size > this.filteredEventCacheLimit) {
+      let victim: number | undefined;
+      for (const eventNumber of this.eventNumberToFilteredEventMap.keys()) {
+        if (this.isFilteredEventEvictable(eventNumber)) {
+          victim = eventNumber;
+          break;
+        }
+      }
+      if (victim === undefined) break;
+      const evicted = this.eventNumberToFilteredEventMap.get(victim);
+      this.eventNumberToFilteredEventMap.delete(victim);
+      if (evicted !== undefined) EventBase.unlinkNeighbourEvents(evicted);
+    }
+  }
+
+  /** Wholesale-clears `eventNumberToFilterMatchesFlagMap` once it exceeds `filteredFlagCacheLimit` (see this file's header). */
+  private rememberFilterMatch(eventNumber: number, matches: boolean): void {
+    if (this.eventNumberToFilterMatchesFlagMap.size >= this.filteredFlagCacheLimit) this.eventNumberToFilterMatchesFlagMap.clear();
+    this.eventNumberToFilterMatchesFlagMap.set(eventNumber, matches);
+  }
+
+  /** Wholesale-clears `eventNumberToTraceableEventFlagMap` once it exceeds `filteredFlagCacheLimit` (see this file's header). */
+  private rememberTraceableFlag(eventNumber: number, value: boolean): void {
+    if (this.eventNumberToTraceableEventFlagMap.size >= this.filteredFlagCacheLimit) this.eventNumberToTraceableEventFlagMap.clear();
+    this.eventNumberToTraceableEventFlagMap.set(eventNumber, value);
   }
 
   // ---- filter parameter getters/setters ----
@@ -299,7 +402,7 @@ export class FilteredEventLog extends EventLogBase implements IEventLog {
     const cached = this.eventNumberToFilterMatchesFlagMap.get(event.getEventNumber());
     if (cached !== undefined) return cached;
     const matches = this.matchesEvent(event) && this.matchesDependency(event);
-    this.eventNumberToFilterMatchesFlagMap.set(event.getEventNumber(), matches);
+    this.rememberFilterMatch(event.getEventNumber(), matches);
     return matches;
   }
 
@@ -477,7 +580,10 @@ export class FilteredEventLog extends EventLogBase implements IEventLog {
   getEventForEventNumber(eventNumber: number, matchKind: MatchKind = MatchKind.EXACT, useCacheOnly = false): FilteredEvent | null {
     if (eventNumber < 0) throw new Error('FilteredEventLog.getEventForEventNumber: eventNumber must be >= 0');
     const cached = this.eventNumberToFilteredEventMap.get(eventNumber);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) {
+      this.touchCachedFilteredEvent(eventNumber, cached);
+      return cached;
+    }
     const event = this.eventLog.getEventForEventNumber(eventNumber, matchKind, useCacheOnly);
     if (event !== null) {
       switch (matchKind) {
@@ -663,9 +769,13 @@ export class FilteredEventLog extends EventLogBase implements IEventLog {
    */
   cacheFilteredEvent(eventNumber: number): FilteredEvent {
     const existing = this.eventNumberToFilteredEventMap.get(eventNumber);
-    if (existing !== undefined) return existing;
+    if (existing !== undefined) {
+      this.touchCachedFilteredEvent(eventNumber, existing);
+      return existing;
+    }
     const filteredEvent = new FilteredEvent(this, eventNumber);
     this.eventNumberToFilteredEventMap.set(eventNumber, filteredEvent);
+    this.enforceFilteredEventCacheLimit();
     return filteredEvent;
   }
 
@@ -777,7 +887,7 @@ export class FilteredEventLog extends EventLogBase implements IEventLog {
           const newUnseenTracedEventCauseEvent = messageDependency.getCauseEvent();
           if (newUnseenTracedEventCauseEvent !== null && (this.traceSelfMessages || !newUnseenTracedEventCauseEvent.isSelfMessageProcessingEvent()) && (this.traceMessageReuses || !isMessageReuseDependency(messageDependency))) {
             const newUnseenTracedEventCauseEventNumber = newUnseenTracedEventCauseEvent.getEventNumber();
-            this.eventNumberToTraceableEventFlagMap.set(newUnseenTracedEventCauseEventNumber, true);
+            this.rememberTraceableFlag(newUnseenTracedEventCauseEventNumber, true);
             this.unseenTracedEventCauseEventNumbers.push(newUnseenTracedEventCauseEventNumber);
             if (newUnseenTracedEventCauseEventNumber === causeEventNumber) return true;
           }
@@ -789,7 +899,7 @@ export class FilteredEventLog extends EventLogBase implements IEventLog {
     // NOTE: see this file's header, deviation #1 -- Java's `return
     // eventNumberToTraceableEventFlagMap.put(causeEventNumber, false)` is a
     // Map.put()-return-value bug (would throw NPE here in Java); cache+return false instead.
-    this.eventNumberToTraceableEventFlagMap.set(causeEventNumber, false);
+    this.rememberTraceableFlag(causeEventNumber, false);
     return false;
   }
 
@@ -811,7 +921,7 @@ export class FilteredEventLog extends EventLogBase implements IEventLog {
             (this.traceMessageReuses || !isMessageReuseDependency(messageDependency))
           ) {
             const newUnseenTracedEventConsequenceEventNumber = newUnseenTracedEventConsequenceEvent.getEventNumber();
-            this.eventNumberToTraceableEventFlagMap.set(newUnseenTracedEventConsequenceEventNumber, true);
+            this.rememberTraceableFlag(newUnseenTracedEventConsequenceEventNumber, true);
             this.unseenTracedEventConsequenceEventNumbers.push(newUnseenTracedEventConsequenceEventNumber);
             if (newUnseenTracedEventConsequenceEventNumber === consequenceEventNumber) return true;
           }
@@ -819,7 +929,7 @@ export class FilteredEventLog extends EventLogBase implements IEventLog {
         this.unseenTracedEventConsequenceEventNumbers.sort(numberCompare);
       }
     }
-    this.eventNumberToTraceableEventFlagMap.set(consequenceEventNumber, false);
+    this.rememberTraceableFlag(consequenceEventNumber, false);
     return false;
   }
 
@@ -843,6 +953,8 @@ export class FilteredEventLog extends EventLogBase implements IEventLog {
     this.eventNumberToTraceableEventFlagMap.clear();
     this.unseenTracedEventCauseEventNumbers = [];
     this.unseenTracedEventConsequenceEventNumbers = [];
+    // OVERWRITTEN is a full reset -- previously pinned event numbers no longer mean anything meaningful.
+    this.pinnedEventNumbers.clear();
   }
 
   private deleteAllocatedObjects(): void {

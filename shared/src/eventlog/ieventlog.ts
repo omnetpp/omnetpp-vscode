@@ -44,12 +44,18 @@
  *
  * Object-identity caveat (port plan risk #3): every `IEvent`/`Index`/`Snapshot` this
  * interface hands back is a *value* obtained by calling into the engine, not a stable
- * singleton per event number, once a bounded LRU (phase E7) can evict and later
+ * singleton per event number, now that phase E7's bounded LRU can evict and later
  * recreate the wrapper object for the same event number. Comparing two `IEvent`s (or an
- * `IEvent` and a concrete `Event`) with `===` is only safe where the plan's risk note
- * says so (a same-call-frame sentinel check, e.g. "is this the very first event");
- * anywhere spans might cross an eviction, compare `getEventNumber()` instead. Each call
- * site in event.ts/chunks.ts that does an identity comparison carries its own comment.
+ * `IEvent` and a concrete `Event`) with `===` is only safe where (a) it is a same-call-
+ * frame sentinel check (e.g. "is this the very first event"), or (b) the specific
+ * objects being compared are ones E7 deliberately protects from eviction (the cached
+ * first/last event, in `EventLog`/`FilteredEventLog` -- see eventLog.ts's header)
+ * *and* the comparison is against exactly that pinned object (not some other, possibly
+ * stale, reference to the same logical event). Anywhere spans might cross an eviction
+ * of a non-pinned event, compare `getEventNumber()` (or, for `EventLogEntry`, the
+ * compound `(eventNumber, entryIndex)` key) instead -- each call site in event.ts/
+ * chunks.ts/eventLogTableFacade.ts that does an identity comparison carries its own
+ * comment explaining which case it is.
  */
 
 import type { BigDecimal } from './bigDecimal';

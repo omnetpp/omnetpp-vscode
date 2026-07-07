@@ -26,6 +26,37 @@
  * thrown JS error instead of a checked exception type), and the two byte thresholds
  * are overridable so tests can exercise the "large file" parse-begin/parse-end path
  * without needing an actual multi-megabyte fixture (item 7 of this phase's test plan).
+ *
+ * MANDATED DEVIATION, phase E7 ("Memory bounding" in the port plan): Java's `EventLog`
+ * retains every parsed `Event` forever (`eventNumberToEventMap`/`beginOffsetToEventMap`/
+ * `endOffsetToEventMap` are never trimmed) -- for a multi-GB file with tens of millions
+ * of events this is exactly the leak the plan calls out as *not* to reproduce. This
+ * port adds a bounded LRU over those three maps (`eventCacheLimit`, default 50_000):
+ *   - `eventNumberToEventMap` changes from a `SortedMap` to a plain `Map<number, Event>`
+ *     (checked: no caller ever needs floor/ceiling navigation on it, only
+ *     `.get`/`.has`/`.set`/`.clear`/`.values()`) -- its insertion order doubles as LRU
+ *     order: `touchCachedEvent()` bumps recency with a delete+re-set (O(1)), and the
+ *     least-recently-used candidate is simply the first non-pinned key encountered
+ *     iterating from the front.
+ *   - the cached first/last `Event` (`this.firstEvent`/`this.lastEvent`) are always
+ *     implicitly protected from eviction, and a `pinEvent()`/`unpinEvent()` API lets a
+ *     host (the E8 worker) protect additional event numbers (the current viewport/row-
+ *     window, the timeline coordinate system's origin, a traced event) for as long as
+ *     the user is looking at them. Protecting first/last this way -- rather than
+ *     rewriting event.ts's `getPreviousEvent()`/`getNextEvent()` identity checks
+ *     (`eventLog.getFirstEvent() !== this`) into `getEventNumber()` comparisons --
+ *     preserves the invariant those checks rely on (`getFirstEvent()`/`getLastEvent()`
+ *     always return the SAME object) without touching event.ts at all; see this file's
+ *     `isEventEvictable()` and event.ts's header for the two sides of this contract.
+ *   - evicting an event removes it from all three maps and calls
+ *     `EventBase.unlinkNeighbourEvents()` on it, so any still-cached neighbour's
+ *     `previousEvent`/`nextEvent` link into the evicted event is cleared -- forcing
+ *     `getPreviousEvent()`/`getNextEvent()` to lazily re-resolve (re-parsing the same
+ *     bytes into a fresh `Event` object) instead of returning a dangling reference into
+ *     a half-evicted chain. Eviction never mutates the evicted `Event` object itself
+ *     (no `clearInternalState()`), so any reference a caller (or a chunk's
+ *     `EventLogEntry.chunk` back-reference) is still holding stays a perfectly valid,
+ *     just no-longer-cached, snapshot.
  */
 
 import { BigDecimal } from './bigDecimal';
@@ -39,7 +70,7 @@ import {
   SimulationEndEntry,
   SnapshotEntry,
 } from './entries';
-import { Event } from './event';
+import { Event, EventBase } from './event';
 import { Index, Snapshot } from './chunks';
 import { EventLogEntryCache } from './eventLogEntryCache';
 import type { FileReader } from './fileReader';
@@ -70,6 +101,15 @@ export interface EventLogOptions {
    * / `parseEnd((long)1E+6)`. Default 1e6.
    */
   parseBeginEndBytes?: number;
+  /**
+   * Phase E7 memory bounding (see this file's header): max number of parsed `Event`
+   * objects retained in `eventNumberToEventMap`/`beginOffsetToEventMap`/
+   * `endOffsetToEventMap` before least-recently-used, non-pinned events are evicted.
+   * Default 50_000. Pass `Infinity` to disable bounding entirely (keeps every parsed
+   * event forever, matching the literal Java behavior -- useful for tests that want
+   * the old unbounded semantics).
+   */
+  eventCacheLimit?: number;
 }
 
 /** Port of `EventLog`. */
@@ -95,9 +135,20 @@ export class EventLog extends EventLogIndex implements IEventLogContext, Progres
   private readonly messageClassNames = new Set<string>(); // message class names seen so far (see Event.parse)
   private readonly messageNames = new Set<string>(); // message names seen so far (see Event.parse)
 
-  private eventNumberToEventMap = new SortedMap<number, Event>(numberCompare); // all parsed events so far
+  /**
+   * All parsed events so far, bounded by an LRU (phase E7 -- see this file's header).
+   * Deliberately a plain `Map`, not a `SortedMap`: no caller needs floor/ceiling
+   * navigation on this particular map (checked), and a plain `Map`'s insertion order
+   * IS the LRU order this cache relies on (`touchCachedEvent()` bumps recency with a
+   * delete+re-set).
+   */
+  private eventNumberToEventMap = new Map<number, Event>();
   private beginOffsetToEventMap = new Map<number, Event | null>(); // all parsed events so far
   private endOffsetToEventMap = new Map<number, Event | null>(); // all parsed events so far
+
+  private readonly eventCacheLimit: number;
+  /** Event numbers a host (E8's worker) has asked to protect from eviction -- see this file's header. */
+  private readonly pinnedEventNumbers = new Set<number>();
 
   private eventNumberToIndexMap = new SortedMap<number, Index>(numberCompare); // all indices are parsed at once
   private eventNumberToSnapshotMap = new SortedMap<number, Snapshot>(numberCompare); // snapshots are parsed lazily
@@ -105,6 +156,7 @@ export class EventLog extends EventLogIndex implements IEventLogContext, Progres
   constructor(reader: FileReader, options: EventLogOptions = {}) {
     super(reader);
     this.options = options;
+    this.eventCacheLimit = options.eventCacheLimit ?? 50_000;
     // NOTE: Java's `reader.setFileLocking(true)` call is not ported here -- file
     // locking has no host-agnostic equivalent (see fileReader.ts's header).
     this.parseIndicesAndSnapshots();
@@ -115,6 +167,96 @@ export class EventLog extends EventLogIndex implements IEventLogContext, Progres
       this.parseBegin(parseBeginEndBytes);
       this.parseEnd(parseBeginEndBytes);
     }
+  }
+
+  // ---- phase E7: bounded parsed-event LRU + pinning API (see this file's header) ----
+
+  /**
+   * Protects `eventNumber` from eviction until `unpinEvent()` is called (or the whole
+   * cache resets via an OVERWRITTEN `synchronize()`). Pinning an event number that
+   * hasn't been parsed yet is harmless -- protection simply takes effect once/if that
+   * event is later cached. Intended for a host (the E8 worker) to protect events the
+   * user is actively looking at: the current viewport/row-window, the sequence
+   * chart's timeline coordinate system origin, a traced event.
+   */
+  pinEvent(eventNumber: number): void {
+    if (eventNumber < 0) throw new Error('EventLog.pinEvent: eventNumber must be >= 0');
+    this.pinnedEventNumbers.add(eventNumber);
+  }
+
+  /** Reverses `pinEvent()`: the event becomes evictable again (if cached and not otherwise protected). */
+  unpinEvent(eventNumber: number): void {
+    this.pinnedEventNumbers.delete(eventNumber);
+  }
+
+  isEventPinned(eventNumber: number): boolean {
+    return this.pinnedEventNumbers.has(eventNumber);
+  }
+
+  /** Number of `Event` objects currently retained -- exposed for tests/instrumentation (see this file's header). */
+  getEventCacheSize(): number {
+    return this.eventNumberToEventMap.size;
+  }
+
+  getEventCacheLimit(): number {
+    return this.eventCacheLimit;
+  }
+
+  /**
+   * True if `eventNumber` may currently be evicted: not explicitly pinned, and not the
+   * cached first/last event. Protecting first/last here (rather than converting
+   * event.ts's identity checks) is what keeps `Event.getPreviousEvent()`/
+   * `getNextEvent()`'s `eventLog.getFirstEvent() !== this` checks correct without
+   * modifying event.ts at all -- see this file's header.
+   */
+  private isEventEvictable(eventNumber: number): boolean {
+    if (this.pinnedEventNumbers.has(eventNumber)) return false;
+    if (this.firstEvent !== null && this.firstEvent.getEventNumber() === eventNumber) return false;
+    if (this.lastEvent !== null && this.lastEvent.getEventNumber() === eventNumber) return false;
+    return true;
+  }
+
+  /** Moves `eventNumber` to the most-recently-used end of `eventNumberToEventMap`'s iteration order (O(1): delete + re-set). */
+  private touchCachedEvent(eventNumber: number, event: Event): void {
+    this.eventNumberToEventMap.delete(eventNumber);
+    this.eventNumberToEventMap.set(eventNumber, event);
+  }
+
+  /** `eventNumberToEventMap.get()` wrapper that also bumps recency on a hit -- use this (not a raw `.get()`) at every cache-lookup call site. */
+  private lookupCachedEventByNumber(eventNumber: number): Event | undefined {
+    const event = this.eventNumberToEventMap.get(eventNumber);
+    if (event !== undefined) this.touchCachedEvent(eventNumber, event);
+    return event;
+  }
+
+  /**
+   * Evicts least-recently-used, non-pinned events until the cache is back at/under
+   * `eventCacheLimit`, or gives up if every remaining cached event is protected (the
+   * cache is then allowed to temporarily exceed the limit rather than evict a pinned
+   * event -- pinning is a hard guarantee, the limit is a soft target).
+   */
+  private enforceEventCacheLimit(): void {
+    while (this.eventNumberToEventMap.size > this.eventCacheLimit) {
+      let victim: number | undefined;
+      for (const eventNumber of this.eventNumberToEventMap.keys()) {
+        if (this.isEventEvictable(eventNumber)) {
+          victim = eventNumber;
+          break;
+        }
+      }
+      if (victim === undefined) break; // everything left is pinned; cannot shrink further
+      this.evictCachedEvent(victim);
+    }
+  }
+
+  /** Removes one event from all three caches and unlinks it from its still-cached neighbours (see this file's header). */
+  private evictCachedEvent(eventNumber: number): void {
+    const event = this.eventNumberToEventMap.get(eventNumber);
+    if (event === undefined) return;
+    this.eventNumberToEventMap.delete(eventNumber);
+    this.beginOffsetToEventMap.delete(event.getBeginOffset());
+    this.endOffsetToEventMap.delete(event.getEndOffset());
+    EventBase.unlinkNeighbourEvents(event);
   }
 
   getEventLogEntryCache(): EventLogEntryCache {
@@ -138,7 +280,10 @@ export class EventLog extends EventLogIndex implements IEventLogContext, Progres
   getEventForBeginOffset(beginOffset: number): Event | null {
     if (beginOffset < 0) throw new Error('EventLog.getEventForBeginOffset: beginOffset must be >= 0');
     const cached = this.beginOffsetToEventMap.get(beginOffset) ?? null;
-    if (cached !== null) return cached;
+    if (cached !== null) {
+      this.touchCachedEvent(cached.getEventNumber(), cached);
+      return cached;
+    }
     if (this.reader.getFileSize() !== beginOffset) {
       const event = new Event(this);
       this.parseEvent(event, beginOffset);
@@ -154,7 +299,10 @@ export class EventLog extends EventLogIndex implements IEventLogContext, Progres
   getEventForEndOffset(endOffset: number): Event | null {
     if (endOffset < 0) throw new Error('EventLog.getEventForEndOffset: endOffset must be >= 0');
     const cached = this.endOffsetToEventMap.get(endOffset) ?? null;
-    if (cached !== null) return cached;
+    if (cached !== null) {
+      this.touchCachedEvent(cached.getEventNumber(), cached);
+      return cached;
+    }
     const beginOffset = this.getBeginOffsetForEndOffset(endOffset);
     if (beginOffset === -1) {
       this.endOffsetToEventMap.set(endOffset, null);
@@ -272,22 +420,26 @@ export class EventLog extends EventLogIndex implements IEventLogContext, Progres
   getEventForEventNumber(eventNumber: number, matchKind: MatchKind = MatchKind.EXACT, useCacheOnly = false): Event | null {
     if (eventNumber < 0) throw new Error('EventLog.getEventForEventNumber: eventNumber must be >= 0');
     if (matchKind === MatchKind.EXACT) {
-      const cached = this.eventNumberToEventMap.get(eventNumber);
+      const cached = this.lookupCachedEventByNumber(eventNumber);
       if (cached !== undefined) return cached;
       if (useCacheOnly) return null;
       else {
         // the following two are still faster than binary searching, but this may access the disk
-        const before = this.eventNumberToEventMap.get(eventNumber - 1);
+        const before = this.lookupCachedEventByNumber(eventNumber - 1);
         if (before !== undefined) {
           const event = before.getNextEvent();
           // the file might be filtered
-          return event !== null && event.getEventNumber() === eventNumber ? event : null;
+          if (event === null || event.getEventNumber() !== eventNumber) return null;
+          this.touchCachedEvent(eventNumber, event);
+          return event;
         }
-        const after = this.eventNumberToEventMap.get(eventNumber + 1);
+        const after = this.lookupCachedEventByNumber(eventNumber + 1);
         if (after !== undefined) {
           const event = after.getPreviousEvent();
           // the file might be filtered
-          return event !== null && event.getEventNumber() === eventNumber ? event : null;
+          if (event === null || event.getEventNumber() !== eventNumber) return null;
+          this.touchCachedEvent(eventNumber, event);
+          return event;
         }
       }
     }
@@ -532,6 +684,7 @@ export class EventLog extends EventLogIndex implements IEventLogContext, Progres
     this.eventNumberToEventMap.set(eventNumber, event);
     this.beginOffsetToEventMap.set(event.getBeginOffset(), event);
     this.endOffsetToEventMap.set(event.getEndOffset(), event);
+    this.enforceEventCacheLimit();
   }
 
   private cacheEventLogEntries(event: Event): void {
@@ -566,6 +719,9 @@ export class EventLog extends EventLogIndex implements IEventLogContext, Progres
     this.eventNumberToSnapshotMap.clear();
     this.beginOffsetToEventMap.clear();
     this.endOffsetToEventMap.clear();
+    // OVERWRITTEN is a full reset (file content changed entirely) -- previously pinned
+    // event numbers no longer mean anything meaningful, so drop them too.
+    this.pinnedEventNumbers.clear();
   }
 
   /**

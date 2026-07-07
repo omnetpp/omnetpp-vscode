@@ -159,11 +159,13 @@ export class FilteredEvent extends EventBase implements IEvent {
 
   /**
    * Port of `getPreviousEvent()`. `filteredEventLog.getFirstEvent() !== this` is an
-   * object-identity check (port plan risk #3) -- safe as long as `FilteredEvent`
-   * instances are memoized per event number by `FilteredEventLog.cacheFilteredEvent()`
-   * (true through phase E7; a future bounded-eviction cache for filtered events would
-   * need this converted to an event-number comparison, same as `event.ts`'s analogous
-   * checks).
+   * object-identity check (port plan risk #3) -- kept as an identity check (not
+   * converted to an event-number comparison) because phase E7's bounded LRU over
+   * `FilteredEventLog.eventNumberToFilteredEventMap` explicitly protects
+   * `firstMatchingEvent`/`lastMatchingEvent` from eviction (see filteredEventLog.ts's
+   * header) -- exactly so that `getFirstEvent()`/`getLastEvent()` always return the
+   * SAME object, the same invariant `EventLog`'s own first/last pinning preserves for
+   * `Event.getPreviousEvent()`/`getNextEvent()` (see event.ts's header).
    */
   getPreviousEvent(): FilteredEvent | null {
     if (this.previousEvent === null && this.filteredEventLog.getFirstEvent() !== this) {
@@ -174,7 +176,7 @@ export class FilteredEvent extends EventBase implements IEvent {
     return this.previousEvent as FilteredEvent | null;
   }
 
-  /** Port of `getNextEvent()` (see `getPreviousEvent()`'s note on the identity check). */
+  /** Port of `getNextEvent()` (see `getPreviousEvent()`'s note on the identity check, now resolved by first/last pinning). */
   getNextEvent(): FilteredEvent | null {
     if (this.nextEvent === null && this.filteredEventLog.getLastEvent() !== this) {
       const next = this.filteredEventLog.getMatchingEventInDirection(this.getEvent().getNextEvent()!, true);

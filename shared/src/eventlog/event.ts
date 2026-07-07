@@ -9,10 +9,14 @@
  * really belong to this event" -- both same-call-frame sentinel/assertion checks, not
  * long-lived identity comparisons that could straddle an eviction. Each site below
  * keeps a short comment; `getPreviousEvent()`/`getNextEvent()`'s `eventLog.getFirstEvent()
- * !== this` / `eventLog.getLastEvent() !== this` checks are the ones most likely to
- * matter once E7 adds a bounded LRU (if `getFirstEvent()`/`getLastEvent()` can ever
- * return a *freshly reconstructed* wrapper object for the same first/last event number,
- * this must become a `getEventNumber()` comparison instead).
+ * !== this` / `eventLog.getLastEvent() !== this` checks are the ones that would matter
+ * once E7 adds a bounded LRU IF `getFirstEvent()`/`getLastEvent()` could ever return a
+ * *freshly reconstructed* wrapper object for the same first/last event number.
+ * RESOLVED, not converted: `EventLog`'s phase E7 LRU (see eventLog.ts's header)
+ * explicitly protects the cached `this.firstEvent`/`this.lastEvent` from eviction, so
+ * `getFirstEvent()`/`getLastEvent()` always return that SAME object for as long as the
+ * eventlog is open -- the identity checks below stay correct as written, no conversion
+ * needed.
  *
  * `parse()`/`parseLines()` mirror the Java termination rule exactly: parsing an event
  * stops at the first entry that `parseEventLogEntry()` returns `null` for -- and that

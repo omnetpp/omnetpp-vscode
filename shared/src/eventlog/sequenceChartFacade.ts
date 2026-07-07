@@ -25,11 +25,39 @@
  * this facade keeps its own side table, `timelineCoordinateCache: Map<eventNumber,
  * {begin, end, version}>`, keyed by `getEventNumber()` (not by object identity) --
  * exactly the shape the plan calls for ("cached per-event timeline coordinates go in a
- * facade-side Map... survive event eviction; trim contiguously"). E7 is expected to add
- * bounding/trimming to this map; this phase only introduces it. All public method NAMES
- * are kept identical to the Java source (`getTimelineCoordinateBegin`,
+ * facade-side Map... survive event eviction; trim contiguously"). All public method
+ * NAMES are kept identical to the Java source (`getTimelineCoordinateBegin`,
  * `getCachedTimelineCoordinateBegin`, `relocateTimelineCoordinateSystem`, ...) -- only
  * the internal storage differs.
+ *
+ * BOUNDING (phase E7, `coordCacheLimit`, default 500_000): the coordinate cache is
+ * capped in two ways:
+ *  1. Every relocation (`relocateTimelineCoordinateSystem()`/`undefineTimelineCoordinateSystem()`)
+ *     bumps `timelineCoordinateSystemVersion`, which permanently invalidates every
+ *     existing cache entry (`getCachedVersion(event) < timelineCoordinateSystemVersion`
+ *     forever after). Since those entries can never be read again, both methods clear
+ *     the whole map outright -- a strict improvement over "just let it become unbounded
+ *     dead weight".
+ *  2. Within one coordinate-system version, `getTimelineCoordinateBegin()`'s STEP/
+ *     NONLINEAR branch extends `[timelineCoordinateRangeStartEventNumber,
+ *     timelineCoordinateRangeEndEventNumber]` one real event at a time (via
+ *     `getNextEvent()`/`getPreviousEvent()`), caching every event it steps over -- so
+ *     the cache is always exactly the (possibly non-contiguous-in-event-NUMBER, but
+ *     contiguous-in-event-SEQUENCE) set of events between those two markers. Once the
+ *     cache exceeds `coordCacheLimit`, `trimTimelineCoordinateCacheAfterExtension()`
+ *     removes entries from the FAR end of that range (opposite whichever end this call
+ *     just extended -- the near end is where the current and likely-next queries are),
+ *     walking inward one real event at a time (not "eventNumber +- 1": event numbers
+ *     are not guaranteed contiguous integers, see eventLogIndex.ts's `CacheEntry`
+ *     header) and shrinking the corresponding range marker to match, so the invariant
+ *     "the range markers always point at actually-cached events" is preserved and a
+ *     later query can always resume extending from wherever the range now ends. This
+ *     is safe for correctness because the STEP/NONLINEAR coordinate at any event is
+ *     computed purely from a chain of adjacent-event deltas relative to the fixed
+ *     `timelineCoordinateSystemOriginEventNumber`/`OriginSimulationTime` scalars (not
+ *     from any other cached value) -- if a query later needs a since-trimmed event's
+ *     coordinate again, re-extending the range from the current boundary reproduces
+ *     the exact same numbers.
  *
  * Object-identity caveats (port plan risk #3, same convention as event.ts/eventLog.ts):
  * every loop below that walks forward/backward comparing "have I reached the target
@@ -83,6 +111,16 @@ interface ExtractedTimelineInfo {
   timelineCoordinateDelta: number;
 }
 
+/** Constructor options for `SequenceChartFacade` -- see this file's header, "BOUNDING". */
+export interface SequenceChartFacadeOptions {
+  /**
+   * Max number of events with cached timeline coordinates before the FAR end of the
+   * contiguous computed range is trimmed (relative to whichever end was most recently
+   * extended). Default 500_000.
+   */
+  coordCacheLimit?: number;
+}
+
 /** Port of `SequenceChartFacade`. */
 export class SequenceChartFacade extends EventLogFacade {
   protected separateEventLogEntries = false; // separate entries within events
@@ -97,11 +135,18 @@ export class SequenceChartFacade extends EventLogFacade {
 
   /** MANDATED DEVIATION -- see this file's header. Keyed by `getEventNumber()`, not object identity. */
   private readonly timelineCoordinateCache = new Map<number, TimelineCoordinateCacheEntry>();
+  private readonly coordCacheLimit: number;
 
-  constructor(eventLog: IEventLog) {
+  constructor(eventLog: IEventLog, options: SequenceChartFacadeOptions = {}) {
     super(eventLog);
+    this.coordCacheLimit = options.coordCacheLimit ?? 500_000;
     this.clearInternalState();
     this.setTimelineMode(TimelineMode.NONLINEAR);
+  }
+
+  /** Number of events with cached timeline coordinates -- exposed for tests/instrumentation (phase E7). */
+  getTimelineCoordinateCacheSize(): number {
+    return this.timelineCoordinateCache.size;
   }
 
   calculateNonLinearFocus(): number {
@@ -183,6 +228,8 @@ export class SequenceChartFacade extends EventLogFacade {
     this.timelineCoordinateSystemVersion++;
     this.timelineCoordinateSystemOriginEventNumber = this.timelineCoordinateRangeStartEventNumber = this.timelineCoordinateRangeEndEventNumber = -1;
     this.timelineCoordinateSystemOriginSimulationTime = BigDecimal.MINUS_ONE;
+    // phase E7: bumping the version permanently invalidates every existing cache entry -- see this file's header, "BOUNDING" item 1.
+    this.timelineCoordinateCache.clear();
   }
 
   relocateTimelineCoordinateSystem(event: IEvent): void {
@@ -190,6 +237,8 @@ export class SequenceChartFacade extends EventLogFacade {
     this.timelineCoordinateSystemVersion++;
     this.timelineCoordinateSystemOriginEventNumber = this.timelineCoordinateRangeStartEventNumber = this.timelineCoordinateRangeEndEventNumber = event.getEventNumber();
     this.timelineCoordinateSystemOriginSimulationTime = event.getSimulationTime();
+    // phase E7: bumping the version permanently invalidates every existing cache entry -- see this file's header, "BOUNDING" item 1.
+    this.timelineCoordinateCache.clear();
     this.setCachedTimelineCoordinate(event, 0, this.getTimelineCoordinateDelta(event));
   }
 
@@ -228,6 +277,7 @@ export class SequenceChartFacade extends EventLogFacade {
 
     if (this.timelineCoordinateSystemVersion > this.getCachedVersion(event)) {
       let timelineCoordinateBegin: number;
+      let extendedForward: boolean | undefined; // phase E7: set only by the STEP/NONLINEAR branch below, which is the only one that grows the cached range
       switch (this.timelineMode) {
         case TimelineMode.SIMULATION_TIME:
           timelineCoordinateBegin = event.getSimulationTime().subtract(this.timelineCoordinateSystemOriginSimulationTime).doubleValue();
@@ -268,12 +318,15 @@ export class SequenceChartFacade extends EventLogFacade {
           } while (currentEvent.getEventNumber() !== event.getEventNumber());
           if (forward) this.timelineCoordinateRangeEndEventNumber = event.getEventNumber();
           else this.timelineCoordinateRangeStartEventNumber = event.getEventNumber();
+          extendedForward = forward;
           break;
         }
         default:
           throw new Error('SequenceChartFacade.getTimelineCoordinateBegin: unknown timeline mode');
       }
       this.setCachedTimelineCoordinate(event, timelineCoordinateBegin, timelineCoordinateBegin + this.getTimelineCoordinateDelta(event));
+      // phase E7: bound the cache once the extension (if any) has settled -- see this file's header, "BOUNDING" item 2.
+      if (extendedForward !== undefined) this.trimTimelineCoordinateCacheAfterExtension(extendedForward);
     }
     return this.getRawCachedBegin(event);
   }
@@ -700,5 +753,38 @@ export class SequenceChartFacade extends EventLogFacade {
 
   private setCachedTimelineCoordinate(event: IEvent, begin: number, end: number): void {
     this.timelineCoordinateCache.set(event.getEventNumber(), { begin, end, version: this.timelineCoordinateSystemVersion });
+  }
+
+  /**
+   * Phase E7 memory bounding -- see this file's header, "BOUNDING" item 2. Trims from
+   * the FAR end of the contiguous computed range (opposite whichever end `extension`
+   * just grew), walking via real `getNextEvent()`/`getPreviousEvent()` (not
+   * "eventNumber +- 1": event numbers are not guaranteed contiguous, see
+   * eventLogIndex.ts's `CacheEntry` header) so the range markers always keep pointing
+   * at an actually-cached event. Stops once the range would collapse to a single
+   * event (never trims the last remaining cached event out from under the caller) or
+   * if a boundary event turns out unreachable (defensive; should not happen given the
+   * class's own invariants).
+   */
+  private trimTimelineCoordinateCacheAfterExtension(extendedForward: boolean): void {
+    while (this.timelineCoordinateCache.size > this.coordCacheLimit && this.timelineCoordinateRangeStartEventNumber !== this.timelineCoordinateRangeEndEventNumber) {
+      if (extendedForward) {
+        // just grew the end -> the far end is the start; shrink it inward
+        const boundaryEvent = this.eventLog.getEventForEventNumber(this.timelineCoordinateRangeStartEventNumber);
+        if (boundaryEvent === null) break;
+        const next = boundaryEvent.getNextEvent();
+        if (next === null) break;
+        this.timelineCoordinateCache.delete(boundaryEvent.getEventNumber());
+        this.timelineCoordinateRangeStartEventNumber = next.getEventNumber();
+      } else {
+        // just grew the start -> the far end is the end; shrink it inward
+        const boundaryEvent = this.eventLog.getEventForEventNumber(this.timelineCoordinateRangeEndEventNumber);
+        if (boundaryEvent === null) break;
+        const previous = boundaryEvent.getPreviousEvent();
+        if (previous === null) break;
+        this.timelineCoordinateCache.delete(boundaryEvent.getEventNumber());
+        this.timelineCoordinateRangeEndEventNumber = previous.getEventNumber();
+      }
+    }
   }
 }
