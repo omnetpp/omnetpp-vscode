@@ -152,7 +152,14 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
   findStatusEl.className = 'elog-findbar-status';
   findBarEl.appendChild(findStatusEl);
 
-  tableEl.append(headerEl, rowsWrapperEl, scrollbarEl);
+  // The header is an in-flow flex-column child; the rows + scrollbar live in a
+  // flex-filling viewport BELOW it (`.elog-rows-viewport`) so the virtualized rows
+  // (absolutely positioned inside it) start under the header instead of on top of it,
+  // and `computeViewportRowCount()` measures the real available height.
+  const rowsViewportEl = document.createElement('div');
+  rowsViewportEl.className = 'elog-rows-viewport';
+  rowsViewportEl.append(rowsWrapperEl, scrollbarEl);
+  tableEl.append(headerEl, rowsViewportEl);
   root.append(findBarEl, tableEl);
 
   const eventNoHeaderCol = makeHeaderCol('Event #', colWidths.eventNo);

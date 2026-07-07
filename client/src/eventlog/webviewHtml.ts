@@ -68,12 +68,20 @@ export function buildEventLogWebviewHtml(webview: vscode.Webview, extensionUri: 
   /* Event Log table (phase U2) -- a custom approximate scrollbar replaces the native
      one (millions of filtered rows make an exact native scrollbar range infeasible),
      so .elog-table itself never scrolls natively. */
-  .elog-table { position: relative; height: 100%; overflow: hidden; outline: none; }
+  /* The table's mount root (#rows, filled by tableView.ts) must fill the positioned
+     .elog-body -- like .elog-chart-canvas-container above. Without a definite height here,
+     .elog-table's height:100% collapses to just its header, so only one row is ever
+     visible (the same zero-height class of bug the chart container's rule fixed). */
+  #rows { position: absolute; inset: 0; }
+  .elog-table { position: relative; height: 100%; overflow: hidden; outline: none; display: flex; flex-direction: column; }
   .elog-table-header { display: flex; flex: 0 0 auto; font-weight: bold; font-size: 11px;
     color: var(--vscode-descriptionForeground); border-bottom: 1px solid var(--vscode-editorWidget-border, transparent);
     user-select: none; }
   .elog-table-header .elog-col { padding: 2px 4px; overflow: hidden; white-space: nowrap; position: relative; box-sizing: border-box; }
   .elog-col-resizer { position: absolute; top: 0; bottom: 0; right: -3px; width: 6px; cursor: col-resize; z-index: 2; }
+  /* The scrolling body below the header: flex-fills the remaining height, and is the
+     positioning context for the absolutely-placed virtual rows + custom scrollbar. */
+  .elog-rows-viewport { position: relative; flex: 1 1 auto; overflow: hidden; }
   .elog-rows { position: absolute; left: 0; right: 14px; top: 0; bottom: 0; overflow: hidden; }
   .elog-row { display: flex; align-items: center; white-space: pre; box-sizing: border-box;
     font-family: var(--vscode-editor-font-family, monospace); font-size: var(--vscode-editor-font-size, 13px); }
