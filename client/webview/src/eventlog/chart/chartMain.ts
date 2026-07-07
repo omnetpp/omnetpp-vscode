@@ -353,8 +353,15 @@ function currentAxesLayout(): AxesLayout {
 function setOpenAxisModules(ids: number[]): void {
   openAxisModuleIds = ids;
   crossingsOrderCache = null;
-  state = { ...state, openAxisModulePaths: moduleIdsToPaths(ids, moduleTree) };
-  persistState();
+  // Persist only when the module tree is available: `moduleIdsToPaths(ids, null)` maps
+  // EVERY id to nothing, so persisting here without a tree would silently overwrite a
+  // real remembered open set with [] -- which restore then honored as "intentionally
+  // empty", bricking the chart to zero axes on every future open (seen in the wild when
+  // early sessions ran with a dead worker and no tree ever loaded).
+  if (moduleTree !== null) {
+    state = { ...state, openAxisModulePaths: moduleIdsToPaths(ids, moduleTree) };
+    persistState();
+  }
   scheduleRender();
 }
 
@@ -367,10 +374,15 @@ function initializeOpenAxisModules(): void {
     return;
   }
   const resolved = pathsToModuleIds(persisted, moduleTree);
-  // a non-empty persisted set resolving to NOTHING = the file was replaced by a run
-  // with a different module structure -- fall back to the default rather than an
-  // accidentally-empty chart (an intentionally-empty persisted set stays empty)
-  openAxisModuleIds = persisted.length > 0 && resolved.length === 0 ? defaultOpenAxisModules(moduleTree) : resolved;
+  // An empty RESOLVED set always falls back to the default open set, whether the
+  // persisted paths no longer resolve (file replaced by a run with a different module
+  // structure) or the persisted set itself was empty. The latter deliberately does NOT
+  // round-trip the Empty preset across a reopen anymore: a chart that comes up
+  // permanently axis-less looks exactly like a rendering bug (and past versions could
+  // write a poisoned [] when the module tree never loaded), so "reopen shows the
+  // default axes" is the safer restore semantics. Within a session the Empty preset
+  // behaves unchanged.
+  openAxisModuleIds = resolved.length === 0 ? defaultOpenAxisModules(moduleTree) : resolved;
 }
 
 /** Re-derives the three render-ready bookmark index sets `drawList.ts` consumes from `bookmarks`/`moduleTree` -- call after either changes (a fresh `init`/`bookmarksChanged`, or the module tree finishing its first `elog/getModuleTree` load). Does NOT itself schedule a render (callers already do, alongside whatever else they're updating). */
@@ -448,7 +460,7 @@ document.getElementById('root')!.innerHTML = `
   <div id="toolbar"></div>
   <div id="status"></div>
   <div class="elog-body" id="body">
-    <div id="chartCanvasContainer" role="application" aria-label="Sequence Chart" style="position:absolute;inset:0;overflow:hidden;"></div>
+    <div id="chartCanvasContainer" class="elog-chart-canvas-container" role="application" aria-label="Sequence Chart"></div>
     <div class="elog-empty" id="empty">Open a Sequence Chart to see events here.</div>
     <div id="filterPanelHost"></div>
     <div id="notificationHost"></div>
@@ -2210,6 +2222,27 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
           // `sequenceChartEditor.ts`'s `ready` handler's `consumeOpenFilterOnAttach()`).
           toggleFilterPanel();
           break;
+        case 'resetViewState': {
+          // "OMNeT++: Reset Event Log View State" -- the host has already wiped the
+          // workspaceState blobs; discard the webview-local persisted + in-memory view
+          // state too and repaint from first principles (default axes/flags/zoom,
+          // goto begin). The escape hatch for state poisoned by an older build.
+          state = {};
+          displayFlags = mergeDisplayFlags(undefined);
+          axisOrderingMode = 'moduleId';
+          manualOrderPaths = [];
+          axisSpacingMode = 'auto';
+          axisSpacingManual = DENSE_AXIS_SPACING;
+          crossingsOrderCache = null;
+          toolbar.setDropdownValue('axisOrdering', axisOrderingMode);
+          openAxisModuleIds = moduleTree !== null ? defaultOpenAxisModules(moduleTree) : null;
+          filterPanel.setState(mergeFilterPanelState(undefined));
+          selection = EMPTY_CHART_SELECTION;
+          viewport = { ...viewport, pixelsPerTc: DEFAULT_PIXELS_PER_TC, vscroll: 0 };
+          persistState();
+          void applyTimelineMode(TimelineMode.SIMULATION_TIME, true, undefined);
+          break;
+        }
         case 'centerOnAxisBookmark': {
           // Phase U6 -- "Show Bookmarks" QuickPick reveal for an Axis-kind bookmark
           // (`bookmarks.ts`'s `revealBookmark()`): no event number to goto, so the host

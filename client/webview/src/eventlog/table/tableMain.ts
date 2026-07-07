@@ -188,7 +188,14 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
       table?.setBookmarks(message.bookmarks);
       break;
     case 'command':
-      // No table-specific commands yet (U1 accepted-and-dropped this too).
+      if (message.command === 'resetViewState') {
+        // "OMNeT++: Reset Event Log View State": the host wiped the persisted blob;
+        // remount the table with defaults (the table has no webview-local state of its
+        // own -- everything flows from `persistedState`, see `render()`).
+        persistedState = undefined;
+        unmountTable();
+        render();
+      }
       break;
   }
 });

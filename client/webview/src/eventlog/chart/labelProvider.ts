@@ -107,7 +107,10 @@ export function buildEventTooltip(event: Pick<TimelineEvent, 'eventNumber' | 'si
     let count = 0;
     for (const entry of detail.entries) {
       if (entry.text === null) continue;
-      result += `<br/><span style="color:rgb(127, 0, 85)"> - ${escapeHtml(stripAnsi(entry.text))}</span>`;
+      // NOTE: no style="..." attributes anywhere in webview HTML -- the webview CSP's
+      // style-src-attr blocks them (only the nonce'd <style> sheet and CSSOM
+      // assignments are allowed); .elog-tooltip-msg lives in webviewHtml.ts.
+      result += `<br/><span class="elog-tooltip-msg"> - ${escapeHtml(stripAnsi(entry.text))}</span>`;
       count++;
       if (count === 100) {
         result += '<br/><br/>Content stripped after 100 lines. See Eventlog Table for more details.';

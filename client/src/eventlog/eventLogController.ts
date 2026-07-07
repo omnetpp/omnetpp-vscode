@@ -12,6 +12,8 @@
 import * as vscode from 'vscode';
 import type { ElogOpenOptions, FilterParams, LogSummary } from '@omnetpp/shared/elog-protocol';
 import { BookmarkStore } from './bookmarks';
+import { CHART_STATE_KEY } from './sequenceChartEditor';
+import { TABLE_STATE_KEY } from './eventLogTableView';
 import { EventLogSession, eventlogWorkerBundlePath, type AttachmentKind, type MessageSink } from './eventLogSession';
 
 /**
@@ -65,7 +67,11 @@ export class EventLogController {
   /** Fires whenever the "active" session (the one behind the focused Sequence Chart editor tab) changes -- the Event Log table view rebinds to this unless pinned. */
   readonly onDidChangeActiveSession = this.activeChangedEmitter.event;
 
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  constructor(
+    private readonly context: vscode.ExtensionContext,
+    /** Diagnostics sink -- the "OMNeT++ Event Log" output channel (see index.ts); a no-op default keeps headless tests unchanged. */
+    readonly log: (line: string) => void = () => {},
+  ) {}
 
   /** Every currently open session (for bulk operations, e.g. `deactivate()`). */
   allSessions(): EventLogSession[] {
@@ -103,13 +109,33 @@ export class EventLogController {
     }
   }
 
+  /**
+   * "OMNeT++: Reset Event Log View State" -- wipes every per-file persisted view blob
+   * for `uriString` (chart state, table state, filter params) so a state poisoned by an
+   * older/buggier build cannot keep a view broken across reopens. The in-webview reset
+   * (the 'resetViewState' command each webview handles) is dispatched by the caller.
+   */
+  async clearPersistedViewState(uriString: string): Promise<void> {
+    for (const storeKey of [CHART_STATE_KEY, TABLE_STATE_KEY]) {
+      const all = this.context.workspaceState.get<Record<string, unknown>>(storeKey, {});
+      if (uriString in all) {
+        const { [uriString]: _dropped, ...rest } = all;
+        await this.context.workspaceState.update(storeKey, rest);
+      }
+    }
+    await this.setPersistedFilterParams(uriString, null);
+    this.log(`cleared persisted view state for ${uriString}`);
+  }
+
   private async openNewSession(uri: vscode.Uri, key: string): Promise<EventLogSession> {
     const bundlePath = eventlogWorkerBundlePath(this.context.extensionUri.fsPath);
+    this.log(`opening ${uri.fsPath} (worker: ${bundlePath}, electron=${process.versions.electron ?? 'no'})`);
     const session = new EventLogSession(key, uri.fsPath, bundlePath, {
       onIdle: () => this.removeSession(key),
       initialFilterParams: this.getPersistedFilterParams(key),
       onFilterChanged: (params) => void this.setPersistedFilterParams(key, params),
       openOptions: readOpenOptions(),
+      onLog: this.log,
     });
     this.sessions.set(key, session);
     this.syncOpenContext();

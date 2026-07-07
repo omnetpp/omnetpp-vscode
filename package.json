@@ -344,6 +344,11 @@
         "command": "omnetpp.eventlog.releaseMemory",
         "title": "Release Memory",
         "category": "OMNeT++"
+      },
+      {
+        "command": "omnetpp.eventlog.resetViewState",
+        "title": "Reset Event Log View State",
+        "category": "OMNeT++"
       }
     ],
     "menus": {
@@ -439,6 +444,10 @@
         {
           "command": "omnetpp.eventlog.unpinEventLogTable",
           "when": "false"
+        },
+        {
+          "command": "omnetpp.eventlog.resetViewState",
+          "when": "omnetpp.eventlogOpen"
         }
       ],
       "webview/context": [
@@ -916,6 +925,7 @@
     "@vscode/test-electron": "^2.4.1",
     "@vscode/vsce": "^3.0.0",
     "esbuild": "^0.23.0",
+    "happy-dom": "^20.10.6",
     "tree-sitter-cli": "0.25.10",
     "typescript": "^5.5.0",
     "vscode-jsonrpc": "^8.2.0",

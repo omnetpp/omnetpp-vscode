@@ -584,7 +584,11 @@ export class EngineSession {
    */
   private fillTransmissionDuration(result: RenderDependency, dep: IMessageDependency, causeEvent: IEvent | null, beginMessage: ReturnType<IMessageDependency['getBeginMessageDescriptionEntry']>): void {
     if (causeEvent === null || !(beginMessage instanceof BeginSendEntry)) return;
-    const withSend = causeEvent as unknown as { getEndSendEntry?(b: BeginSendEntry): { getIsDeliveredImmediately(): boolean } | null; getTransmissionDelay?(b: BeginSendEntry): BigDecimal; getRemainingDuration?(b: BeginSendEntry): BigDecimal };
+    // NOTE: the generated entry classes (entries.ts) expose plain FIELDS, not Java-style
+    // getters -- `isDeliveredImmediately`, not `getIsDeliveredImmediately()`. Calling the
+    // Java getter name here crashed every viewport fetch on logs whose sends carry
+    // transmission durations (e.g. PureAloha), leaving the chart permanently blank.
+    const withSend = causeEvent as unknown as { getEndSendEntry?(b: BeginSendEntry): { isDeliveredImmediately: boolean } | null; getTransmissionDelay?(b: BeginSendEntry): BigDecimal; getRemainingDuration?(b: BeginSendEntry): BigDecimal };
     if (typeof withSend.getEndSendEntry !== 'function' || typeof withSend.getTransmissionDelay !== 'function' || typeof withSend.getRemainingDuration !== 'function') return;
     const endSendEntry = withSend.getEndSendEntry(beginMessage);
     if (endSendEntry === null) return;
@@ -596,7 +600,7 @@ export class EngineSession {
     const fraction = Number(transmissionDelay.toString()) / Number(span.toString());
     if (!Number.isFinite(fraction)) return;
     result.transmissionDurationFraction = Math.min(1, Math.max(0, fraction));
-    result.isReceptionStart = endSendEntry.getIsDeliveredImmediately();
+    result.isReceptionStart = endSendEntry.isDeliveredImmediately;
   }
 
   /**

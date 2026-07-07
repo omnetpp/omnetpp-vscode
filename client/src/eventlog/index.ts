@@ -28,13 +28,43 @@ import {
  * just the Sequence Chart editor.
  */
 export function registerEventLog(context: vscode.ExtensionContext, client?: LanguageClient): void {
-  const controller = new EventLogController(context);
+  // Diagnostics channel: worker spawn/open/stderr/restarts and engine-request failures.
+  // The one place to look when a view is unexpectedly blank (View -> Output ->
+  // "OMNeT++ Event Log Diagnostics" -- named distinctly from the "OMNeT++ Event Log"
+  // PANEL VIEW so instructions like "check the Event Log output" stay unambiguous).
+  const output = vscode.window.createOutputChannel('OMNeT++ Event Log Diagnostics');
+  context.subscriptions.push(output);
+  const log = (line: string) => output.appendLine(`[${new Date().toISOString().slice(11, 23)}] ${line}`);
+
+  const controller = new EventLogController(context, log);
   context.subscriptions.push(controller);
 
   context.subscriptions.push(SequenceChartEditorProvider.register(context, controller, client));
 
   const { provider: tableView, disposable: tableViewDisposable } = EventLogTableViewProvider.register(context, controller, client);
   context.subscriptions.push(tableViewDisposable);
+
+  // "OMNeT++: Reset Event Log View State" -- clears every persisted per-file view blob
+  // for the active elog session and tells its webviews to reset in place. The escape
+  // hatch for view state poisoned by an older build (see EventLogController.
+  // clearPersistedViewState()).
+  context.subscriptions.push(
+    vscode.commands.registerCommand('omnetpp.eventlog.resetViewState', async () => {
+      const session = controller.getActiveSession() ?? controller.allSessions()[0];
+      if (!session) {
+        void vscode.window.showInformationMessage('OMNeT++: no event log is open.');
+        return;
+      }
+      await controller.clearPersistedViewState(session.uriString);
+      try {
+        if (session.getCurrentFilterParams() !== null) await session.setFilter(null);
+      } catch {
+        // best-effort: a failing unfilter must not block the state reset
+      }
+      session.sendCommand('resetViewState');
+      log(`view state reset for ${session.uriString}`);
+    }),
+  );
 
   // seed the pin toggle's context key (defaults to unpinned)
   void vscode.commands.executeCommand('setContext', 'omnetpp.eventlogTablePinned', false);

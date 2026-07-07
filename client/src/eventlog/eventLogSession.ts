@@ -88,6 +88,13 @@ export interface EventLogSessionOptions {
    * `ElogOpenOptions`).
    */
   openOptions?: ElogOpenOptions;
+  /**
+   * Diagnostics sink (the "OMNeT++ Event Log" output channel in the real extension;
+   * unset in headless tests/smokes): worker stderr, restarts, open results, and
+   * engine-request failures land here so "the view is blank" is diagnosable from
+   * inside VS Code without attaching a debugger.
+   */
+  onLog?: (line: string) => void;
 }
 
 export class EventLogSession {
@@ -117,7 +124,11 @@ export class EventLogSession {
     this.workerClientInstance = new WorkerClient(bundlePath, options.workerOptions);
     this.workerClientInstance.onProgress((p) => this.broadcast({ type: 'engineNotify', event: 'elog/progress', payload: p }));
     this.workerClientInstance.onChanged((p) => this.handleChanged(p));
-    this.workerClientInstance.onRestarted((e) => this.handleRestarted(e));
+    this.workerClientInstance.onRestarted((e) => {
+      this.options.onLog?.(`worker restarted for ${this.filePath} (state re-established: ${JSON.stringify(e)})`);
+      this.handleRestarted(e);
+    });
+    this.workerClientInstance.onStderr((chunk) => this.options.onLog?.(`[worker stderr] ${chunk.trimEnd()}`));
   }
 
   /** Direct access to the underlying `WorkerClient`, for callers that want a
@@ -141,14 +152,25 @@ export class EventLogSession {
    * would be a redundant, no-op `workspaceState.update()`).
    */
   async initialize(): Promise<LogSummary> {
-    const summary = await this.workerClientInstance.open({ path: this.filePath, options: this.options.openOptions });
+    let summary: LogSummary;
+    try {
+      summary = await this.workerClientInstance.open({ path: this.filePath, options: this.options.openOptions });
+    } catch (err) {
+      this.options.onLog?.(`open FAILED for ${this.filePath}: ${err instanceof Error ? err.message : String(err)}`);
+      throw err;
+    }
+    this.options.onLog?.(
+      `opened ${this.filePath}: events ${summary.firstEventNumber}..${summary.lastEventNumber} (~${summary.approximateNumberOfEvents}), ${summary.fileSize} bytes`,
+    );
     this.lastSummary = summary;
     if (this.options.initialFilterParams) {
       try {
         this.lastSummary = await this.workerClientInstance.setFilter(this.options.initialFilterParams);
         this.currentFilterParams = this.options.initialFilterParams;
-      } catch {
+        this.options.onLog?.(`rehydrated persisted filter for ${this.filePath} (summary now: events ${this.lastSummary.firstEventNumber}..${this.lastSummary.lastEventNumber}, filtered=${this.lastSummary.filtered})`);
+      } catch (err) {
         // best-effort rehydrate -- see this method's doc comment
+        this.options.onLog?.(`persisted-filter rehydrate failed for ${this.filePath} (continuing unfiltered): ${err instanceof Error ? err.message : String(err)}`);
       }
     }
     return this.lastSummary;
@@ -325,6 +347,18 @@ export class EventLogSession {
    * `$/cancelRequest` to the worker.
    */
   async handleEngineRequest(method: string, params: unknown, token?: CancellationToken): Promise<unknown> {
+    try {
+      return await this.dispatchEngineRequest(method, params, token);
+    } catch (err) {
+      // Log every non-cancellation failure (cancellations are routine pan/zoom churn):
+      // a request that fails here is exactly the "view stays blank with no clue" case.
+      const code = (err as { code?: number }).code;
+      if (code !== -32800) this.options.onLog?.(`${method} FAILED: ${err instanceof Error ? err.message : String(err)}`);
+      throw err;
+    }
+  }
+
+  private async dispatchEngineRequest(method: string, params: unknown, token?: CancellationToken): Promise<unknown> {
     const wc = this.workerClientInstance;
     switch (method) {
       case ElogMethods.open:

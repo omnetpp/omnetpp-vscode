@@ -416,7 +416,14 @@ export function createCanvasStack(container: HTMLElement): CanvasStackHandle {
     c.style.height = '100%';
   }
   overlay.style.pointerEvents = 'none';
-  container.style.position = 'relative';
+  // Do NOT touch container.style.position here: the container's stylesheet class
+  // (.elog-chart-canvas-container: position:absolute; inset:0) is what stretches it to
+  // fill the chart body, and an inline CSSOM 'relative' would override the class --
+  // position:relative turns inset:0 into a no-op offset, collapsing the container to
+  // ZERO HEIGHT. That exact override kept the chart canvas invisible in every real
+  // VS Code window from day one (absolute children only need *a* positioned ancestor,
+  // which absolute itself satisfies) while the happy-dom smoke, whose stub
+  // ResizeObserver reports a fixed size without doing layout, stayed green.
   container.appendChild(content);
   container.appendChild(overlay);
 

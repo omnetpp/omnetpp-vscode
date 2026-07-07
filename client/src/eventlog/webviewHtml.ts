@@ -51,6 +51,12 @@ export function buildEventLogWebviewHtml(webview: vscode.Webview, extensionUri: 
     border-bottom: 1px solid var(--vscode-editorWidget-border, transparent); }
   .elog-status .placeholder { font-style: italic; }
   .elog-body { flex: 1 1 auto; overflow: auto; position: relative; }
+  /* CSP note: the webview CSP has no style-src-attr allowance, so inline style="..."
+     attributes in webview-generated HTML are BLOCKED (this exact class replaced one
+     that silently zero-heighted the chart canvas container). Style elements here (nonce'd)
+     and CSSOM assignments (el.style.x = ...) are the only allowed styling vectors. */
+  .elog-chart-canvas-container { position: absolute; inset: 0; overflow: hidden; }
+  .elog-tooltip-msg { color: var(--vscode-charts-purple, rgb(127, 0, 85)); }
   /* Sequence Chart canvas container is the keyboard-interactive surface (phase U4:
      pan/zoom/select/navigate all happen via its keydown handler) -- a visible focus
      ring is the minimal a11y requirement for a focusable, non-native-control element. */

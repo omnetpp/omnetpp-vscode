@@ -114,7 +114,20 @@ export class WorkerClient {
   // ---- lifecycle ---------------------------------------------------------------------
 
   private spawnAndConnect(): void {
-    const child = spawn(process.execPath, [this.bundlePath], { ...this.options.spawnOptions, stdio: ['pipe', 'pipe', 'pipe'] }) as ChildProcessWithoutNullStreams;
+    // Inside a VS Code extension host, `process.execPath` is the *Electron* binary, not
+    // node: without ELECTRON_RUN_AS_NODE=1 the child boots as a VS Code instance (which
+    // under the single-instance lock just forwards its argv to the running window and
+    // exits) instead of running the worker bundle -- the JSON-RPC connection then never
+    // answers and every view stays empty. Under bun/node (tests, smoke scripts,
+    // `process.versions.electron` unset) the variable is harmless but skipped anyway.
+    const spawnEnv = process.versions.electron
+      ? { ...process.env, ...this.options.spawnOptions?.env, ELECTRON_RUN_AS_NODE: '1' }
+      : this.options.spawnOptions?.env;
+    const child = spawn(process.execPath, [this.bundlePath], {
+      ...this.options.spawnOptions,
+      env: spawnEnv,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }) as ChildProcessWithoutNullStreams;
     this.child = child;
     child.stderr.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf8');

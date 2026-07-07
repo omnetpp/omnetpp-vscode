@@ -22,7 +22,7 @@ export const SEQUENCE_CHART_VIEW_TYPE = VIEW_TYPE;
  * yet" -- this phase adds it, since the Show/Hide toggles are meant to survive a full
  * window reload, not just a webview hide/show).
  */
-const CHART_STATE_KEY = 'omnetpp.eventlog.chartState';
+export const CHART_STATE_KEY = 'omnetpp.eventlog.chartState';
 
 /**
  * The `CustomDocument` VS Code hands back from `openCustomDocument()`. It has
@@ -134,6 +134,10 @@ export class SequenceChartEditorProvider implements vscode.CustomReadonlyEditorP
       // eventLogTableView.ts already uses for its own per-uri table state.
       if (message.type === 'ready') {
         const settings = readEventLogUiSettings();
+        // Diagnostics: what the chart is about to restore -- poisoned persisted state
+        // is a proven "blank view" cause, so make it visible in the output channel.
+        const persistedForLog = this.getPersistedState(uriString);
+        this.controller.log(`chart init for ${uriString}: persistedState=${persistedForLog === undefined ? '(none)' : JSON.stringify(persistedForLog).slice(0, 400)}`);
         sink.postMessage({
           type: 'init',
           fileUri: uriString,

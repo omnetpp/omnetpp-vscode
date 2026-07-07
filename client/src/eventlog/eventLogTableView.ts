@@ -22,7 +22,7 @@ const CONTEXT_TABLE_PINNED = 'omnetpp.eventlogTablePinned';
  * (not shared with the Sequence Chart editor, which has no comparable per-uri state
  * yet) so this phase does not need to touch `sequenceChartEditor.ts`.
  */
-const TABLE_STATE_KEY = 'omnetpp.eventlog.tableState';
+export const TABLE_STATE_KEY = 'omnetpp.eventlog.tableState';
 
 /**
  * Duplicates `sequenceChartEditor.ts`'s private `readEventLogUiSettings()` (a handful
@@ -115,6 +115,9 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
         return;
       }
       if (message.type === 'ready') {
+        const boundKey = this.boundUri?.toString();
+        const persistedForLog = boundKey ? this.getPersistedState(boundKey) : undefined;
+        this.controller.log(`table init for ${boundKey ?? '(unbound)'}: persistedState=${persistedForLog === undefined ? '(none)' : JSON.stringify(persistedForLog).slice(0, 400)}`);
         // Bypass handleWebviewMessage()'s generic 'ready' case (which always sends
         // `persistedState: undefined` -- U1 had no persistence matrix yet) so a fresh
         // webview reload picks the table's own remembered modes back up immediately.

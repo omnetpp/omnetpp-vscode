@@ -168,7 +168,12 @@ the bundled CLI linter (`dist/opp_lint.js`) over a throwaway project (diagnostic
 suppression, JSON shape, exit codes). For the eventlog feature (after `bun run dev:build`):
 `elog-worker-smoke.mjs` drives the bundled worker (`dist/eventlogWorker.js`) end to end
 over its JSON-RPC transport, `eventlog-ui-smoke.mjs` drives the client session layer
-headlessly; the manual F5 checklist is `docs/eventlog-manual-tests.md`.
+headlessly, and `eventlog-webview-smoke.mjs [<elog>]` loads the real
+`dist/webview/sequenceChart.js` bundle under happy-dom with a recording canvas —
+the only automated coverage of the webview's browser-only glue (DOM scaffold, init
+handshake, render loop). It cannot catch extension-host-only issues (e.g. the
+`ELECTRON_RUN_AS_NODE` worker-spawn requirement in `workerClient.ts`); the manual F5
+checklist is `docs/eventlog-manual-tests.md`.
 
 ## Conventions
 

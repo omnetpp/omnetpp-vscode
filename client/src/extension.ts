@@ -137,8 +137,18 @@ function registerRevalidationTriggers(context: ExtensionContext): void {
   );
 
   // Git HEAD changes (checkout/reset/stash) — the most reliable bulk-change signal.
-  const gitExports = extensions.getExtension<GitExtensionExports>('vscode.git')?.exports;
-  const api = gitExports?.getAPI(1);
+  // Accessing `.exports` THROWS when vscode.git exists but has not activated yet — and
+  // this extension can activate first (a restored .elog tab triggers onCustomEditor very
+  // early), which used to kill the whole activate() halfway (everything registered after
+  // this line, e.g. the MCP bridge, silently vanished). Treat any failure as "git
+  // unavailable" and use the .git/HEAD watcher fallback below.
+  let api: GitAPI | undefined;
+  try {
+    const gitExtension = extensions.getExtension<GitExtensionExports>('vscode.git');
+    api = gitExtension?.isActive ? gitExtension.exports?.getAPI(1) : undefined;
+  } catch {
+    api = undefined;
+  }
   if (api) {
     const hook = (repo: GitRepository): void => {
       context.subscriptions.push(repo.state.onDidChange(poke));
