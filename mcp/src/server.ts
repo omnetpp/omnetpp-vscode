@@ -7,7 +7,10 @@
 // Usage:  node dist/opp_ide_mcp.js [projectDir ...] [--ned-path=a;b]
 // Env:    OMNETPP_NED_PATH, OMNETPP_WASM_DIR, OMNETPP_CONFIG_DIR
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { OMNETPP_TOOLS, handleTool } from '@omnetpp/shared';
+import { ELOG_TOOLS, handleElogTool, type ElogToolContext } from '@omnetpp/shared/elog-tools';
+import { NodeRandomAccessFileProvider } from '@omnetpp/shared/node';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -40,16 +43,27 @@ async function main(): Promise<void> {
       `${index.msgCache.allTypes().length} MSG type(s) from: ${roots.join(', ')}`,
   );
 
+  // The elog tools are a fully independent feature (query any .elog file on disk by
+  // path, no relation to the NED/MSG/INI project index above), so their context is
+  // just a RandomAccessFileProvider + a path resolver -- no disk indexing at startup.
+  const elogCtx: ElogToolContext = {
+    fileProvider: new NodeRandomAccessFileProvider(),
+    resolvePath: (p) => (/^[a-z][a-z0-9+.-]*:\/\//i.test(p) ? fileURLToPath(p) : resolve(p)),
+  };
+  log(`${ELOG_TOOLS.length} elog tool(s) available`);
+
   const server = new Server(
     { name: 'omnetpp-ned-msg-ini', version: '0.1.0' },
     { capabilities: { tools: {} } },
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: OMNETPP_TOOLS }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...OMNETPP_TOOLS, ...ELOG_TOOLS] }));
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     try {
-      const result = await handleTool(req.params.name, req.params.arguments ?? {}, ctx);
+      const result = req.params.name.startsWith('elog_')
+        ? handleElogTool(req.params.name, req.params.arguments ?? {}, elogCtx)
+        : await handleTool(req.params.name, req.params.arguments ?? {}, ctx);
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
     } catch (e) {
       return {

@@ -29,6 +29,10 @@
       "types": "./out/eventlog/elogProtocol.d.ts",
       "default": "./out/eventlog/elogProtocol.js"
     },
+    "./elog-tools": {
+      "types": "./out/mcp/elogTools.d.ts",
+      "default": "./out/mcp/elogTools.js"
+    },
     "./match": {
       "types": "./out/match/index.d.ts",
       "default": "./out/match/index.js"

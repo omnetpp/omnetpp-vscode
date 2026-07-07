@@ -9,6 +9,10 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const projectDir = resolve(process.argv[2] ?? join(root, 'samples'));
+// The elog tools are independent of the NED/MSG project index above (they open any
+// .elog file on disk by path), so they get their own fixture rather than a projectDir
+// arg -- reuses the same fixture the shared/ unit tests (elogTools.test.ts) exercise.
+const elogFixture = join(root, 'shared', 'src', 'test', 'fixtures', 'elog', 'sample', 'Fifo1-#0.elog');
 
 const server = spawn(process.execPath, [join(root, 'dist', 'opp_ide_mcp.js'), projectDir], {
   stdio: ['pipe', 'pipe', 'inherit'],
@@ -71,6 +75,20 @@ try {
 
   const opt = await request('tools/call', { name: 'lookup_config_option', arguments: { name: 'sim-time-limit' } });
   console.log(`lookup_config_option: OK (${opt.content[0].text.slice(0, 60).replace(/\n/g, ' ')}...)`);
+
+  const elogToolNames = tools.tools.map((t) => t.name).filter((n) => n.startsWith('elog_'));
+  if (elogToolNames.length === 0) throw new Error('expected elog_* tools in tools/list');
+  console.log(`elog tools: OK (${elogToolNames.length} found: ${elogToolNames.join(', ')})`);
+
+  const infoCall = await request('tools/call', { name: 'elog_info', arguments: { file: elogFixture } });
+  const info = JSON.parse(infoCall.content[0].text);
+  if (info.isEmpty !== false || typeof info.runId !== 'string') throw new Error(`elog_info: unexpected result ${JSON.stringify(info)}`);
+  console.log(`elog_info: OK (runId=${info.runId}, ${info.firstEventNumber}..${info.lastEventNumber})`);
+
+  const eventCall = await request('tools/call', { name: 'elog_get_event', arguments: { file: elogFixture, eventNumber: 1 } });
+  const event = JSON.parse(eventCall.content[0].text);
+  if (!event.found || event.eventNumber !== 1) throw new Error(`elog_get_event: unexpected result ${JSON.stringify(event)}`);
+  console.log(`elog_get_event: OK (event #1, ${event.entries.length} entries, messageName=${event.messageName})`);
 
   console.log('MCP smoke test PASSED');
   server.kill();
