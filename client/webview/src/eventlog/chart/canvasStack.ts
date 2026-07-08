@@ -223,11 +223,14 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       ctx.stroke();
       break;
     case 'axisLabel':
+      // Sit the name JUST ABOVE the axis line (baseline 2px above it) instead of centered
+      // on it -- the line no longer strikes through the text, so names stay readable now
+      // that the label strip is transparent.
       ctx.fillStyle = p.color;
       ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
+      ctx.textBaseline = 'bottom';
       ctx.font = p.bold ? `bold ${mainFont}` : mainFont;
-      ctx.fillText(p.text, p.x, p.y);
+      ctx.fillText(p.text, p.x, p.y - 2);
       break;
     case 'axisSelectionMark':
       // Two thin colored lines hugging the axis line (above and below) -- Java `drawAxisMark()`.

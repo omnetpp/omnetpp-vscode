@@ -185,7 +185,8 @@ function emitPrimitive(b: SvgBuilder, p: DrawPrimitive, fontFamily: string): voi
       b.el('line', { x1: p.x1, y1: p.y + p.lineHeight, x2: p.x2, y2: p.y + p.lineHeight, stroke: p.color, 'stroke-width': 1.5 });
       return;
     case 'axisLabel':
-      b.el('text', { x: p.x, y: p.y, fill: p.color, 'font-size': 12, 'font-weight': p.bold ? 'bold' : 'normal', 'font-family': fontFamily, 'text-anchor': 'start', 'dominant-baseline': 'middle' }, p.text);
+      // Above the line (baseline 2px above), matching the canvas -- see canvasStack.ts.
+      b.el('text', { x: p.x, y: p.y - 2, fill: p.color, 'font-size': 12, 'font-weight': p.bold ? 'bold' : 'normal', 'font-family': fontFamily, 'text-anchor': 'start', 'dominant-baseline': 'text-after-edge' }, p.text);
       return;
     case 'axisHeaderBox': {
       const h = Math.max(1, p.y1 - p.y0);
