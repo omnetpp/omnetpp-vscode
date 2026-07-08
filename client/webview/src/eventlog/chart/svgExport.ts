@@ -195,6 +195,14 @@ function emitPrimitive(b: SvgBuilder, p: DrawPrimitive, fontFamily: string): voi
         b.el('line', { x1: first.x1, y1: top, x2: last.x2, y2: top, stroke: p.borderColor, 'stroke-width': 1 });
         b.el('line', { x1: first.x1, y1: bot, x2: last.x2, y2: bot, stroke: p.borderColor, 'stroke-width': 1 });
       }
+      // value/enum labels (see canvasStack.ts); ~5.4px/char at 9px Courier for the fit test.
+      for (const seg of p.segments) {
+        const vx1 = Math.max(p.clipLeft, seg.x1);
+        const vx2 = Math.min(p.clipRight, seg.x2);
+        if (vx2 - vx1 > seg.valueText.length * 5.4 + 6) {
+          b.el('text', { x: (vx1 + vx2) / 2, y: p.y, fill: p.labelColor, 'font-size': 9, 'font-family': 'monospace', 'text-anchor': 'middle', 'dominant-baseline': 'middle' }, seg.valueText);
+        }
+      }
       return;
     }
     case 'axisSelectionMark':

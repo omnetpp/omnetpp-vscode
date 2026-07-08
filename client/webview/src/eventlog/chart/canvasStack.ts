@@ -256,6 +256,19 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
         ctx.lineTo(last.x2, bot - 0.5);
         ctx.stroke();
       }
+      // value/enum labels (Eclipse getValueText): drawn per segment when the VISIBLE part is
+      // wide enough, centered in that visible part so a segment scrolled partly off still
+      // shows its label. Clipped to the content area (never over the left label column).
+      ctx.font = '9px "Courier New", monospace';
+      ctx.fillStyle = p.labelColor;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      for (const seg of p.segments) {
+        const vx1 = Math.max(p.clipLeft, seg.x1);
+        const vx2 = Math.min(p.clipRight, seg.x2);
+        const tw = ctx.measureText(seg.valueText).width;
+        if (vx2 - vx1 > tw + 6) ctx.fillText(seg.valueText, (vx1 + vx2) / 2, p.y);
+      }
       break;
     }
     case 'axisLabel':
