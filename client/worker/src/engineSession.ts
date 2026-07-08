@@ -557,10 +557,20 @@ export class EngineSession {
     const causeEvent = dep.getCauseEvent();
     const consequenceEvent = dep.getConsequenceEvent();
     const beginMessage = dep.getBeginMessageDescriptionEntry();
+    // The cause MODULE is normally the cause event's module, but for a plain send the true
+    // sender is the module CONTEXT at the send entry: a message scheduled inside a method
+    // call (e.g. a self-message sent from within `initialize()`) is attributed to the
+    // CALLED module, not the event's own (compound/system) module -- so the arrow leaves
+    // the right axis and a self-scheduled message reads as a self-message. Only for `send`
+    // (the begin entry lives in the cause event), and only when the context is a real module.
+    let causeModuleId = causeEvent?.getModuleId() ?? null;
+    if (kind === 'send' && beginMessage !== null && beginMessage.contextModuleId >= 0 && beginMessage.getEvent()?.getEventNumber() === causeEvent?.getEventNumber()) {
+      causeModuleId = beginMessage.contextModuleId;
+    }
     const result: RenderDependency = {
       kind,
       causeEventNumber: dep.getCauseEventNumber(),
-      causeModuleId: causeEvent?.getModuleId() ?? null,
+      causeModuleId,
       // Java `drawMessageDependency()` (SequenceChart.java:4540-4548): the cause endpoint is
       // the cause event's END (right edge of the pill), or -- for a non-reuse (send)
       // dependency -- the specific send entry's timeline coordinate, which SPREADS several
