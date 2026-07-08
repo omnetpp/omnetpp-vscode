@@ -79,9 +79,10 @@ export interface TcSimSample {
   simTime: number;
 }
 
-/** Anything with the two fields needed to build a sample table — `TimelineEvent` satisfies this; kept generic so tests can hand-build samples without the full protocol type. */
+/** Anything with the fields needed to build a sample table — `TimelineEvent` satisfies this; kept generic so tests can hand-build samples without the full protocol type. `tcEnd` optional (defaults to `tcBegin` = a zero-width point). */
 export interface TcSimSource {
   tcBegin: number;
+  tcEnd?: number;
   simulationTime: string;
 }
 
@@ -96,7 +97,16 @@ export interface TcSimSource {
  * `if (delta === 0)` branches.
  */
 export function buildSampleTable(events: TcSimSource[]): TcSimSample[] {
-  const samples = events.map((e) => ({ tc: e.tcBegin, simTime: Number(e.simulationTime) }));
+  const samples: TcSimSample[] = [];
+  for (const e of events) {
+    const simTime = Number(e.simulationTime);
+    // A pill-shaped event spans [tcBegin, tcEnd] all at the SAME simulation time (its
+    // internal log entries have no simtime advance). Emit BOTH ends so the piecewise-linear
+    // interpolation stays FLAT across the pill instead of ramping toward the next event --
+    // otherwise the mouse-time hairline "counts up" while sweeping a zero-simtime pill.
+    samples.push({ tc: e.tcBegin, simTime });
+    if (e.tcEnd !== undefined && e.tcEnd !== e.tcBegin) samples.push({ tc: e.tcEnd, simTime });
+  }
   samples.sort((a, b) => a.tc - b.tc);
   return samples;
 }

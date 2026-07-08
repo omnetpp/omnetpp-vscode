@@ -49,6 +49,17 @@ test('buildSampleTable sorts ascending by tc', () => {
   );
 });
 
+test('buildSampleTable emits BOTH ends of a pill (same simtime) so interpolation stays FLAT across it (mouse-hairline zero-time fix)', () => {
+  // A pill event [0, 0.7] at simtime 0, then event #1 at tc 0.8, simtime 0.1.
+  const table = buildSampleTable([{ tcBegin: 0, tcEnd: 0.7, simulationTime: '0' }, { tcBegin: 0.8, tcEnd: 0.8, simulationTime: '0.1' }]);
+  // sweeping the pill (0..0.7) -> simtime stays 0 (was ramping up toward 0.1 before the fix)
+  assert.strictEqual(tcToSimTimeApprox(0.2, table), 0);
+  assert.strictEqual(tcToSimTimeApprox(0.5, table), 0);
+  assert.strictEqual(tcToSimTimeApprox(0.7, table), 0);
+  // between the pill's end and the next event, simtime ramps up
+  assert.ok(tcToSimTimeApprox(0.75, table)! > 0 && tcToSimTimeApprox(0.75, table)! < 0.1);
+});
+
 test('tcToSimTimeApprox interpolates linearly between two bracketing samples', () => {
   const table = buildSampleTable([src(0, '0'), src(10, '100')]);
   assert.strictEqual(tcToSimTimeApprox(5, table), 50);
