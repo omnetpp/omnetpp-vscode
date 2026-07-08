@@ -274,21 +274,21 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       ctx.fillRect(p.x, p.y, p.w, p.h);
       break;
     case 'axisHeaderBox': {
-      // Fully transparent band -- no fill/border covers the chart; only the rotated compound
-      // name is drawn, with a faint halo (p.color) so it stays legible over the timeline,
-      // zero-time regions and selection lines that now show through the hierarchy column.
+      // Opaque compound-module band (p.color fill, thin border) with the rotated name.
+      ctx.fillStyle = p.color;
+      const w = HEADER_BOX_WIDTH;
+      ctx.fillRect(p.x, p.y0, w, Math.max(1, p.y1 - p.y0));
+      ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(p.x, p.y0, w, Math.max(1, p.y1 - p.y0));
       if (p.y1 - p.y0 > 20) {
         ctx.save();
+        ctx.fillStyle = p.textColor;
         ctx.font = axisHeaderFont;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.translate(p.x + HEADER_BOX_WIDTH / 2, (p.y0 + p.y1) / 2);
+        ctx.translate(p.x + w / 2, (p.y0 + p.y1) / 2);
         ctx.rotate(-Math.PI / 2);
-        ctx.lineJoin = 'round';
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = p.color;
-        ctx.strokeText(p.label, 0, 0);
-        ctx.fillStyle = p.textColor;
         ctx.fillText(p.label, 0, 0);
         ctx.restore();
       }

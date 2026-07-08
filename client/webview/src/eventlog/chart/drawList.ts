@@ -395,10 +395,10 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       const y1 = axisRowY(lastAxis.y, viewport) + lastAxis.lineHeight;
       if (y1 < GUTTER_TOP_HEIGHT || y0 > viewport.canvasHeight) continue;
       const x = 2 + level * HEADER_LEVEL_WIDTH;
-      // Transparent band: `color` is now a faint HALO behind the rotated name (drawn by the
-      // renderer as a text outline) instead of an opaque fill -- so the timeline/regions/
-      // selection lines behind the hierarchy stay fully visible (nothing is covered).
-      primitives.push({ kind: 'axisHeaderBox', x, y0, y1, label: header.label, color: theme.isDark ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.8)', textColor: theme.isDark ? '#cfe6e6' : '#123' });
+      // The compound-module band keeps an OPAQUE background (only the leaf-label strip and
+      // the rest of the left column are transparent) -- `color` is the fill, `textColor` the
+      // rotated name.
+      primitives.push({ kind: 'axisHeaderBox', x, y0, y1, label: header.label, color: theme.isDark ? '#2f5060' : '#d7f2f2', textColor: theme.isDark ? '#e0f0f0' : '#000000' });
       // (No per-header glyphs: when a compound is expanded it is ALSO drawn as an axis
       // row, whose expand/collapse glyph -- now placed right before its name above --
       // already controls it, so a second glyph in the band would just duplicate it.)
@@ -654,10 +654,6 @@ function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx:
   const consequenceX = dep.consequenceTc === null ? null : contentX(dep.consequenceTc, viewport);
 
   if (isSelf) {
-    // Self-message arcs are drawn DOTTED -- reuses (matching Java) AND self-message sends
-    // (per request, to set self-messages apart from cross-module sends). Emphasis (hover/
-    // selection) stays solid, so reuse `override` already cleared `dash` above.
-    const arcDash = override ? dash : [2, 2];
     let y = axisRowY(causeAxis.y, viewport);
     [y] = adjustEndpointsForEventRadius(y, y, EVENT_RADIUS, flags.showEventMarks);
     const geom = computeSelfArrowGeometry({
@@ -672,9 +668,11 @@ function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx:
     if (!geom) return;
     for (const seg of geom.segments) {
       if (Math.abs(seg.x2 - seg.x1) < 1 && !vlineBuffer.addAndCheck((seg.x1 + seg.x2) / 2, seg.y1, seg.y2)) continue;
-      primitives.push({ kind: 'arrow', arrowKind, x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2, color, dash: seg.dashed ? OFFSCREEN_DASH : arcDash, ref: depRef, width: arrowWidth });
+      primitives.push({ kind: 'arrow', arrowKind, x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2, color, dash: seg.dashed ? OFFSCREEN_DASH : dash, ref: depRef, width: arrowWidth });
     }
-    if (geom.ellipse) primitives.push({ kind: 'ellipseArc', ...geom.ellipse, color, ref: depRef, width: arrowWidth, dash: arcDash });
+    // The arc follows the dependency's own dash: REUSE arcs are dotted (Java + this port),
+    // self-message SENDS stay solid. (`dash` is [2,2] for reuse, undefined for send.)
+    if (geom.ellipse) primitives.push({ kind: 'ellipseArc', ...geom.ellipse, color, ref: depRef, width: arrowWidth, dash });
     if (geom.arrowhead) primitives.push({ kind: 'arrowHead', x: geom.arrowhead.x, y: geom.arrowhead.y, angle: geom.arrowhead.angle, color: geom.arrowhead.long ? LONG_ARROWHEAD_COLOR : color, length: geom.arrowhead.length, width: geom.arrowhead.width });
     if (isFiltered && geom.signAnchor) primitives.push({ kind: 'zigzag', segments: buildFilteredSignSegments(geom.signAnchor), color });
     if (flags.showMessageNames && showLabels && dep.messageName) primitives.push({ kind: 'label', x: geom.labelAnchor.x + (isFiltered ? 7 : 0), y: geom.labelAnchor.y, text: dep.messageName, color, align: 'left' });

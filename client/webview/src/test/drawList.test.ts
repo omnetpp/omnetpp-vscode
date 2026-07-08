@@ -132,13 +132,18 @@ test('a same-module dependency (both endpoints known, distinct tc) is drawn as a
   assert.strictEqual(ellipses[0].quarter, -1, 'both sides in range -> full half-ellipse (quarter=-1)');
 });
 
-test('self-message arcs are drawn DOTTED (the ellipseArc carries a dash), even for a plain send', () => {
-  // deps4[3] is a self-message SEND (same module both sides) -> ellipseArc; Eclipse draws
-  // self-sends solid, but per request self-message arcs are dotted here to stand out.
-  const primitives = draw();
-  const arc = primitives.find((p) => p.kind === 'ellipseArc') as { dash?: number[] } | undefined;
-  assert.ok(arc, 'self-message send is an ellipseArc');
-  assert.ok(arc!.dash && arc!.dash.length > 0, 'the self-message arc is dotted');
+test('arc dash follows the dependency KIND: a self-message SEND arc is solid, a REUSE arc is dotted', () => {
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([1, 2]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const params = { timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [] as TimelineEvent[], methodCalls: [] as RenderMethodCall[], axesLayout, ticks: [], theme };
+  // self-message SEND (same module) -> solid arc
+  const sendSelf = dep_({ causeEventNumber: 1, consequenceEventNumber: 2, kind: 'send', causeModuleId: 2, causeTc: 10, consequenceModuleId: 2, consequenceTc: 30 });
+  const sendArc = buildDrawList({ ...params, dependencies: [sendSelf], displayFlags: { ...DEFAULT_DISPLAY_FLAGS, showSelfMessageSends: true } }).find((p) => p.kind === 'ellipseArc') as { dash?: number[] } | undefined;
+  assert.ok(sendArc && !sendArc.dash, 'self-message send arc is solid');
+  // self-message REUSE (same module) -> dotted arc
+  const reuseSelf = dep_({ causeEventNumber: 1, consequenceEventNumber: 2, kind: 'reuse', causeModuleId: 2, causeTc: 10, consequenceModuleId: 2, consequenceTc: 30 });
+  const reuseArc = buildDrawList({ ...params, dependencies: [reuseSelf], displayFlags: { ...DEFAULT_DISPLAY_FLAGS, showSelfMessageReuses: true } }).find((p) => p.kind === 'ellipseArc') as { dash?: number[] } | undefined;
+  assert.ok(reuseArc && reuseArc.dash && reuseArc.dash.length > 0, 'reuse arc is dotted');
 });
 
 test('a "reuse" dependency gets a dashed/dotted line, distinct from a plain "send"', () => {
