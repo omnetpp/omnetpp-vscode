@@ -712,9 +712,14 @@ function computeInfoPanelText(): InfoPanelText | undefined {
   const endEventNumber = visible.length > 0 ? Math.max(...visible.map((e) => e.eventNumber)) : startEventNumber;
   const leftSim = simTimeAt(viewport.leftTc);
   const rightSim = simTimeAt(range.rightTc);
-  const positionAndRange: [string, string] = [`Position: #${startEventNumber}, ${leftSim !== null ? formatTickLabel(leftSim) : '?'}`, `Range: #${endEventNumber - startEventNumber + 1}, ${leftSim !== null && rightSim !== null ? formatTickLabel(rightSim - leftSim) : '?'}`];
+  // Position/Range times use unit formatting (Java: `TimeUtils.secondsToTimeString`).
+  const positionAndRange: [string, string] = [`Position: #${startEventNumber}, ${leftSim !== null ? formatTickTime(leftSim) : '?'}`, `Range: #${endEventNumber - startEventNumber + 1}, ${leftSim !== null && rightSim !== null ? formatTickTime(rightSim - leftSim) : '?'}`];
   const eventLogInfo: [string, string] = [
-    `File: ${summary.fileSize} bytes, ~${summary.approximateNumberOfEvents} events (#${summary.firstEventNumber} .. #${summary.lastEventNumber}), ${summary.lastSimulationTime ?? '0'} s`,
+    // Java `drawEventLogInfo()` line 1 verbatim (raw simulation time + " seconds").
+    `File: ${summary.fileSize} bytes, ~${summary.approximateNumberOfEvents} events (#${summary.firstEventNumber} .. #${summary.lastEventNumber}), ${summary.lastSimulationTime ?? '0'} seconds`,
+    // Java's line 2 ("Read: N modules, N events, N lines, N bytes") reads live parse
+    // counters (`getNumParsedEvents()`/`FileReader.getNumRead*()`) not yet exposed over
+    // the protocol -- documented simplification, shows the coordinate-system version.
     `Coordinate system version: ${summary.coordinateSystemVersion}${summary.filtered ? ' (filtered)' : ''}`,
   ];
   return { positionAndRange, eventLogInfo };

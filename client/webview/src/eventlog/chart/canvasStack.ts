@@ -330,16 +330,27 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       }
       break;
     case 'infoPanel': {
+      // Sized to its measured text (Java measures getTextExtent), not an estimate: box
+      // width = widest line + padding, right-aligned to `rightX`.
+      ctx.font = secondaryFont;
+      const lineH = 15;
+      const padX = 6;
+      const padY = 3;
+      let textW = 0;
+      for (const line of p.lines) textW = Math.max(textW, ctx.measureText(line).width);
+      const w = Math.ceil(textW) + 2 * padX;
+      const h = p.lines.length * lineH + 2 * padY;
+      const x = p.rightX - w - 4;
+      const y = p.edge === 'top' ? p.anchorY + 2 : p.anchorY - h - 2;
       ctx.fillStyle = p.background;
-      ctx.fillRect(p.x, p.y, p.w, p.h);
+      ctx.fillRect(x, y, w, h);
       ctx.strokeStyle = p.color;
       ctx.lineWidth = 1;
-      ctx.strokeRect(p.x, p.y, p.w, p.h);
+      ctx.strokeRect(x, y, w, h);
       ctx.fillStyle = p.color;
-      ctx.font = secondaryFont;
-      ctx.textAlign = 'right';
+      ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
-      for (let i = 0; i < p.lines.length; i++) ctx.fillText(p.lines[i], p.x + p.w - 4, p.y + 3 + i * 15);
+      for (let i = 0; i < p.lines.length; i++) ctx.fillText(p.lines[i], x + padX, y + padY + i * lineH);
       break;
     }
     case 'tick':

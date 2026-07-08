@@ -261,12 +261,21 @@ function emitPrimitive(b: SvgBuilder, p: DrawPrimitive, fontFamily: string): voi
     case 'timeDifferenceLabel':
       b.el('text', { x: p.x, y: p.y, fill: p.color, 'font-size': 11, 'font-family': fontFamily, 'text-anchor': 'middle', 'dominant-baseline': 'middle' }, p.text);
       return;
-    case 'infoPanel':
-      b.el('rect', { x: p.x, y: p.y, width: p.w, height: p.h, fill: p.background, stroke: p.color });
+    case 'infoPanel': {
+      // No canvas to measure with here (export path); estimate the width from the longest
+      // line at ~6px/char -- exact pixel width only matters for the live canvas overlay.
+      const lineH = 15;
+      const textW = Math.max(0, ...p.lines.map((l) => l.length * 6));
+      const w = textW + 12;
+      const h = p.lines.length * lineH + 6;
+      const x = p.rightX - w - 4;
+      const y = p.edge === 'top' ? p.anchorY + 2 : p.anchorY - h - 2;
+      b.el('rect', { x, y, width: w, height: h, fill: p.background, stroke: p.color });
       for (let i = 0; i < p.lines.length; i++) {
-        b.el('text', { x: p.x + p.w - 4, y: p.y + 3 + i * 15, fill: p.color, 'font-size': 11, 'font-family': fontFamily, 'text-anchor': 'end', 'dominant-baseline': 'hanging' }, p.lines[i]);
+        b.el('text', { x: x + 6, y: y + 3 + i * lineH, fill: p.color, 'font-size': 11, 'font-family': fontFamily, 'text-anchor': 'start', 'dominant-baseline': 'hanging' }, p.lines[i]);
       }
       return;
+    }
     case 'selectionMark':
       b.el('rect', { x: p.x - p.radius, y: p.y - p.radius, width: p.xEnd - p.x + 2 * p.radius, height: 2 * p.radius, rx: p.radius, ry: p.radius, stroke: p.color, fill: 'none', 'stroke-width': 2 });
       return;

@@ -95,7 +95,8 @@ export type DrawPrimitive =
   | { kind: 'zigzag'; segments: LineSegment[]; color: string }
   | { kind: 'label'; x: number; y: number; text: string; color: string; align?: 'left' | 'center' | 'right'; rotateDeg?: number }
   | { kind: 'timeDifferenceLabel'; x: number; y: number; text: string; color: string }
-  | { kind: 'infoPanel'; x: number; y: number; w: number; h: number; lines: string[]; background: string; color: string; align: 'right' }
+  /** Phase U11 — the position/range (top) and eventlog-info (bottom) overlay boxes, right-aligned. Sized to its measured text at draw time (Java measures `getTextExtent`), so `rightX`/`anchorY`/`edge` describe placement and the renderer computes the box. */
+  | { kind: 'infoPanel'; lines: string[]; rightX: number; anchorY: number; edge: 'top' | 'bottom'; background: string; color: string }
   /** Phase U4 — a selection ring around a selected event; a stadium outline (not a circle) when the event has a nonzero timeline width (`xEnd > x`), matching the pill event mark and Java's `drawEventMark()`. */
   | { kind: 'selectionMark'; x: number; xEnd: number; y: number; radius: number; color: string }
   /** Phase U11 — a selected timeline coordinate (a background click): a vertical line spanning the content height (Java `drawTimelineMark()`). */
@@ -561,12 +562,7 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
 }
 
 function pushInfoPanel(primitives: DrawPrimitive[], theme: EventLogPalette, lines: [string, string], canvasWidth: number, anchorY: number, edge: 'top' | 'bottom'): void {
-  const approxCharWidth = 7;
-  const w = Math.max(lines[0].length, lines[1].length) * approxCharWidth + 12;
-  const h = 2 * 16 + 6;
-  const x = canvasWidth - w - 4;
-  const y = edge === 'top' ? anchorY + 2 : anchorY - h - 2;
-  primitives.push({ kind: 'infoPanel', x, y, w, h, lines: [lines[0], lines[1]], background: theme.isDark ? '#264f4f' : '#e0ffff', color: theme.isDark ? theme.foreground : '#000000', align: 'right' });
+  primitives.push({ kind: 'infoPanel', lines: [lines[0], lines[1]], rightX: canvasWidth, anchorY, edge, background: theme.isDark ? '#264f4f' : '#e0ffff', color: theme.isDark ? theme.foreground : '#000000' });
 }
 
 interface DependencyDrawContext {
