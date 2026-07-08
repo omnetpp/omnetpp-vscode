@@ -6,7 +6,9 @@ import {
   formatSimulationTime,
   isNegativeDecimal,
   multiplyDecimalStringByInt,
+  roundDecimalString,
   scaleDecimalStringByPow10,
+  setTimeDisplayAccuracy,
   subtractDecimalStrings,
 } from '../eventlog/common/decimalTime';
 
@@ -58,4 +60,26 @@ test('compareDecimalStrings: orders like Array.prototype.sort comparators', () =
   assert.ok(compareDecimalStrings('1', '2') < 0);
   assert.ok(compareDecimalStrings('2', '1') > 0);
   assert.equal(compareDecimalStrings('1.50', '1.5'), 0);
+});
+
+test('roundDecimalString: rounds to N fractional digits (half up), leaving shorter values alone', () => {
+  assert.equal(roundDecimalString('0.159174900913', 6), '0.159175');
+  assert.equal(roundDecimalString('0.159174900913', 3), '0.159');
+  assert.equal(roundDecimalString('1.7999', 3), '1.8');
+  assert.equal(roundDecimalString('0.159174900913', 0), '0');
+  assert.equal(roundDecimalString('1.5', 6), '1.5'); // already short enough
+  assert.equal(roundDecimalString('-0.0005', 3), '-0.001'); // sign preserved, rounds away from zero
+});
+
+test('formatSimulationTime: maxFractionDigits rounds before the unit breakdown; the global accuracy is the default', () => {
+  assert.equal(formatSimulationTime('0.159174900913'), '159ms 174us 900ns 913ps'); // full by default
+  assert.equal(formatSimulationTime('0.159174900913', 6), '159ms 175us');
+  assert.equal(formatSimulationTime('0.159174900913', 3), '159ms');
+  setTimeDisplayAccuracy(3);
+  try {
+    assert.equal(formatSimulationTime('0.159174900913'), '159ms'); // global default applies
+    assert.equal(formatSimulationTime('1.7999'), '1s 800ms');
+  } finally {
+    setTimeDisplayAccuracy(null); // don't leak global state into other tests
+  }
 });

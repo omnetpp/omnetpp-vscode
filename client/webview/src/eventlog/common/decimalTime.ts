@@ -84,8 +84,42 @@ export function multiplyDecimalStringByInt(valueStr: string, n: number): string 
   return formatFromUnscaled(unscaled, scale);
 }
 
-/** Port of `TimeUtils.secondsToTimeString(BigDecimal)`, operating on the decimal string directly (exact). */
-export function formatSimulationTime(decimalString: string): string {
+/**
+ * The webview-global "maximum time display accuracy": the number of fractional decimal
+ * digits (of a value in SECONDS) to keep when formatting any displayed simulation time.
+ * `null` = full precision. Set from the chart's "Time Accuracy" context-menu selector;
+ * every time string (hovers, marker deltas, info panels, ruler, hairline) rounds to it.
+ * The SI units map to fractional digits: s=0, ms=3, us=6, ns=9, ps=12, fs=15, as=18.
+ */
+let displayAccuracyFractionDigits: number | null = null;
+
+export function setTimeDisplayAccuracy(fractionDigits: number | null): void {
+  displayAccuracyFractionDigits = fractionDigits;
+}
+
+export function getTimeDisplayAccuracy(): number | null {
+  return displayAccuracyFractionDigits;
+}
+
+/** Rounds a decimal string to at most `maxFractionDigits` fractional digits (round-half-away-from-zero), exactly, via BigInt. Returns the input unchanged when it already has few enough fractional digits. */
+export function roundDecimalString(decimalString: string, maxFractionDigits: number): string {
+  const v = parseDecimalString(decimalString);
+  if (v.fracDigits.length <= maxFractionDigits) return decimalString;
+  const drop = v.fracDigits.length - maxFractionDigits;
+  const divisor = 10n ** BigInt(drop);
+  const magnitude = BigInt(v.intDigits + v.fracDigits);
+  const rounded = (magnitude + divisor / 2n) / divisor; // round half up on the magnitude
+  return formatFromUnscaled(v.negative ? -rounded : rounded, maxFractionDigits);
+}
+
+/**
+ * Port of `TimeUtils.secondsToTimeString(BigDecimal)`, operating on the decimal string
+ * directly (exact). `maxFractionDigits` (defaulting to the global display accuracy)
+ * rounds the value first, so e.g. an "us" accuracy turns "159ms 174us 900ns 913ps" into
+ * "159ms 175us".
+ */
+export function formatSimulationTime(decimalString: string, maxFractionDigits: number | null = displayAccuracyFractionDigits): string {
+  if (maxFractionDigits != null) decimalString = roundDecimalString(decimalString, maxFractionDigits);
   const parsed = parseDecimalString(decimalString);
   let intPart = stripLeadingZeros(parsed.intDigits);
   let frac = parsed.fracDigits;

@@ -28,6 +28,7 @@ import { EngineRpc, RequestCancelledError } from '../common/rpc';
 import { loadPersistedBlob, withVersion } from '../common/persistedState';
 import { buildToolbar, type ToolbarHandle } from '../common/toolbar';
 import { renderSummaryStrip } from '../common/summary';
+import { setTimeDisplayAccuracy } from '../common/decimalTime';
 import { readPalette, watchThemeChange, type EventLogPalette } from '../common/theme';
 import { showContextMenu } from '../common/contextMenu';
 import { DEFAULT_FIND_TEXT_STATE, openFindTextDialog, openGotoEventDialog, openGotoSimTimeDialog, type FindTextState } from '../common/dialogs';
@@ -173,6 +174,8 @@ interface PersistedChartState {
    * the end of.
    */
   viewport?: { originEventNumber: number; pixelsPerTc: number; vscroll: number };
+  /** The "Time Accuracy" selection: max fractional-seconds digits to display, or `null`/absent = full precision. Rounds every displayed time (hovers, deltas, ruler, info panels, hairline). */
+  timeAccuracy?: number | null;
 }
 
 /** Phase U10 -- bump whenever `PersistedChartState`'s shape changes in a way older code could misinterpret; see `persistedState.ts`'s header for the tolerant-load policy this gates. */
@@ -196,6 +199,9 @@ function currentChartFontSizePx(): number {
 let notificationOverlay: NotificationOverlayHandle;
 
 let currentTimelineMode: TimelineMode = (state.timelineMode as TimelineMode) ?? TimelineMode.SIMULATION_TIME;
+/** The "Time Accuracy" selection (max fractional-seconds digits, or `null` = full). Applied globally to `decimalTime`'s formatters so every displayed time rounds to it. */
+let timeAccuracy: number | null = state.timeAccuracy ?? null;
+setTimeDisplayAccuracy(timeAccuracy);
 let viewport: ViewportState = createViewportState();
 let palette: EventLogPalette = readPalette();
 let moduleTree: ElogModule | null = null;
@@ -1747,6 +1753,13 @@ function openChartContextMenu(clientX: number, clientY: number, hits: HitObject[
     spacingIncrease: spacingActions.increase,
     spacingDecrease: spacingActions.decrease,
     setTimelineMode: (mode) => void applyTimelineMode(mode, false),
+    setTimeAccuracy: (fractionDigits) => {
+      timeAccuracy = fractionDigits;
+      setTimeDisplayAccuracy(fractionDigits);
+      state = { ...state, timeAccuracy: fractionDigits };
+      persistState();
+      scheduleRender();
+    },
     zoomIn: () => {
       viewport = zoomAtCenter(viewport, 1.5);
       scheduleRender();
@@ -1789,6 +1802,7 @@ function openChartContextMenu(clientX: number, clientY: number, hits: HitObject[
     resolveAxisInfo: resolveAxisMenuInfo,
     actions,
     displayFlags,
+    currentTimeAccuracy: timeAccuracy,
   });
   showContextMenu(clientX, clientY, entries);
 }
@@ -2232,6 +2246,8 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
       if (message.persistedState !== undefined) {
         state = { ...state, ...loadPersistedBlob<PersistedChartState>(message.persistedState, CHART_STATE_VERSION) };
         displayFlags = mergeDisplayFlags(state.displayFlags);
+        timeAccuracy = state.timeAccuracy ?? null;
+        setTimeDisplayAccuracy(timeAccuracy);
         filterPanel.setState(mergeFilterPanelState(state.filterPanel));
         // phase U8 -- axis management state (open set itself resolves from paths once
         // the module tree arrives below, initializeOpenAxisModules())
@@ -2428,6 +2444,8 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
           // goto begin). The escape hatch for state poisoned by an older build.
           state = {};
           displayFlags = mergeDisplayFlags(undefined);
+          timeAccuracy = null;
+          setTimeDisplayAccuracy(null);
           axisOrderingMode = 'moduleId';
           manualOrderPaths = [];
           axisSpacingMode = 'auto';

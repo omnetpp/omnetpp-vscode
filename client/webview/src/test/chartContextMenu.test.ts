@@ -17,6 +17,7 @@ function makeParams(actions: ChartMenuActions, overrides: Partial<ChartMenuBuild
     resolveAxisInfo: () => null,
     actions,
     displayFlags: DEFAULT_DISPLAY_FLAGS,
+    currentTimeAccuracy: null,
     ...overrides,
   };
 }

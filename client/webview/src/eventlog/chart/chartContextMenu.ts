@@ -126,6 +126,8 @@ export interface ChartMenuActions {
   spacingIncrease(): void;
   spacingDecrease(): void;
   setTimelineMode(mode: TimelineMode): void;
+  /** Time-display accuracy selector: the max number of fractional (seconds) digits to show, or `null` for full precision. See `TIME_ACCURACY_OPTIONS`. */
+  setTimeAccuracy(fractionDigits: number | null): void;
   zoomIn(): void;
   zoomOut(): void;
   defaultZoom(): void;
@@ -162,6 +164,27 @@ export interface ChartMenuBuildParams {
   actions: ChartMenuActions;
   /** Phase U5 — current toggle state, for the Show/Hide submenu's checkmarks. */
   displayFlags: ChartDisplayFlags;
+  /** Current time-display accuracy (max fractional-seconds digits, or `null` = full), for the Time Accuracy radios' checkmarks. */
+  currentTimeAccuracy: number | null;
+}
+
+/** The Time Accuracy radio options: `[maxFractionalSecondsDigits | null, label]`, coarsest SI unit first. `null` = full precision. */
+export const TIME_ACCURACY_OPTIONS: [number | null, string][] = [
+  [null, 'Full precision'],
+  [0, 'Seconds (s)'],
+  [3, 'Milliseconds (ms)'],
+  [6, 'Microseconds (µs)'],
+  [9, 'Nanoseconds (ns)'],
+  [12, 'Picoseconds (ps)'],
+  [15, 'Femtoseconds (fs)'],
+];
+
+function timeAccuracySection(current: number | null, actions: ChartMenuActions): MenuEntry {
+  return {
+    id: 'timeAccuracy',
+    label: 'Time Accuracy',
+    submenu: TIME_ACCURACY_OPTIONS.map(([frac, label]): MenuEntry => ({ id: `ta-${frac}`, label, checked: frac === current, onSelect: () => actions.setTimeAccuracy(frac) })),
+  };
 }
 
 const TIMELINE_MODE_LABELS: [TimelineMode, string][] = [
@@ -290,7 +313,7 @@ function showHideSection(displayFlags: ChartDisplayFlags, actions: ChartMenuActi
 }
 
 export function buildChartContextMenu(params: ChartMenuBuildParams): MenuEntry[] {
-  const { hits, resolveDependencyLabel, resolveDependencyMessageId, currentTimelineMode, currentAxisOrderingMode, resolveAxisInfo, actions, displayFlags } = params;
+  const { hits, resolveDependencyLabel, resolveDependencyMessageId, currentTimelineMode, currentAxisOrderingMode, resolveAxisInfo, actions, displayFlags, currentTimeAccuracy } = params;
   const entries: MenuEntry[] = [];
 
   const events = hits.filter((h): h is Extract<HitObject, { kind: 'event' }> => h.kind === 'event');
@@ -323,6 +346,7 @@ export function buildChartContextMenu(params: ChartMenuBuildParams): MenuEntry[]
   });
 
   entries.push(showHideSection(displayFlags, actions));
+  entries.push(timeAccuracySection(currentTimeAccuracy, actions));
 
   entries.push({
     id: 'zoom',
