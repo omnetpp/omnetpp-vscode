@@ -423,7 +423,10 @@ export interface RenderDependency {
 /** A `ComponentMethodBeginEntry`-derived method-call arrow. */
 export interface RenderMethodCall {
   eventNumber: number;
+  /** Timeline coordinate of the call (the ComponentMethodBegin entry). */
   tc: number;
+  /** Timeline coordinate of the return (the matching ComponentMethodEnd entry); spreads the call across a WIDTH within the event's pill (Java draws a faint bar `[tc, tcEnd]`). Defaults to `tc` (zero width) when the end entry is unavailable / no entry separation. */
+  tcEnd?: number;
   sourceModuleId: number;
   targetModuleId: number;
   methodName: string;

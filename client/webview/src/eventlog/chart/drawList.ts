@@ -353,30 +353,26 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       primitives.push({ kind: 'axisLine', moduleId: axis.moduleId, x1: 0, x2: viewport.canvasWidth, y, lineHeight: axis.lineHeight, color: theme.foreground });
       const axisHovered = hovered?.axisModuleIds?.has(axis.moduleId) ?? false;
       const axisSelected = selectedAxisModuleIds?.has(axis.moduleId) ?? false;
-      // Hover only makes the label BOLD (same color); selection turns it red -- see this
-      // phase's report: hover = bolder/wider/same-color, selection = red.
-      if (flags.showAxisLabels) primitives.push({ kind: 'axisLabel', moduleId: axis.moduleId, x: 4 + labelIndent, y, text: axis.label, color: axisSelected ? emphasisColor : theme.foreground, bold: axisHovered });
-      // Phase U11 -- selected axis: two thin red lines just above/below the axis line,
-      // spanning the content width (Java `drawAxisMark()`). Appended to `emphasis` so it
-      // draws on top of everything.
+      // The expand/collapse glyph sits immediately BEFORE the module name (a reserved slot
+      // just left of the label) rather than right-aligned across the gutter, so a
+      // collapsible module reads as "[−] name". The slot is reserved for every axis so all
+      // names stay left-aligned; leaf axes (no glyph) just leave it blank.
+      const glyphSlot = MODULE_ACTION_SIZE + 3;
+      const glyphX = 4 + labelIndent;
+      const labelX = glyphX + glyphSlot;
+      // Hover only makes the label BOLD (same color); selection turns it red.
+      if (flags.showAxisLabels) primitives.push({ kind: 'axisLabel', moduleId: axis.moduleId, x: labelX, y, text: axis.label, color: axisSelected ? emphasisColor : theme.foreground, bold: axisHovered });
+      // Phase U11 -- selected axis: two thin red lines just above/below the axis line.
       if (axisSelected) emphasis.push({ kind: 'axisSelectionMark', x1: GUTTER_LEFT_WIDTH, x2: viewport.canvasWidth, y, lineHeight: axis.lineHeight, color: emphasisColor });
       if (bookmarkedModuleIds?.has(axis.moduleId)) primitives.push({ kind: 'bookmarkMark', x: GUTTER_LEFT_WIDTH - 6, y, color: bookmarkMarkColor(theme) });
-      // Phase U8 -- per-axis expand/collapse glyphs (Java `layoutAxis()`'s ModuleActions),
-      // right-aligned in the left gutter. The "close" (remove-from-canvas) glyph is
-      // intentionally omitted: filtering / Select Modules already removes axes, and the
-      // per-axis X only cluttered the narrow strip. Leaf axes have neither expand nor
-      // collapse, so they show no glyph at all -- just their label.
+      // Expand/collapse glyph in the reserved slot before the name (the "close"/remove-X is
+      // intentionally omitted -- filtering / Select Modules removes axes). A module offers
+      // at most one of the two in practice; prefer collapse if somehow both.
       if (params.axisGlyphs) {
         const info = params.axisGlyphs.get(axis.moduleId);
         const gy = y - Math.round(MODULE_ACTION_SIZE / 2);
-        let gx = GUTTER_LEFT_WIDTH - 4 - MODULE_ACTION_SIZE;
-        if (info?.collapse) {
-          primitives.push({ kind: 'moduleAction', action: 'collapse', moduleId: axis.moduleId, scope: 'axis', x: gx, y: gy, size: MODULE_ACTION_SIZE, color: theme.descriptionForeground });
-          gx -= MODULE_ACTION_SIZE + 2;
-        }
-        if (info?.expand) {
-          primitives.push({ kind: 'moduleAction', action: 'expand', moduleId: axis.moduleId, scope: 'axis', x: gx, y: gy, size: MODULE_ACTION_SIZE, color: theme.descriptionForeground });
-        }
+        if (info?.collapse) primitives.push({ kind: 'moduleAction', action: 'collapse', moduleId: axis.moduleId, scope: 'axis', x: glyphX, y: gy, size: MODULE_ACTION_SIZE, color: theme.descriptionForeground });
+        else if (info?.expand) primitives.push({ kind: 'moduleAction', action: 'expand', moduleId: axis.moduleId, scope: 'axis', x: glyphX, y: gy, size: MODULE_ACTION_SIZE, color: theme.descriptionForeground });
       }
     }
   }
@@ -392,19 +388,9 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       if (y1 < GUTTER_TOP_HEIGHT || y0 > viewport.canvasHeight) continue;
       const x = 2 + level * HEADER_LEVEL_WIDTH;
       primitives.push({ kind: 'axisHeaderBox', x, y0, y1, label: header.label, color: theme.isDark ? '#2f5060' : '#d7f2f2', textColor: theme.isDark ? '#e0f0f0' : '#000000' });
-      // Phase U8 -- per-header expand/collapse glyphs (Java `layoutAxisHeader()`'s
-      // ModuleActions), stacked at the top of the header band. The "close" glyph is
-      // omitted here too (see the per-axis note above).
-      const headerInfo = params.headerGlyphs?.get(header.fullPath);
-      if (headerInfo) {
-        let gy = Math.max(y0, GUTTER_TOP_HEIGHT) + 2;
-        const pushGlyph = (action: 'expand' | 'collapse'): void => {
-          primitives.push({ kind: 'moduleAction', action, moduleId: headerInfo.moduleId, scope: 'header', x: x - 1, y: gy, size: MODULE_ACTION_SIZE, color: theme.descriptionForeground });
-          gy += MODULE_ACTION_SIZE + 2;
-        };
-        if (headerInfo.expand) pushGlyph('expand');
-        if (headerInfo.collapse) pushGlyph('collapse');
-      }
+      // (No per-header glyphs: when a compound is expanded it is ALSO drawn as an axis
+      // row, whose expand/collapse glyph -- now placed right before its name above --
+      // already controls it, so a second glyph in the band would just duplicate it.)
     }
   }
 
@@ -488,28 +474,39 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
   }
 
   // ---- method calls ----
+  // Java `drawOrFitComponentMethodCall()`: a call spans [xBegin, xEnd] (begin entry ->
+  // matching end entry) between the source and target axes -- drawn as a faint filled bar
+  // (its "length"/duration within the event pill), a solid CALL line at xBegin, a dashed
+  // RETURN line at xEnd, and arrowheads. This replaces the previous single zero-width line.
   for (const call of flags.showComponentMethodCalls ? methodCalls : []) {
     if (!flags.showInitializationEvent && call.eventNumber === 0) continue;
     const sourceAxis = axisByModuleId.get(call.sourceModuleId);
     const targetAxis = axisByModuleId.get(call.targetModuleId);
     if (!sourceAxis || !targetAxis) continue;
-    const x = contentX(call.tc, viewport);
+    const xBegin = contentX(call.tc, viewport);
+    const xEnd = call.tcEnd !== undefined && call.tcEnd !== call.tc ? contentX(call.tcEnd, viewport) : xBegin;
     let y1 = axisRowY(sourceAxis.y, viewport);
     let y2 = axisRowY(targetAxis.y, viewport);
     [y1, y2] = adjustEndpointsForEventRadius(y1, y2, EVENT_RADIUS, flags.showEventMarks);
     const color = arrowColors.method;
-    // method calls are drawn between two axes at the same tc -- a vertical arrow, still deduped like any other near-vertical segment
-    if (!vlineBuffer.addAndCheck(x, y1, y2)) continue;
     const callRef: ArrowRef = { kind: 'methodCall', eventNumber: call.eventNumber, sourceModuleId: call.sourceModuleId, targetModuleId: call.targetModuleId, tc: call.tc };
-    primitives.push({ kind: 'arrow', arrowKind: 'method', x1: x, y1, x2: x, y2, color, ref: callRef });
-    if (flags.showArrowHeads && y1 !== y2) {
-      primitives.push({ kind: 'arrowHead', x, y: y2, angle: Math.atan2(y2 - y1, 0), color, length: ARROWHEAD_LENGTH, width: ARROWHEAD_WIDTH });
-      primitives.push({ kind: 'arrowHead', x, y: y1, angle: Math.atan2(y1 - y2, 0), color, length: ARROWHEAD_LENGTH, width: ARROWHEAD_WIDTH });
+    const hasWidth = xEnd > xBegin + 0.5;
+    // faint bar over the call's duration (Java's alpha-24 fillRectangle)
+    if (hasWidth && y1 !== y2) primitives.push({ kind: 'parallelogram', points: [[xBegin, y1], [xEnd, y1], [xEnd, y2], [xBegin, y2]], color });
+    // solid call line at xBegin (deduped against other near-vertical geometry)
+    if (vlineBuffer.addAndCheck(xBegin, y1, y2)) {
+      primitives.push({ kind: 'arrow', arrowKind: 'method', x1: xBegin, y1, x2: xBegin, y2, color, ref: callRef });
+      if (flags.showArrowHeads && y1 !== y2) primitives.push({ kind: 'arrowHead', x: xBegin, y: y2, angle: Math.atan2(y2 - y1, 0), color, length: ARROWHEAD_LENGTH, width: ARROWHEAD_WIDTH });
     }
-    // method-name label rotated -90 (Java: drawn along the call's left/begin edge, SequenceChart.java:3770-3781)
+    // dashed return line at xEnd
+    if (hasWidth && vlineBuffer.addAndCheck(xEnd, y1, y2)) {
+      primitives.push({ kind: 'arrow', arrowKind: 'method', x1: xEnd, y1, x2: xEnd, y2, color, dash: [2, 2], ref: callRef });
+      if (flags.showArrowHeads && y1 !== y2) primitives.push({ kind: 'arrowHead', x: xEnd, y: y1, angle: Math.atan2(y1 - y2, 0), color, length: ARROWHEAD_LENGTH, width: ARROWHEAD_WIDTH });
+    }
+    // method-name label rotated -90 along the call's begin edge
     if (flags.showMethodNames && showLabels) {
       const name = call.methodName.includes('(') ? call.methodName.slice(0, call.methodName.indexOf('(')) : call.methodName;
-      primitives.push({ kind: 'label', x, y: (y1 + y2) / 2, text: name, color, align: 'center', rotateDeg: -90 });
+      primitives.push({ kind: 'label', x: xBegin, y: (y1 + y2) / 2, text: name, color, align: 'center', rotateDeg: -90 });
     }
   }
 

@@ -501,9 +501,25 @@ export class EngineSession {
     const methodCalls: RenderMethodCall[] = [];
     if ((params.includeMethodCalls ?? true) && startEvent !== null && endEvent !== null) {
       for (const entry of facade.getComponentMethodBeginEntries(startEvent, endEvent)) {
+        const event = entry.getEvent();
+        const tc = facade.EventLogEntry_getTimelineCoordinate(entry);
+        // The call spans [begin entry, matching end entry] -- Java draws a faint bar over
+        // that width (`getComponentMethodEndEntry` + `EventLogEntry_getTimelineCoordinate`).
+        // `getComponentMethodEndEntry` lives on the concrete Event (not IEvent), so access
+        // it defensively; fall back to a zero-width call if unavailable.
+        const endEntry = (event as unknown as { getComponentMethodEndEntry?(b: typeof entry): EventLogEntry | null } | null)?.getComponentMethodEndEntry?.(entry) ?? null;
+        let tcEnd = tc;
+        if (endEntry !== null) {
+          try {
+            tcEnd = facade.EventLogEntry_getTimelineCoordinate(endEntry);
+          } catch {
+            tcEnd = tc;
+          }
+        }
         methodCalls.push({
-          eventNumber: entry.getEvent()!.getEventNumber(),
-          tc: facade.EventLogEntry_getTimelineCoordinate(entry),
+          eventNumber: event!.getEventNumber(),
+          tc,
+          tcEnd,
           sourceModuleId: entry.sourceComponentId,
           targetModuleId: entry.targetComponentId,
           methodName: entry.methodName,

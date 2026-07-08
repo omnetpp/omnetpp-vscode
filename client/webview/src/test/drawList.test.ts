@@ -438,6 +438,36 @@ test('U8 axisGlyphs: expand/collapse per the passed visibility info (no "close" 
   assert.ok(glyphs.every((g) => g.x >= 0 && g.x + g.size <= GUTTER_LEFT_WIDTH));
 });
 
+test('U8 axisGlyphs: the glyph sits immediately BEFORE (to the left of) the module name', () => {
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([1]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, displayFlags: DEFAULT_DISPLAY_FLAGS, axisGlyphs: new Map([[1, { expand: false, collapse: true }]]) });
+  const glyph = primitives.find((p): p is Extract<typeof p, { kind: 'moduleAction' }> => p.kind === 'moduleAction')!;
+  const label = primitives.find((p): p is Extract<typeof p, { kind: 'axisLabel' }> => p.kind === 'axisLabel')!;
+  assert.ok(glyph.x + glyph.size <= label.x, `glyph (ends at ${glyph.x + glyph.size}) should be left of the label (x=${label.x})`);
+});
+
+test('method calls with a nonzero duration draw a bar (parallelogram) + a solid call line and a dashed return line', () => {
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const calls: RenderMethodCall[] = [{ eventNumber: 5, tc: 10, tcEnd: 20, sourceModuleId: 1, targetModuleId: 2, methodName: 'initialize()' }];
+  const primitives = buildDrawList({ timelineMode: TimelineMode.STEP, viewport, events: [], dependencies: [], methodCalls: calls, axesLayout, ticks: [], theme, displayFlags: BASE_TEST_FLAGS });
+  assert.strictEqual(primitives.filter((p) => p.kind === 'parallelogram').length, 1, 'a faint duration bar');
+  const methodArrows = primitives.filter((p): p is Extract<typeof p, { kind: 'arrow' }> => p.kind === 'arrow' && p.arrowKind === 'method');
+  assert.strictEqual(methodArrows.length, 2, 'a call line and a return line');
+  assert.ok(methodArrows.some((a) => !a.dash) && methodArrows.some((a) => a.dash), 'one solid (call), one dashed (return)');
+  assert.ok(methodArrows[0].x1 !== methodArrows[1].x1, 'call and return lines are at different x (the calls span a width)');
+});
+
+test('a zero-duration method call (tcEnd == tc) is still a single line, no bar', () => {
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([1, 2]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const calls: RenderMethodCall[] = [{ eventNumber: 5, tc: 10, sourceModuleId: 1, targetModuleId: 2, methodName: 'foo()' }];
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: [], methodCalls: calls, axesLayout, ticks: [], theme, displayFlags: BASE_TEST_FLAGS });
+  assert.strictEqual(primitives.filter((p) => p.kind === 'parallelogram').length, 0);
+  assert.strictEqual(primitives.filter((p) => p.kind === 'arrow' && p.arrowKind === 'method').length, 1);
+});
+
 test('U8 axisGlyphs omitted: no moduleAction primitives at all (module tree not loaded)', () => {
   const primitives = draw();
   assert.equal(primitives.filter((p) => p.kind === 'moduleAction').length, 0);
