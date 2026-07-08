@@ -459,6 +459,17 @@ test('method calls with a nonzero duration draw a bar (parallelogram) + a solid 
   assert.ok(methodArrows[0].x1 !== methodArrows[1].x1, 'call and return lines are at different x (the calls span a width)');
 });
 
+test('method calls are hoverable/selectable: a selected call is emphasized red, a hovered one thicker', () => {
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const calls: RenderMethodCall[] = [{ eventNumber: 5, tc: 10, tcEnd: 20, sourceModuleId: 1, targetModuleId: 2, methodName: 'initialize()' }];
+  const key = '5:1:2:10'; // methodCallKey(eventNumber:source:target:tc)
+  const selected = buildDrawList({ timelineMode: TimelineMode.STEP, viewport, events: [], dependencies: [], methodCalls: calls, axesLayout, ticks: [], theme, displayFlags: BASE_TEST_FLAGS, selectedMethodCallKeys: new Set([key]) });
+  assert.ok(selected.some((p) => p.kind === 'arrow' && p.arrowKind === 'method' && p.color === SELECTION_MARK_COLOR), 'selected call redrawn red');
+  const hovered = buildDrawList({ timelineMode: TimelineMode.STEP, viewport, events: [], dependencies: [], methodCalls: calls, axesLayout, ticks: [], theme, displayFlags: BASE_TEST_FLAGS, hovered: { methodCallKeys: new Set([key]) } });
+  assert.ok(hovered.some((p) => p.kind === 'arrow' && p.arrowKind === 'method' && (p.width ?? 1) > 1 && p.color !== SELECTION_MARK_COLOR), 'hovered call redrawn thicker in its own color');
+});
+
 test('a zero-duration method call (tcEnd == tc) is still a single line, no bar', () => {
   const viewport = baseViewport();
   const axesLayout = deriveAxes(new Set([1, 2]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);

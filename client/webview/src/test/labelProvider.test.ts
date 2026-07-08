@@ -193,14 +193,14 @@ test('buildAxisTooltip: module type + full path + id', () => {
 // buildTimestampTooltip / formatEventLabel / findNeighborEvents
 // ---------------------------------------------------------------------------------
 
-test('buildTimestampTooltip: with both neighbors', () => {
-  const html = buildTimestampTooltip(1.5, 4, 5);
-  assert.ok(html.includes('just after event #4'));
-  assert.ok(html.includes('just before event #5'));
+test('buildTimestampTooltip: just the formatted time, no "just after/before event" noise', () => {
+  const html = buildTimestampTooltip(1.5);
+  assert.ok(html.includes('t = <b>1s 500ms</b>'));
+  assert.ok(!html.includes('just after') && !html.includes('just before'));
 });
 
 test('buildTimestampTooltip: unknown simTime renders "?"', () => {
-  assert.ok(buildTimestampTooltip(null, null, null).includes('t = <b>?</b>'));
+  assert.ok(buildTimestampTooltip(null).includes('t = <b>?</b>'));
 });
 
 test('formatEventLabel: "#<n>"', () => {

@@ -87,7 +87,7 @@ import {
 } from './filterPanelState';
 import { hitTest, pickDoubleClickTarget, pickPrimary, pickPrimaryGroup, type HitObject } from './hitTest';
 import { attachInteractions } from './interactions';
-import { buildAxisTooltip, buildDependencyLabel, buildDependencyTooltip, buildEventTooltip, buildMethodCallTooltip, buildTimestampTooltip, findNeighborEvents, type LabelProviderContext } from './labelProvider';
+import { buildAxisTooltip, buildDependencyLabel, buildDependencyTooltip, buildEventTooltip, buildMethodCallTooltip, buildTimestampTooltip, type LabelProviderContext } from './labelProvider';
 import { applyClick, clearSelection, dependencyKey, EMPTY_CHART_SELECTION, focusEvent, methodCallKey, type ChartSelectionState } from './selection';
 import { attachTooltip } from './tooltip';
 import { RenderModelCache, type EngineViewportSource } from './renderModelCache';
@@ -228,7 +228,7 @@ let lastPrimitives: DrawPrimitive[] = [];
 /** Phase U4 selection state (events/dependencies/methodCalls/axes/timelineCoords + focus) -- see `selection.ts`. */
 let selection: ChartSelectionState = EMPTY_CHART_SELECTION;
 /** Phase U11 -- the object(s) currently under the cursor, highlighted "bold red" on hover (Java `highlightedObjects`). `hoverSignature` guards re-renders so a hover that doesn't change the target is a no-op. */
-let hovered: { events: Set<number>; dependencyKeys: Set<string>; axisModuleIds: Set<number> } = { events: new Set(), dependencyKeys: new Set(), axisModuleIds: new Set() };
+let hovered: { events: Set<number>; dependencyKeys: Set<string>; axisModuleIds: Set<number>; methodCallKeys: Set<string> } = { events: new Set(), dependencyKeys: new Set(), axisModuleIds: new Set(), methodCallKeys: new Set() };
 let hoverSignature = '';
 /** Phase U11 -- the content-area canvas x of the cursor, for the live "tick under the mouse" hairline (`drawTickUnderMouse()`); `null` when the pointer is off the content area. */
 let mouseContentX: number | null = null;
@@ -669,6 +669,7 @@ function renderFrame(): void {
     selectedEventNumbers: selection.events,
     selectedDependencyKeys: selection.dependencies,
     selectedAxisModuleIds: selection.axes,
+    selectedMethodCallKeys: selection.methodCalls,
     selectedTimelineCoords: [...selection.timelineCoords].map((tc) => ({ tc, simulationTime: String(simTimeAt(tc) ?? 0) })),
     hovered,
     mouseTick: mouseContentX !== null ? { x: mouseContentX, label: formatTickTime(simTimeAt(fullCanvasPxToTc(mouseContentX, viewport) ?? viewport.leftTc) ?? 0) } : undefined,
@@ -1383,19 +1384,21 @@ function updateHover(px: number, py: number): void {
   const events = new Set<number>();
   const dependencyKeys = new Set<string>();
   const axisModuleIds = new Set<number>();
+  const methodCallKeys = new Set<string>();
   for (const hit of group) {
     if (hit.kind === 'event') events.add(hit.eventNumber);
     else if (hit.kind === 'dependency') dependencyKeys.add(dependencyKey(hit));
+    else if (hit.kind === 'methodCall') methodCallKeys.add(methodCallKey(hit));
     else if (hit.kind === 'axis') axisModuleIds.add(hit.moduleId);
   }
   // Live mouse-time hairline follows the cursor, so a plain move (no target change) must
   // still repaint. Track the content-area x here and repaint if EITHER it or the hover
   // target changed. rAF-coalesced by scheduleRender(), same cost profile as a drag.
   const newMouseX = px >= GUTTER_LEFT_WIDTH && px <= viewport.canvasWidth ? px : null;
-  const sig = `e:${[...events].sort((a, b) => a - b).join(',')}|d:${[...dependencyKeys].sort().join(',')}|a:${[...axisModuleIds].sort((a, b) => a - b).join(',')}`;
+  const sig = `e:${[...events].sort((a, b) => a - b).join(',')}|d:${[...dependencyKeys].sort().join(',')}|m:${[...methodCallKeys].sort().join(',')}|a:${[...axisModuleIds].sort((a, b) => a - b).join(',')}`;
   if (sig === hoverSignature && newMouseX === mouseContentX) return;
   hoverSignature = sig;
-  hovered = { events, dependencyKeys, axisModuleIds };
+  hovered = { events, dependencyKeys, axisModuleIds, methodCallKeys };
   mouseContentX = newMouseX;
   scheduleRender();
 }
@@ -1403,7 +1406,7 @@ function updateHover(px: number, py: number): void {
 function clearHover(): void {
   if (hoverSignature === '' && mouseContentX === null) return;
   hoverSignature = '';
-  hovered = { events: new Set(), dependencyKeys: new Set(), axisModuleIds: new Set() };
+  hovered = { events: new Set(), dependencyKeys: new Set(), axisModuleIds: new Set(), methodCallKeys: new Set() };
   mouseContentX = null;
   scheduleRender();
 }
@@ -1460,8 +1463,7 @@ async function resolveHitForTooltip(px: number, py: number): Promise<string | nu
     } else if (h.kind === 'axis') {
       parts.push(buildAxisTooltip(h.moduleId, labelProviderCtx));
     } else if (h.kind === 'timestamp' && parts.length > 0) {
-      const neighbors = findNeighborEvents(h.tc, lastModel?.events ?? []);
-      parts.push(buildTimestampTooltip(simTimeAt(h.tc), neighbors.before, neighbors.after));
+      parts.push(buildTimestampTooltip(simTimeAt(h.tc)));
     }
     // moduleAction glyphs have no tooltip in Java either.
   }

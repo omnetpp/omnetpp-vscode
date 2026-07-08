@@ -251,12 +251,14 @@ export interface BuildDrawListParams {
   selectedDependencyKeys?: ReadonlySet<string>;
   /** Phase U11 — selected axis module ids; each gets an `'axisSelectionMark'` (Java `drawAxisSelectionMarks()`). */
   selectedAxisModuleIds?: ReadonlySet<number>;
+  /** Selected component-method-call keys (`selection.ts`'s `methodCallKey()`); each selected call is redrawn red, hovered ones thicker. */
+  selectedMethodCallKeys?: ReadonlySet<string>;
   /** Phase U11 — selected timeline coordinates (background clicks): each draws a vertical `'timelineMark'` line AND participates in the time-difference measurement. The caller resolves each tc's simulation time (this pure module has no simtime<->tc table). */
   selectedTimelineCoords?: ReadonlyArray<{ tc: number; simulationTime: string }>;
   /** Phase U11 — the live tick under the mouse (`drawTickUnderMouse()`): a vertical hairline + a top-gutter time box following the cursor. `x` is the content-area canvas x; `label` the formatted simulation time. Omitted when the pointer is off the content area. */
   mouseTick?: { x: number; label: string };
   /** Phase U11 — the object(s) under the cursor (hover), redrawn "bold" in the highlight color (Java `drawHightlightedObjects()`, `highlightedObjects` populated on mouseMove). Usually holds the single hit group at the pointer. */
-  hovered?: { events?: ReadonlySet<number>; dependencyKeys?: ReadonlySet<string>; axisModuleIds?: ReadonlySet<number> };
+  hovered?: { events?: ReadonlySet<number>; dependencyKeys?: ReadonlySet<string>; axisModuleIds?: ReadonlySet<number>; methodCallKeys?: ReadonlySet<string> };
   /** Phase U6 — event numbers with an `'Event'`-kind bookmark; each gets a `'bookmarkMark'` flag near its event mark. */
   bookmarkedEventNumbers?: ReadonlySet<number>;
   /** Phase U6 — module ids with an `'Axis'`-kind bookmark (already resolved from the bookmark's stored `modulePath` -- see `chartMain.ts`'s `recomputeBookmarkIndexes()`); each gets a `'bookmarkMark'` at the start of its axis line. */
@@ -286,7 +288,7 @@ export interface BuildDrawListParams {
 }
 
 export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
-  const { viewport, events, dependencies, methodCalls, axesLayout, ticks, theme, selectedEventNumbers, selectedDependencyKeys, selectedAxisModuleIds, selectedTimelineCoords, hovered, bookmarkedEventNumbers, bookmarkedModuleIds, bookmarkedDependencyKeys, axisHeaderRoot, infoPanelText, skipLabelsForPerf } = params;
+  const { viewport, events, dependencies, methodCalls, axesLayout, ticks, theme, selectedEventNumbers, selectedDependencyKeys, selectedAxisModuleIds, selectedMethodCallKeys, selectedTimelineCoords, hovered, bookmarkedEventNumbers, bookmarkedModuleIds, bookmarkedDependencyKeys, axisHeaderRoot, infoPanelText, skipLabelsForPerf } = params;
   const flags = params.displayFlags ?? DEFAULT_DISPLAY_FLAGS;
   const primitives: DrawPrimitive[] = [];
   // Phase U11 — selection/hover emphasis (thicker arrows, axis brackets, bold-red hovered
@@ -370,7 +372,9 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       // at most one of the two in practice; prefer collapse if somehow both.
       if (params.axisGlyphs) {
         const info = params.axisGlyphs.get(axis.moduleId);
-        const gy = y - Math.round(MODULE_ACTION_SIZE / 2);
+        // Sit the glyph ABOVE the axis line, aligned with the name text (its bottom at the
+        // label's baseline, y-2) rather than centered on the line.
+        const gy = y - MODULE_ACTION_SIZE - 2;
         if (info?.collapse) primitives.push({ kind: 'moduleAction', action: 'collapse', moduleId: axis.moduleId, scope: 'axis', x: glyphX, y: gy, size: MODULE_ACTION_SIZE, color: theme.descriptionForeground });
         else if (info?.expand) primitives.push({ kind: 'moduleAction', action: 'expand', moduleId: axis.moduleId, scope: 'axis', x: glyphX, y: gy, size: MODULE_ACTION_SIZE, color: theme.descriptionForeground });
       }
@@ -507,6 +511,17 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
     if (flags.showMethodNames && showLabels) {
       const name = call.methodName.includes('(') ? call.methodName.slice(0, call.methodName.indexOf('(')) : call.methodName;
       primitives.push({ kind: 'label', x: xBegin, y: (y1 + y2) / 2, text: name, color, align: 'center', rotateDeg: -90 });
+    }
+    // selection/hover emphasis: redraw the call/return lines thicker (hover) / red (selected)
+    // on top -- makes method calls hoverable+selectable like message arrows.
+    const mcKey = `${call.eventNumber}:${call.sourceModuleId}:${call.targetModuleId}:${call.tc}`;
+    const mcSelected = selectedMethodCallKeys?.has(mcKey) ?? false;
+    const mcHovered = hovered?.methodCallKeys?.has(mcKey) ?? false;
+    if (mcSelected || mcHovered) {
+      const ecolor = mcSelected ? emphasisColor : color;
+      const ewidth = mcHovered ? 3 : 1.5;
+      emphasis.push({ kind: 'arrow', arrowKind: 'method', x1: xBegin, y1, x2: xBegin, y2, color: ecolor, width: ewidth, ref: callRef });
+      if (hasWidth) emphasis.push({ kind: 'arrow', arrowKind: 'method', x1: xEnd, y1, x2: xEnd, y2, color: ecolor, width: ewidth, dash: [2, 2], ref: callRef });
     }
   }
 

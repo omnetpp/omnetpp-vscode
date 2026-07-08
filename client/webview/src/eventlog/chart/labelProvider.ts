@@ -162,11 +162,10 @@ export function buildMethodCallTooltip(call: RenderMethodCall, ctx: LabelProvide
 // timeline coordinate ("Double" -- click on empty timeline)
 // ---------------------------------------------------------------------------------
 
-export function buildTimestampTooltip(simTime: number | null, beforeEventNumber: number | null, afterEventNumber: number | null): string {
-  let result = `<b>At</b> t = <b>${simTime !== null ? formatTickTime(simTime) : '?'}</b>`;
-  if (beforeEventNumber !== null) result += `, just after event #${beforeEventNumber}`;
-  if (afterEventNumber !== null) result += `, just before event #${afterEventNumber}`;
-  return result;
+export function buildTimestampTooltip(simTime: number | null): string {
+  // Just the time -- the "just after event #N / just before event #N" hints were dropped
+  // as noise (the neighbouring event numbers are already visible on the chart).
+  return `<b>At</b> t = <b>${simTime !== null ? formatTickTime(simTime) : '?'}</b>`;
 }
 
 /** Port of `getEventLabel()` -- `"#<n>"`. */
@@ -215,6 +214,6 @@ export function buildTooltipHtml(hit: ResolvedHit, ctx: LabelProviderContext): s
     case 'axis':
       return buildAxisTooltip(hit.moduleId, ctx);
     case 'timestamp':
-      return buildTimestampTooltip(hit.simTime, hit.beforeEventNumber, hit.afterEventNumber);
+      return buildTimestampTooltip(hit.simTime);
   }
 }
