@@ -18,19 +18,20 @@
  * covered by `hitTest.test.ts`/`labelProvider.test.ts`.
  */
 
-import { buildTooltipHtml, type LabelProviderContext, type ResolvedHit } from './labelProvider';
+import type { LabelProviderContext } from './labelProvider';
 
 export interface TooltipDeps {
   /** The element hover/mousemove/leave/wheel are observed on (the chart's canvas container). */
   hostElement: HTMLElement;
   /**
    * Resolves whatever is at content-area point `(px, py)` (same space as
-   * `hitTest.ts`'s primitives) into label data, or `null` if nothing is there.
-   * Async because the event case may need an on-demand `elog/getEventDetail` round
-   * trip for the message-line dump (`chartMain.ts` supplies this, backed by the
-   * currently-loaded viewport model + a direct RPC call).
+   * `hitTest.ts`'s primitives) into the tooltip's HTML markup, or `null` if there is
+   * nothing to show. Returns the fully-built HTML (concatenated descriptive text for
+   * ALL objects under the cursor, like Java's `getDescriptiveText()`), not just one
+   * hit. Async because the single-event case fetches its message lines via an on-demand
+   * `elog/getEventDetail` round trip.
    */
-  resolveHit(px: number, py: number): Promise<ResolvedHit | null>;
+  resolveHit(px: number, py: number): Promise<string | null>;
   ctx: LabelProviderContext;
   hoverDelayMs?: number;
 }
@@ -42,7 +43,7 @@ export interface TooltipHandle {
 const DEFAULT_HOVER_DELAY_MS = 500;
 
 export function attachTooltip(deps: TooltipDeps): TooltipHandle {
-  const { hostElement, resolveHit, ctx } = deps;
+  const { hostElement, resolveHit } = deps;
   const delay = deps.hoverDelayMs ?? DEFAULT_HOVER_DELAY_MS;
 
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -84,9 +85,9 @@ export function attachTooltip(deps: TooltipDeps): TooltipHandle {
     const clientY = e.clientY;
     const myGeneration = generation;
     timer = setTimeout(() => {
-      void resolveHit(px, py).then((resolved) => {
-        if (myGeneration !== generation || !resolved) return;
-        showAt(clientX, clientY, buildTooltipHtml(resolved, ctx));
+      void resolveHit(px, py).then((html) => {
+        if (myGeneration !== generation || !html) return;
+        showAt(clientX, clientY, html);
       });
     }, delay);
   };

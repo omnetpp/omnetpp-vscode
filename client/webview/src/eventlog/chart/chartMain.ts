@@ -86,7 +86,7 @@ import {
 } from './filterPanelState';
 import { hitTest, pickDoubleClickTarget, pickPrimary, pickPrimaryGroup, type HitObject } from './hitTest';
 import { attachInteractions } from './interactions';
-import { buildDependencyLabel, buildTooltipHtml, findNeighborEvents, type LabelProviderContext, type ResolvedHit } from './labelProvider';
+import { buildAxisTooltip, buildDependencyLabel, buildDependencyTooltip, buildEventTooltip, buildMethodCallTooltip, buildTimestampTooltip, findNeighborEvents, type LabelProviderContext } from './labelProvider';
 import { applyClick, clearSelection, dependencyKey, EMPTY_CHART_SELECTION, focusEvent, methodCallKey, type ChartSelectionState } from './selection';
 import { attachTooltip } from './tooltip';
 import { RenderModelCache, type EngineViewportSource } from './renderModelCache';
@@ -1406,42 +1406,64 @@ function clearHover(): void {
   scheduleRender();
 }
 
-async function resolveHitForTooltip(px: number, py: number): Promise<ResolvedHit | null> {
+/**
+ * Builds the hover tooltip's HTML the way Java's `SequenceChartLabelProvider.
+ * getDescriptiveText()` does: concatenate the descriptive text of EVERY object under the
+ * cursor (event + its message lines + any dependency/method-call/axis), in hit-priority
+ * order, deduplicated. The "At t = ..." timestamp line is appended ONLY as a suffix when
+ * there is already other content (Java's `result.length() != 0` guard) -- on empty
+ * background the mouse-time hairline shows the time instead. The event's message-line dump
+ * is fetched (one `getEventDetail` round trip) only when a SINGLE event is under the
+ * cursor, matching Java.
+ */
+async function resolveHitForTooltip(px: number, py: number): Promise<string | null> {
   const hits = hitTest({ primitives: lastPrimitives, px, py, pointerTc: fullCanvasPxToTc(px, viewport) });
-  const primary = pickPrimary(hits);
-  if (!primary) return null;
+  if (hits.length === 0) return null;
 
-  switch (primary.kind) {
-    case 'moduleAction':
-      // phase U8 -- glyphs have no tooltip in Java either (plain image buttons)
-      return null;
-    case 'event': {
-      const event = findEvent(primary.eventNumber);
-      if (!event) return null;
-      const causeDependency = findCauseDependencyFor(primary.eventNumber);
-      let detail: EventDetail | null = null;
-      try {
-        detail = await rpc.request<EventDetail | null>(ElogMethods.getEventDetail, { eventNumber: primary.eventNumber });
-      } catch {
-        detail = null;
-      }
-      return { kind: 'event', event, causeDependency, detail };
-    }
-    case 'dependency': {
-      const dependency = findDependency(primary);
-      return dependency ? { kind: 'dependency', dependency } : null;
-    }
-    case 'methodCall': {
-      const call = findMethodCall(primary);
-      return call ? { kind: 'methodCall', call } : null;
-    }
-    case 'axis':
-      return { kind: 'axis', moduleId: primary.moduleId };
-    case 'timestamp': {
-      const neighbors = findNeighborEvents(primary.tc, lastModel?.events ?? []);
-      return { kind: 'timestamp', simTime: simTimeAt(primary.tc), beforeEventNumber: neighbors.before, afterEventNumber: neighbors.after };
+  // Deduplicate while preserving hit priority (event > dependency > methodCall > axis > timestamp).
+  const seen = new Set<string>();
+  const ordered: HitObject[] = [];
+  for (const kind of ['event', 'dependency', 'methodCall', 'axis', 'timestamp'] as const) {
+    for (const h of hits) {
+      if (h.kind !== kind) continue;
+      const key = h.kind === 'event' ? `e${h.eventNumber}` : h.kind === 'dependency' ? `d${dependencyKey(h)}` : h.kind === 'methodCall' ? `m${methodCallKey(h)}` : h.kind === 'axis' ? `a${h.moduleId}` : h.kind === 'timestamp' ? `t${h.tc}` : '';
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      ordered.push(h);
     }
   }
+
+  const eventCount = ordered.filter((h) => h.kind === 'event').length;
+  const parts: string[] = [];
+  for (const h of ordered) {
+    if (h.kind === 'event') {
+      const event = findEvent(h.eventNumber);
+      if (!event) continue;
+      const causeDependency = findCauseDependencyFor(h.eventNumber);
+      let detail: EventDetail | null = null;
+      if (eventCount === 1) {
+        try {
+          detail = await rpc.request<EventDetail | null>(ElogMethods.getEventDetail, { eventNumber: h.eventNumber });
+        } catch {
+          detail = null;
+        }
+      }
+      parts.push(buildEventTooltip(event, labelProviderCtx, { causeDependency, detail }));
+    } else if (h.kind === 'dependency') {
+      const dependency = findDependency(h);
+      if (dependency) parts.push(buildDependencyTooltip(dependency));
+    } else if (h.kind === 'methodCall') {
+      const call = findMethodCall(h);
+      if (call) parts.push(buildMethodCallTooltip(call, labelProviderCtx));
+    } else if (h.kind === 'axis') {
+      parts.push(buildAxisTooltip(h.moduleId, labelProviderCtx));
+    } else if (h.kind === 'timestamp' && parts.length > 0) {
+      const neighbors = findNeighborEvents(h.tc, lastModel?.events ?? []);
+      parts.push(buildTimestampTooltip(simTimeAt(h.tc), neighbors.before, neighbors.after));
+    }
+    // moduleAction glyphs have no tooltip in Java either.
+  }
+  return parts.length > 0 ? parts.join('<br/>') : null;
 }
 
 function handleClick(hits: HitObject[], ctrl: boolean): void {
