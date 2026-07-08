@@ -122,7 +122,9 @@ export function buildEventLogWebviewHtml(webview: vscode.Webview, extensionUri: 
     background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
     color: var(--vscode-menu-foreground, var(--vscode-foreground));
     border: 1px solid var(--vscode-menu-border, var(--vscode-editorWidget-border, transparent));
-    border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.35); font-size: 13px; user-select: none; }
+    border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.35); font-size: 13px; user-select: none;
+    /* long menus (e.g. the 25-item Show/Hide list) scroll vertically instead of overflowing the window */
+    max-height: calc(100vh - 16px); overflow-y: auto; overflow-x: hidden; }
   .elog-menu-item { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 3px; cursor: pointer; white-space: nowrap; }
   .elog-menu-item.highlighted, .elog-menu-item:hover:not(.disabled) {
     background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground));
