@@ -180,6 +180,23 @@ function emitPrimitive(b: SvgBuilder, p: DrawPrimitive, fontFamily: string): voi
     case 'axisLine':
       b.el('line', { x1: p.x1, y1: p.y, x2: p.x2, y2: p.y, stroke: p.color, 'stroke-width': p.lineHeight });
       return;
+    case 'axisVectorStrip': {
+      // Multi-color step bar centered on the axis line (see canvasStack.ts).
+      const top = p.y - p.height / 2;
+      const bot = top + p.height;
+      for (const seg of p.segments) {
+        const w = Math.max(1, seg.x2 - seg.x1);
+        b.el('rect', { x: seg.x1, y: top, width: w, height: p.height, fill: seg.color });
+        b.el('line', { x1: seg.x1, y1: top, x2: seg.x1, y2: bot, stroke: p.borderColor, 'stroke-width': 1 });
+      }
+      const first = p.segments[0];
+      const last = p.segments[p.segments.length - 1];
+      if (first && last) {
+        b.el('line', { x1: first.x1, y1: top, x2: last.x2, y2: top, stroke: p.borderColor, 'stroke-width': 1 });
+        b.el('line', { x1: first.x1, y1: bot, x2: last.x2, y2: bot, stroke: p.borderColor, 'stroke-width': 1 });
+      }
+      return;
+    }
     case 'axisSelectionMark':
       b.el('line', { x1: p.x1, y1: p.y - 1, x2: p.x2, y2: p.y - 1, stroke: p.color, 'stroke-width': 1.5 });
       b.el('line', { x1: p.x1, y1: p.y + p.lineHeight, x2: p.x2, y2: p.y + p.lineHeight, stroke: p.color, 'stroke-width': 1.5 });

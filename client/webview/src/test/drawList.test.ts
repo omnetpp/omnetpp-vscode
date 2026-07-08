@@ -452,6 +452,34 @@ test('U8 axisGlyphs: expand/collapse per the passed visibility info (no "close" 
   assert.ok(glyphs.every((g) => g.x >= 0 && g.x + g.size <= GUTTER_LEFT_WIDTH));
 });
 
+test('axis vector strip: shown (in place of the line) only when the flag is on AND a strip exists', () => {
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([1, 2]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const strips = [
+    {
+      moduleId: 1,
+      segments: [
+        { tcBegin: 0, tcEnd: 10, colorIndex: 0, value: 0, valueText: 'EMPTY' },
+        { tcBegin: 10, tcEnd: 30, colorIndex: 1, value: 1, valueText: 'BUSY' },
+      ],
+    },
+  ];
+  const base = { timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [] as TimelineEvent[], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, axisVectorStrips: strips };
+
+  // flag ON: module 1 renders a strip (2 segments) and NO axis line; module 2 still a line.
+  const on = buildDrawList({ ...base, displayFlags: { ...DEFAULT_DISPLAY_FLAGS, showAxisVectorData: true } });
+  const strip = on.find((p): p is Extract<typeof p, { kind: 'axisVectorStrip' }> => p.kind === 'axisVectorStrip');
+  assert.ok(strip && strip.moduleId === 1 && strip.segments.length === 2, 'strip with two segments');
+  assert.ok(strip!.segments[0].color !== strip!.segments[1].color, 'distinct values get distinct colors');
+  assert.ok(!on.some((p) => p.kind === 'axisLine' && p.moduleId === 1), 'strip replaces the axis line for module 1');
+  assert.ok(on.some((p) => p.kind === 'axisLine' && p.moduleId === 2), 'module 2 keeps its line');
+
+  // flag OFF: no strip, module 1 keeps its plain line.
+  const off = buildDrawList({ ...base, displayFlags: { ...DEFAULT_DISPLAY_FLAGS, showAxisVectorData: false } });
+  assert.ok(!off.some((p) => p.kind === 'axisVectorStrip'));
+  assert.ok(off.some((p) => p.kind === 'axisLine' && p.moduleId === 1));
+});
+
 test('U8 axisGlyphs: the glyph sits immediately BEFORE (to the left of) the module name', () => {
   const viewport = baseViewport();
   const axesLayout = deriveAxes(new Set([1]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);

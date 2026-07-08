@@ -35,7 +35,7 @@
  *     `eventDensityLine` primitive spanning the column's observed y-range.
  */
 
-import { TimelineMode, type RenderDependency, type RenderMethodCall, type TimelineEvent } from '@omnetpp/shared/elog-protocol';
+import { TimelineMode, type AxisVectorStrip, type RenderDependency, type RenderMethodCall, type TimelineEvent } from '@omnetpp/shared/elog-protocol';
 import {
   adjustEndpointsForEventRadius,
   ARROWHEAD_LENGTH,
@@ -80,6 +80,8 @@ export type DrawPrimitive =
   | { kind: 'gutter'; part: 'top' | 'left'; x: number; y: number; w: number; h: number; color: string }
   | { kind: 'regionBand'; x: number; y: number; w: number; h: number; color: string }
   | { kind: 'axisLine'; moduleId: number; x1: number; x2: number; y: number; lineHeight: number; color: string }
+  /** Axis vector-data strip (Eclipse `AxisVectorBarRenderer`): a horizontal multi-color step bar centered on the axis line, one colored segment per held value, with top/bottom borders. Replaces the plain axis line for that module while shown. */
+  | { kind: 'axisVectorStrip'; moduleId: number; y: number; height: number; borderColor: string; segments: { x1: number; x2: number; color: string; value: number; valueText: string }[] }
   | { kind: 'axisLabel'; moduleId: number; x: number; y: number; text: string; color: string; bold?: boolean }
   /** Phase U11 — a selected/hovered axis's Eclipse selection mark: two thin colored lines just above and below the axis line, spanning the content width (`drawAxisMark()`, SequenceChart.java:3668-3680). */
   | { kind: 'axisSelectionMark'; x1: number; x2: number; y: number; lineHeight: number; color: string }
@@ -129,6 +131,20 @@ export type DrawPrimitive =
 
 /** Phase U8 — glyph box edge length (Java uses the 16px `expand.png`/`collapse.png`/`close.png` images; a slightly smaller vector glyph fits this port's tighter axis labels). */
 export const MODULE_ACTION_SIZE = 11;
+
+/** Height (px) of an axis vector-data strip, centered on the axis line (Eclipse `AxisVectorBarRenderer.getHeight()` returns 12). */
+export const AXIS_VECTOR_STRIP_HEIGHT = 12;
+
+/**
+ * Eclipse `ColorFactory.getGoodLightColor(i)` — the "reversed Tableau-20 light half" palette
+ * (`ColorFactory.java`), cycled by index. Used to color axis vector-strip segments by value
+ * (equal values → same color). Fixed light colors regardless of theme, matching Java's strip.
+ */
+const GOOD_LIGHT_COLORS = ['#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5', '#c49c94', '#f7b6d2', '#c7c7c7', '#dbdb8d', '#9edae9'];
+export function getGoodLightColor(index: number): string {
+  const n = GOOD_LIGHT_COLORS.length;
+  return GOOD_LIGHT_COLORS[(((index % n) + n) % n) | 0];
+}
 
 /** Colors this module needs beyond `EventLogPalette` (reuse/filtered-dependency dash colors, the "long" arrowhead color) — derived locally from the imported palette rather than editing `common/theme.ts` (out of this phase's file ownership). */
 export function deriveArrowColors(theme: EventLogPalette): Record<ArrowKind, string> {
@@ -247,6 +263,8 @@ export interface BuildDrawListParams {
   axesLayout: AxesLayout;
   ticks: Tick[];
   theme: EventLogPalette;
+  /** Per-axis vector-data strips (from `ViewportModel.axisVectorStrips`); rendered instead of the plain axis line for those modules when `displayFlags.showAxisVectorData` is on. */
+  axisVectorStrips?: AxisVectorStrip[];
   /** Phase U4 — event numbers currently selected; each gets a `'selectionMark'` ring around its event mark, and (if `displayFlags.showTimeDifferences`) participates in the time-differences polyline. */
   selectedEventNumbers?: ReadonlySet<number>;
   /** Phase U11 — selected message-dependency keys (`selection.ts`'s `dependencyKey()` = `kind:cause:consequence`); each selected arrow is redrawn thicker in the selection color (Java `drawMessageDependencySelectionMarks()`). */
@@ -354,13 +372,32 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
   const maxHeaderLevel = headerNodes.reduce((m, h) => Math.max(m, h.level), -1);
   const labelIndent = Math.min(maxHeaderLevel + 1, MAX_HEADER_LEVELS_SHOWN) * HEADER_LEVEL_WIDTH;
 
+  // Axis vector-data strips replace the plain line for their module (Eclipse's
+  // AxisMultiRenderer shows the bar instead of the line while `showAxisVectorData` is on).
+  const stripByModuleId = new Map<number, AxisVectorStrip>();
+  if (flags.showAxisVectorData && params.axisVectorStrips) for (const s of params.axisVectorStrips) stripByModuleId.set(s.moduleId, s);
+
   if (flags.showAxes) {
     for (const axis of axesLayout.axes) {
       const y = axisRowY(axis.y, viewport);
       if (y < GUTTER_TOP_HEIGHT - axis.lineHeight || y > viewport.canvasHeight + axis.lineHeight) continue;
-      // Axis line spans the FULL width (from x=0), so it runs under the transparent
-      // leaf-label strip -- the label reads as sitting on the chart, not on an opaque band.
-      primitives.push({ kind: 'axisLine', moduleId: axis.moduleId, x1: 0, x2: viewport.canvasWidth, y, lineHeight: axis.lineHeight, color: theme.foreground });
+      const strip = stripByModuleId.get(axis.moduleId);
+      if (strip) {
+        // Multi-color step bar centered on the axis line (in place of the line). Segments are
+        // culled to the canvas; contentX maps each held-value span's tc edges to pixels.
+        const segments: { x1: number; x2: number; color: string; value: number; valueText: string }[] = [];
+        for (const seg of strip.segments) {
+          const x1 = contentX(seg.tcBegin, viewport);
+          const x2 = seg.tcEnd > seg.tcBegin ? contentX(seg.tcEnd, viewport) : x1;
+          if (x2 < 0 || x1 > viewport.canvasWidth) continue;
+          segments.push({ x1, x2, color: getGoodLightColor(seg.colorIndex), value: seg.value, valueText: seg.valueText });
+        }
+        if (segments.length > 0) primitives.push({ kind: 'axisVectorStrip', moduleId: axis.moduleId, y, height: AXIS_VECTOR_STRIP_HEIGHT, borderColor: theme.foreground, segments });
+      } else {
+        // Axis line spans the FULL width (from x=0), so it runs under the transparent
+        // leaf-label strip -- the label reads as sitting on the chart, not on an opaque band.
+        primitives.push({ kind: 'axisLine', moduleId: axis.moduleId, x1: 0, x2: viewport.canvasWidth, y, lineHeight: axis.lineHeight, color: theme.foreground });
+      }
       const axisHovered = hovered?.axisModuleIds?.has(axis.moduleId) ?? false;
       const axisSelected = selectedAxisModuleIds?.has(axis.moduleId) ?? false;
       // The expand/collapse glyph sits immediately BEFORE the module name (a reserved slot

@@ -8,12 +8,9 @@
  * modes" — see `sequenceChartEditor.ts`'s per-uri `workspaceState` blob, mirroring
  * `eventLogTableView.ts`'s `TABLE_STATE_KEY` pattern).
  *
- * `showAxisVectorData` now HAS a `TOGGLE_ORDER` entry (for full parity with Eclipse's
- * Show/Hide list — all 25 options present), but still has NO rendering effect: the `.vec`
- * axis-data strips themselves are out of scope for this whole port (per the port plan's
- * decision record), so there is nothing for this flag to gate yet. It persists/round-trips
- * like every other flag; toggling it simply has no visual effect until `.vec` rendering
- * lands in a later phase.
+ * `showAxisVectorData` gates the axis vector-data strips (`drawList.ts`'s `axisVectorStrip`
+ * primitive, from `ViewportModel.axisVectorStrips`): when on, a module with a vector
+ * attached shows its values as a colored step bar in place of its plain axis line.
  */
 
 export interface ChartDisplayFlags {
@@ -102,9 +99,6 @@ export const TOGGLE_ORDER: [keyof ChartDisplayFlags, string][] = [
   ['showAxes', 'Axes'],
   ['showAxisLabels', 'Axis Labels'],
   ['showAxisHeaders', 'Axis Headers'],
-  // Present for full parity with Eclipse's Show/Hide list (all 25 options). The `.vec`
-  // axis-data strip RENDERING is still out of scope for this port, so toggling this has no
-  // visual effect yet -- it round-trips/persists like the others so the menu matches Eclipse.
   ['showAxisVectorData', 'Axis Vector Data'],
   ['showEmptyAxes', 'Empty Axes'],
   ['showHairlines', 'Hairlines'],

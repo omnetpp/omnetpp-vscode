@@ -223,6 +223,41 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       ctx.lineTo(p.x2, p.y);
       ctx.stroke();
       break;
+    case 'axisVectorStrip': {
+      // Multi-color step bar centered on the axis line (Eclipse AxisVectorBarRenderer): a
+      // filled rectangle per held-value segment, a black divider at each value change, and
+      // top/bottom border lines.
+      const top = Math.round(p.y - p.height / 2);
+      const bot = top + p.height;
+      ctx.setLineDash([]);
+      for (const seg of p.segments) {
+        const x1 = Math.round(seg.x1);
+        const w = Math.max(1, Math.round(seg.x2) - x1);
+        ctx.fillStyle = seg.color;
+        ctx.fillRect(x1, top, w, p.height);
+        // divider at the value change (segment start)
+        ctx.strokeStyle = p.borderColor;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x1 + 0.5, top);
+        ctx.lineTo(x1 + 0.5, bot);
+        ctx.stroke();
+      }
+      // top + bottom borders spanning the drawn extent
+      const first = p.segments[0];
+      const last = p.segments[p.segments.length - 1];
+      if (first && last) {
+        ctx.strokeStyle = p.borderColor;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(first.x1, top + 0.5);
+        ctx.lineTo(last.x2, top + 0.5);
+        ctx.moveTo(first.x1, bot - 0.5);
+        ctx.lineTo(last.x2, bot - 0.5);
+        ctx.stroke();
+      }
+      break;
+    }
     case 'axisLabel':
       // Sit the name JUST ABOVE the axis line (baseline 2px above it) instead of centered
       // on it -- the line no longer strikes through the text, so names stay readable now
