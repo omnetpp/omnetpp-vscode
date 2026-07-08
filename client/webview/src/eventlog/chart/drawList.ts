@@ -51,7 +51,7 @@ import type { AxisHeaderNode } from './axisHeaders';
 import { flattenDrawableAxisHeaders } from './axisHeaders';
 import { subtractDecimalStrings, formatSimulationTime, isNegativeDecimal } from '../common/decimalTime';
 import type { EventLogPalette } from '../common/theme';
-import type { AxisInfo, AxesLayout } from './axes';
+import { AXIS_VECTOR_STRIP_HEIGHT, type AxisInfo, type AxesLayout } from './axes';
 import { clipCoordinate, tcToPixel } from './coords';
 import { DEFAULT_DISPLAY_FLAGS, type ChartDisplayFlags } from './displayFlags';
 import type { Tick } from './ticks';
@@ -131,9 +131,6 @@ export type DrawPrimitive =
 
 /** Phase U8 — glyph box edge length (Java uses the 16px `expand.png`/`collapse.png`/`close.png` images; a slightly smaller vector glyph fits this port's tighter axis labels). */
 export const MODULE_ACTION_SIZE = 11;
-
-/** Height (px) of an axis vector-data strip, centered on the axis line (Eclipse `AxisVectorBarRenderer.getHeight()` returns 12). */
-export const AXIS_VECTOR_STRIP_HEIGHT = 12;
 
 /**
  * Eclipse `ColorFactory.getGoodLightColor(i)` — the "reversed Tableau-20 light half" palette

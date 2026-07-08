@@ -356,14 +356,21 @@ async function requestCrossingsOrdering(visible: number[], key: string): Promise
 }
 
 /** The full U8 axes pipeline: visible set (open modules × activity) -> ordering -> vertical layout. Falls back to the pre-U8 derivation while the module tree / open set aren't initialized yet. */
+/** Module ids currently showing a vector-data strip (so their axis rows reserve the taller strip height in the layout). Empty unless the flag is on and the last viewport carried strips. */
+function strippedModuleIds(): ReadonlySet<number> | undefined {
+  if (!displayFlags.showAxisVectorData || !lastModel?.axisVectorStrips?.length) return undefined;
+  return new Set(lastModel.axisVectorStrips.map((s) => s.moduleId));
+}
+
 function currentAxesLayout(): AxesLayout {
   const spacing: AxisSpacingSpec = axisSpacingMode === 'manual' ? { mode: 'manual', manualSpacing: axisSpacingManual } : AUTO_AXIS_SPACING;
+  const strips = strippedModuleIds();
   if (moduleTree === null || openAxisModuleIds === null) {
-    if (spacing.mode === 'manual') return layoutAxes([...knownModuleIds].sort((a, b) => a - b), moduleTree, contentHeight(viewport), spacing);
+    if (spacing.mode === 'manual') return layoutAxes([...knownModuleIds].sort((a, b) => a - b), moduleTree, contentHeight(viewport), spacing, strips);
     return deriveAxes(knownModuleIds, moduleTree, contentHeight(viewport), displayFlags.showEmptyAxes);
   }
   const visible = computeVisibleAxisModuleIds(openAxisModuleIds, knownModuleIds, moduleTree, displayFlags.showEmptyAxes);
-  return layoutAxes(orderVisibleAxes(visible), moduleTree, contentHeight(viewport), spacing);
+  return layoutAxes(orderVisibleAxes(visible), moduleTree, contentHeight(viewport), spacing, strips);
 }
 
 /** REPLACE the open set (all mutation paths funnel through here -- Java's `setOpenAxisModules()` + invalidation), persisting as full paths. */

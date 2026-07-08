@@ -32,6 +32,9 @@
 import type { ElogModule } from '@omnetpp/shared/elog-protocol';
 import { AXIS_OFFSET, FONT_HEIGHT_PX } from './viewportState';
 
+/** Height (px) reserved for an axis that shows a vector-data strip (Eclipse `AxisVectorBarRenderer.getHeight()` = 12), instead of the 1/3px plain line. */
+export const AXIS_VECTOR_STRIP_HEIGHT = 12;
+
 export interface AxisInfo {
   moduleId: number;
   label: string;
@@ -145,15 +148,14 @@ export const DENSE_AXIS_SPACING = FONT_HEIGHT_PX + 1;
  * axis still renders (just unnamed) rather than being dropped. Spacing per
  * `spacing` — see `AxisSpacingSpec`.
  */
-export function layoutAxes(orderedModuleIds: readonly number[], moduleTree: ElogModule | null, contentHeightPx: number, spacing: AxisSpacingSpec = AUTO_AXIS_SPACING): AxesLayout {
+export function layoutAxes(orderedModuleIds: readonly number[], moduleTree: ElogModule | null, contentHeightPx: number, spacing: AxisSpacingSpec = AUTO_AXIS_SPACING, stripModuleIds?: ReadonlySet<number>): AxesLayout {
   const resolved = orderedModuleIds.map((moduleId) => {
     const found = findModuleName(moduleId, moduleTree);
-    return {
-      moduleId,
-      label: found?.label ?? `Module #${moduleId}`,
-      compound: found?.compound ?? false,
-      lineHeight: (found?.compound ?? false) ? 3 : 1,
-    };
+    const compound = found?.compound ?? false;
+    // A module showing a vector-data strip reserves the strip height (centered on its line);
+    // otherwise the plain 3px (compound) / 1px (simple) line thickness.
+    const lineHeight = stripModuleIds?.has(moduleId) ? AXIS_VECTOR_STRIP_HEIGHT : compound ? 3 : 1;
+    return { moduleId, label: found?.label ?? `Module #${moduleId}`, compound, lineHeight };
   });
 
   const totalLineHeights = resolved.reduce((sum, a) => sum + a.lineHeight, 0);

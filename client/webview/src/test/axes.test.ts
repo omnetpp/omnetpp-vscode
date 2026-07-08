@@ -1,7 +1,7 @@
 import { test } from 'bun:test';
 import assert from 'node:assert';
 import type { ElogModule } from '@omnetpp/shared/elog-protocol';
-import { deriveAxes, maxVerticalScroll } from '../eventlog/chart/axes';
+import { AUTO_AXIS_SPACING, AXIS_VECTOR_STRIP_HEIGHT, deriveAxes, layoutAxes, maxVerticalScroll } from '../eventlog/chart/axes';
 
 function module_(moduleId: number, fullName: string, compound: boolean, children: ElogModule[] = []): ElogModule {
   return { moduleId, fullName, nedTypeName: fullName, moduleClassName: fullName, compound, children };
@@ -33,6 +33,20 @@ test('names/compound-ness are resolved from the module tree when available', () 
   assert.strictEqual(byId.get(3)?.label, 'Net.node[1]');
   assert.strictEqual(byId.get(3)?.compound, false);
   assert.strictEqual(byId.get(3)?.lineHeight, 1);
+});
+
+test('a module showing a vector strip reserves the taller strip height, and pushes later axes down', () => {
+  const ids = [1, 2, 3];
+  // manual (fixed) spacing so the reserved height actually shifts positions -- AUTO mode
+  // would rebalance the spacing to fill the viewport and hide the effect.
+  const spacing = { mode: 'manual' as const, manualSpacing: 20 };
+  const plain = layoutAxes(ids, null, 600, spacing);
+  const withStrip = layoutAxes(ids, null, 600, spacing, new Set([2]));
+  const byId = new Map(withStrip.axes.map((a) => [a.moduleId, a]));
+  assert.strictEqual(byId.get(2)?.lineHeight, AXIS_VECTOR_STRIP_HEIGHT, 'strip axis reserves 12px');
+  assert.strictEqual(byId.get(1)?.lineHeight, 1, 'other axes unchanged');
+  const plain3 = plain.axes.find((a) => a.moduleId === 3)!.y;
+  assert.ok(byId.get(3)!.y > plain3, 'strip height pushes the following axis down');
 });
 
 test('only known (seen) module ids get an axis -- the tree may contain modules with no events yet', () => {
