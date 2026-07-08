@@ -232,6 +232,8 @@ let hovered: { events: Set<number>; dependencyKeys: Set<string>; axisModuleIds: 
 let hoverSignature = '';
 /** Phase U11 -- the content-area canvas x of the cursor, for the live "tick under the mouse" hairline (`drawTickUnderMouse()`); `null` when the pointer is off the content area. */
 let mouseContentX: number | null = null;
+/** The current tick prefix (Java `tickPrefix`) computed by the last `calculateTicks`; the hairline shows its time relative to this ("+340ms") when non-zero. */
+let currentTickPrefix = 0;
 /** Phase U5 -- the ~25 Show/Hide toggles (`displayFlags.ts`), including `showTimeDifferences` (Tab toggle, port of `SequenceChart.java`'s `setShowTimeDifferences`). */
 let displayFlags: ChartDisplayFlags = mergeDisplayFlags(state.displayFlags);
 /**
@@ -626,7 +628,10 @@ function simTimeAt(tc: number): number | null {
 function mouseTickLabel(px: number): string {
   const sim = simTimeAt(fullCanvasPxToTc(px, viewport) ?? viewport.leftTc) ?? 0;
   const simNext = simTimeAt(fullCanvasPxToTc(px + 1, viewport) ?? viewport.leftTc) ?? sim;
-  return formatMouseTime(sim, Math.abs(simNext - sim), timeAccuracy);
+  // Relative to the shared tick prefix (Java `drawTick` subtracts `tickPrefix` and prepends
+  // "+"), so the hairline reads "+340ms" against the "+ 1s" corner box instead of "1s 340ms".
+  const spp = Math.abs(simNext - sim);
+  return currentTickPrefix !== 0 ? '+' + formatMouseTime(sim - currentTickPrefix, spp, timeAccuracy) : formatMouseTime(sim, spp, timeAccuracy);
 }
 
 function renderFrame(): void {
@@ -653,6 +658,7 @@ function renderFrame(): void {
   const axesLayout: AxesLayout = currentAxesLayout();
   const lastSimTime = summary.lastSimulationTime !== null ? Number(summary.lastSimulationTime) : 0;
   const tickResult = calculateTicks(currentTimelineMode, viewport.leftTc, range.rightTc, viewport.pixelsPerTc, lastSimTime, simTimeAt);
+  currentTickPrefix = tickResult.tickPrefix;
   const axisHeaderRoot = displayFlags.showAxisHeaders
     ? calculateAxisHeaders(
         axesLayout.axes.map((a) => a.moduleId),
@@ -685,6 +691,7 @@ function renderFrame(): void {
     selectedTimelineCoords: [...selection.timelineCoords].map((tc) => ({ tc, simulationTime: String(simTimeAt(tc) ?? 0) })),
     hovered,
     mouseTick: mouseContentX !== null ? { x: mouseContentX, label: mouseTickLabel(mouseContentX) } : undefined,
+    tickPrefixLabel: currentTickPrefix !== 0 ? '+ ' + formatTickTime(currentTickPrefix) : undefined,
     bookmarkedEventNumbers,
     bookmarkedModuleIds,
     bookmarkedDependencyKeys,
@@ -1104,6 +1111,7 @@ async function performExportSvg(result: ExportDialogResult, ctxBase: ExportRange
       axisHeaderRoot,
       // No live status/info overlays in a static export -- they're screen-only conveniences.
       infoPanelText: undefined,
+      tickPrefixLabel: tickResult.tickPrefix !== 0 ? '+ ' + formatTickTime(tickResult.tickPrefix) : undefined,
       skipLabelsForPerf: false,
       moduleIdToAxisModuleId,
     });

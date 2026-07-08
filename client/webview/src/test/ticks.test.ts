@@ -1,7 +1,7 @@
 import { test } from 'bun:test';
 import assert from 'node:assert';
 import { TimelineMode } from '@omnetpp/shared/elog-protocol';
-import { adaptiveTimeFractionDigits, calculateTicks, formatMouseTime, formatTickLabel, formatTickTime } from '../eventlog/chart/ticks';
+import { adaptiveTimeFractionDigits, calculateTicks, formatMouseTime, formatTickLabel, formatTickTime, timeCommonPrefix } from '../eventlog/chart/ticks';
 
 // A simple affine simtime<->tc mapping (as if TimelineMode.SIMULATION_TIME, where tc IS simtime).
 function identitySimTimeAt(tc: number): number | null {
@@ -84,6 +84,33 @@ test('formatMouseTime: precision adapts to zoom, not to the magnitude (the >1s "
   assert.strictEqual(formatMouseTime(3.774, 1e-6, null), '3s 774ms'); // trailing zero us chunk dropped -> still short
   // Time Accuracy cap wins when it is coarser than the adaptive precision.
   assert.strictEqual(formatMouseTime(0.13, 1e-9, 3), '130ms');
+});
+
+test('timeCommonPrefix mirrors Java TimeUtils.commonPrefix (shared round offset of two times)', () => {
+  assert.strictEqual(timeCommonPrefix(1.15, 1.5), 1); // "1s" shared, factor it out
+  assert.strictEqual(timeCommonPrefix(1.15, 1.16), 1.1); // shared "1.1"
+  assert.strictEqual(timeCommonPrefix(0.15, 0.5), 0); // fractional diverges immediately -> nothing shared
+  assert.strictEqual(timeCommonPrefix(12.3, 15.6), 10); // differing integer digit masked to 0
+});
+
+test('calculateTicks factors out the common prefix: tickPrefix set + labels drawn relative ("+200ms")', () => {
+  // SIMULATION_TIME so tc == simtime; view spans 1.10s..1.30s -> prefix 1s; zoom gives 0.1s ticks.
+  const r = calculateTicks(TimelineMode.SIMULATION_TIME, 1.1, 1.3, 2000, 10, (tc) => tc);
+  assert.strictEqual(r.tickPrefix, 1, 'prefix factored out to 1s');
+  assert.ok(r.ticks.length >= 2);
+  assert.ok(
+    r.ticks.every((t) => t.label.startsWith('+')),
+    'every tick label is relative ("+…")',
+  );
+  // a tick at 1.2s reads "+200ms", not "1s 200ms"
+  const t12 = r.ticks.find((t) => Math.abs(t.simTime - 1.2) < 1e-9);
+  assert.ok(t12 && t12.label === '+200ms', `expected +200ms, got ${t12?.label}`);
+});
+
+test('calculateTicks: no shared prefix (view spans 0..end) -> tickPrefix 0, full labels (no "+")', () => {
+  const r = calculateTicks(TimelineMode.SIMULATION_TIME, 0, 0.5, 500, 10, (tc) => tc);
+  assert.strictEqual(r.tickPrefix, 0);
+  assert.ok(r.ticks.some((t) => !t.label.startsWith('+')));
 });
 
 test('calculateTicks tolerates a simTimeAt that returns null (unresolvable tc) without throwing', () => {

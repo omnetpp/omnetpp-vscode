@@ -97,8 +97,14 @@ export interface Tick {
 
 export interface TickResult {
   ticks: Tick[];
-  /** Shared decimal prefix common to the leftmost/rightmost visible simulation time (Java: `tickPrefix`, shown once instead of repeating on every label). Empty string if not worth factoring out. */
-  commonPrefix: string;
+  /**
+   * Java `tickPrefix`: the "round" simulation-time value common to the leftmost and
+   * rightmost visible times (e.g. `1` when the view spans 1.15s..1.5s). When non-zero it
+   * is shown ONCE in the top-right gutter corner ("+ 1s") and every tick/hairline label is
+   * drawn relative to it ("+150ms"), instead of repeating the shared prefix on each label.
+   * `0` when there is nothing worth factoring out (labels then show their full value).
+   */
+  tickPrefix: number;
 }
 
 // ---------------------------------------------------------------------------------
@@ -214,11 +220,40 @@ export function formatTickLabel(value: number): string {
   return value.toFixed(Math.min(20, decimals)).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
 }
 
-function commonPrefix(a: string, b: string): string {
-  let i = 0;
-  while (i < a.length && i < b.length && a[i] === b[i]) i++;
-  // only worth factoring out a shared prefix of at least 3 chars ending before the last couple digits
-  return i >= 3 ? a.slice(0, i) : '';
+/**
+ * Faithful port of `TimeUtils.commonPrefix(BigDecimal, BigDecimal)`: the largest "round"
+ * value that is a common leading part of both times -- their shared integer magnitude
+ * (differing integer digits masked to 0) plus any shared leading fractional digits. Walks
+ * both plain-decimal strings digit by digit; once past a matching decimal point, stops at
+ * the first differing fractional digit; before it, masks differing integer digits with 0.
+ * Returns 0 when the fractional parts diverge immediately / integer lengths differ (nothing
+ * worth factoring). Simulation times are non-negative, matching Java's usage.
+ */
+export function timeCommonPrefix(a: number, b: number): number {
+  let s1 = numberToPlainDecimalString(Math.abs(a));
+  let s2 = numberToPlainDecimalString(Math.abs(b));
+  if (!s1.includes('.')) s1 += '.';
+  if (!s2.includes('.')) s2 += '.';
+  const len = Math.min(s1.length, s2.length);
+  let common = '';
+  let matches = true;
+  let decimalPointFound = false;
+  for (let i = 0; i < len; i++) {
+    const c1 = s1[i];
+    const c2 = s2[i];
+    if (c1 === '.' || c2 === '.') {
+      if (c1 !== c2) break;
+      decimalPointFound = true;
+    }
+    if (matches && c1 === c2) {
+      common += c1;
+    } else {
+      matches = false;
+      if (decimalPointFound) break;
+      common += '0';
+    }
+  }
+  return decimalPointFound ? Number(common) : 0;
 }
 
 // ---------------------------------------------------------------------------------
@@ -240,14 +275,19 @@ export function calculateTicks(
   simTimeAt: (tc: number) => number | null,
 ): TickResult {
   const ticks: Tick[] = [];
-  if (pixelsPerTc <= 0 || lastSimTime < 0) return { ticks, commonPrefix: '' };
+  if (pixelsPerTc <= 0 || lastSimTime < 0) return { ticks, tickPrefix: 0 };
 
   const leftSimTime = simTimeAt(leftTc) ?? 0;
   const rightSimTime = simTimeAt(rightTc) ?? leftSimTime;
 
+  // Java `calculateTicks`: the shared prefix is factored out and shown once; each tick's
+  // label is then drawn RELATIVE to it as "+<delta>" (see `formatTickLabelRelative`).
+  const tickPrefix = timeCommonPrefix(leftSimTime, rightSimTime);
+  const labelFor = (t: number): string => (tickPrefix !== 0 ? '+' + formatTickTime(t - tickPrefix) : formatTickTime(t));
+
   if (timelineMode === TimelineMode.SIMULATION_TIME) {
     const tickSpacingInUnits = TICK_SPACING_PX / pixelsPerTc;
-    if (tickSpacingInUnits <= 0 || !Number.isFinite(tickSpacingInUnits)) return { ticks, commonPrefix: '' };
+    if (tickSpacingInUnits <= 0 || !Number.isFinite(tickSpacingInUnits)) return { ticks, tickPrefix: 0 };
     const tickScale = Math.ceil(Math.log10(tickSpacingInUnits));
     const unit = Math.pow(10, tickScale);
     let tickIntvl = unit;
@@ -263,11 +303,11 @@ export function calculateTicks(
       // tc is an affine function of simtime in this mode -- linear interpolation between the two
       // simtimes we already sampled (left/right) recovers it without a further engine round trip.
       const tc = rightSimTime === leftSimTime ? leftTc : leftTc + ((t - leftSimTime) * (rightTc - leftTc)) / (rightSimTime - leftSimTime);
-      ticks.push({ tc, simTime: t, label: formatTickTime(t) });
+      ticks.push({ tc, simTime: t, label: labelFor(t) });
     }
   } else {
     const tcStep = TICK_SPACING_PX / pixelsPerTc;
-    if (tcStep <= 0 || !Number.isFinite(tcStep)) return { ticks, commonPrefix: '' };
+    if (tcStep <= 0 || !Number.isFinite(tcStep)) return { ticks, tickPrefix: 0 };
     const kStart = Math.floor(leftTc / tcStep) - 1;
     const kEnd = Math.ceil(rightTc / tcStep) + 1;
     const maxTicks = 10_000;
@@ -278,10 +318,11 @@ export function calculateTicks(
       const tMin = simTimeAt(tc - tcStep / 2) ?? simulationTime;
       const tMax = simTimeAt(tc + tcStep / 2) ?? simulationTime;
       const tick = calculateTick(simulationTime, tMin, tMax);
-      if (tick >= 0 && tick <= lastSimTime) ticks.push({ tc, simTime: tick, label: formatTickTime(tick) });
+      if (tick >= 0 && tick <= lastSimTime) ticks.push({ tc, simTime: tick, label: labelFor(tick) });
     }
   }
 
-  const prefix = ticks.length >= 2 ? commonPrefix(formatTickLabel(leftSimTime), formatTickLabel(rightSimTime)) : '';
-  return { ticks, commonPrefix: prefix };
+  // Return the prefix only when there are ticks that actually used it (keeps the corner box
+  // and the relative labels consistent).
+  return { ticks, tickPrefix: ticks.length > 0 ? tickPrefix : 0 };
 }

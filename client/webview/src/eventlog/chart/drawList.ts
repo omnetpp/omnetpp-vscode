@@ -103,6 +103,8 @@ export type DrawPrimitive =
   | { kind: 'timelineMark'; x: number; y0: number; y1: number; color: string }
   /** Phase U11 — the live "tick under the mouse" (Java `drawTickUnderMouse()`): a vertical hairline following the cursor plus a small labelled box, in the top gutter, showing the exact simulation time under the pointer. */
   | { kind: 'mouseTick'; x: number; y0: number; y1: number; label: string; lineColor: string; textColor: string; bgColor: string }
+  /** Java `drawTickPrefix()`: the shared time offset ("+ 1s"), boxed in the TOP gutter's right corner, so tick/hairline labels can be drawn relative to it. `rightX` is the box's right edge (canvas width); the renderer measures the text and grows leftward. */
+  | { kind: 'tickPrefixBox'; label: string; rightX: number; color: string; textColor: string; bgColor: string }
   /**
    * Phase U6 — a bookmark mark: a small filled "flag" glyph, port of Eclipse's
    * bookmark ring/flag decoration on the event mark (`IMarker.BOOKMARK`'s default
@@ -257,6 +259,8 @@ export interface BuildDrawListParams {
   selectedTimelineCoords?: ReadonlyArray<{ tc: number; simulationTime: string }>;
   /** Phase U11 — the live tick under the mouse (`drawTickUnderMouse()`): a vertical hairline + a top-gutter time box following the cursor. `x` is the content-area canvas x; `label` the formatted simulation time. Omitted when the pointer is off the content area. */
   mouseTick?: { x: number; label: string };
+  /** Java `tickPrefix` shown as "+ <offset>" in the top gutter's right corner (`drawTickPrefix()`); omitted/empty when there is no shared prefix to factor out. */
+  tickPrefixLabel?: string;
   /** Phase U11 — the object(s) under the cursor (hover), redrawn "bold" in the highlight color (Java `drawHightlightedObjects()`, `highlightedObjects` populated on mouseMove). Usually holds the single hit group at the pointer. */
   hovered?: { events?: ReadonlySet<number>; dependencyKeys?: ReadonlySet<string>; axisModuleIds?: ReadonlySet<number>; methodCallKeys?: ReadonlySet<string> };
   /** Phase U6 — event numbers with an `'Event'`-kind bookmark; each gets a `'bookmarkMark'` flag near its event mark. */
@@ -589,6 +593,10 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
   // box, drawn on the very top so it tracks the cursor over everything else.
   if (params.mouseTick && params.mouseTick.x >= GUTTER_LEFT_WIDTH && params.mouseTick.x <= viewport.canvasWidth) {
     primitives.push({ kind: 'mouseTick', x: params.mouseTick.x, y0: GUTTER_TOP_HEIGHT, y1: viewport.canvasHeight, label: params.mouseTick.label, lineColor: theme.descriptionForeground, textColor: theme.isDark ? theme.foreground : '#000000', bgColor: theme.isDark ? '#264f4f' : '#e0ffff' });
+  }
+  // Java `drawTickPrefix()`: the shared time offset boxed in the top gutter's right corner.
+  if (params.tickPrefixLabel) {
+    primitives.push({ kind: 'tickPrefixBox', label: params.tickPrefixLabel, rightX: viewport.canvasWidth, color: theme.descriptionForeground, textColor: theme.isDark ? theme.foreground : '#000000', bgColor: theme.isDark ? '#264f4f' : '#e0ffff' });
   }
   return primitives;
 }

@@ -290,6 +290,16 @@ function emitPrimitive(b: SvgBuilder, p: DrawPrimitive, fontFamily: string): voi
       b.el('polygon', { points, fill: p.color });
       return;
     }
+    case 'tickPrefixBox': {
+      // The shared time offset ("+ 1s"); exported so the relative ("+150ms") tick labels
+      // have context. Width estimated at ~6px/char (no canvas to measure with here).
+      const boxW = p.label.length * 6 + 8;
+      const boxH = 15;
+      const x = p.rightX - boxW - 1;
+      b.el('rect', { x, y: 3, width: boxW, height: boxH, fill: p.bgColor, stroke: p.color });
+      b.el('text', { x: x + boxW / 2, y: 3 + boxH / 2, fill: p.textColor, 'font-size': 11, 'font-weight': 'bold', 'font-family': fontFamily, 'text-anchor': 'middle', 'dominant-baseline': 'middle' }, p.label);
+      return;
+    }
     case 'moduleAction':
     case 'mouseTick':
       // Interactive-only chart chrome (glyph hotspots / the live mouse-time hairline) --

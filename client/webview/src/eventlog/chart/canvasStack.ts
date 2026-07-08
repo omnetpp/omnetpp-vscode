@@ -158,7 +158,7 @@ export interface CanvasStackHandle {
   dispose(): void;
 }
 
-const NONCACHEABLE_KINDS = new Set<DrawPrimitive['kind']>(['gutter', 'tick', 'axisLabel', 'axisHeaderBox', 'label', 'selectionMark', 'bookmarkMark', 'infoPanel', 'timeDifferenceLabel', 'moduleAction', 'mouseTick']);
+const NONCACHEABLE_KINDS = new Set<DrawPrimitive['kind']>(['gutter', 'tick', 'axisLabel', 'axisHeaderBox', 'label', 'selectionMark', 'bookmarkMark', 'infoPanel', 'timeDifferenceLabel', 'moduleAction', 'mouseTick', 'tickPrefixBox']);
 
 /**
  * "Gutter chrome": overlay primitives that live in (or must stay on top of) the left/top
@@ -180,6 +180,7 @@ function isGutterChrome(p: DrawPrimitive): boolean {
     case 'infoPanel':
     case 'bookmarkMark':
     case 'mouseTick':
+    case 'tickPrefixBox':
       return true;
     case 'label':
       return p.y < GUTTER_TOP_HEIGHT;
@@ -401,6 +402,26 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       ctx.fillStyle = p.bgColor;
       ctx.fillRect(boxX, boxY, boxW, boxH);
       ctx.strokeStyle = p.lineColor;
+      ctx.strokeRect(boxX, boxY, boxW, boxH);
+      ctx.fillStyle = p.textColor;
+      ctx.textAlign = 'center';
+      ctx.fillText(p.label, boxX + boxW / 2, boxY + boxH / 2);
+      break;
+    }
+    case 'tickPrefixBox': {
+      // Java `drawTickPrefix()`: the shared "+ <offset>" boxed in the top gutter's right
+      // corner. Bold, measured, right-aligned to rightX.
+      ctx.font = axisHeaderFont; // reuse the small bold header font
+      ctx.textBaseline = 'middle';
+      const tw = ctx.measureText(p.label).width;
+      const boxW = Math.ceil(tw) + 8;
+      const boxH = 15;
+      const boxX = p.rightX - boxW - 1;
+      const boxY = 3;
+      ctx.fillStyle = p.bgColor;
+      ctx.fillRect(boxX, boxY, boxW, boxH);
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = 1;
       ctx.strokeRect(boxX, boxY, boxW, boxH);
       ctx.fillStyle = p.textColor;
       ctx.textAlign = 'center';
