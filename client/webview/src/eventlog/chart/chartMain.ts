@@ -1848,6 +1848,8 @@ toolbar = buildToolbar(document.getElementById('toolbar')!, [
   { kind: 'separator' },
   { kind: 'button', button: { id: 'zoomOut', icon: 'zoom-out', title: 'Zoom out', onClick: () => { viewport = zoomAtCenter(viewport, 1 / 1.5); scheduleRender(); } } },
   { kind: 'button', button: { id: 'zoomIn', icon: 'zoom-in', title: 'Zoom in', onClick: () => { viewport = zoomAtCenter(viewport, 1.5); scheduleRender(); } } },
+  { kind: 'button', button: { id: 'zoomToFit', icon: 'screen-full', title: 'Zoom to fit', onClick: () => { if (beginTc !== null && endTc !== null) { viewport = zoomToFit(viewport, beginTc, endTc, 0.02); scheduleRender(); } } } },
+  { kind: 'button', button: { id: 'defaultZoom', icon: 'screen-normal', title: 'Default zoom', onClick: () => void applyDefaultZoom(false) } },
   { kind: 'separator' },
   {
     kind: 'button',
