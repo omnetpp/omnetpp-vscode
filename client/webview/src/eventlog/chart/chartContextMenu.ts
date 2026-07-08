@@ -203,7 +203,7 @@ function eventSection(hit: Extract<HitObject, { kind: 'event' }>, actions: Chart
       { id: 'center', label: 'Center', onSelect: () => actions.centerOnEvent(hit.eventNumber) },
       { id: 'selectInTable', label: 'Select in Event Log Table', onSelect: () => actions.selectInTable(hit.eventNumber) },
       { id: 'toggleBookmark', label: 'Toggle Bookmark', onSelect: () => actions.toggleEventBookmark(hit.eventNumber) },
-      { id: 'filter', label: 'Filter Causes/Consequences...', onSelect: () => actions.filterCausesConsequences(hit.eventNumber) },
+      { id: 'filter', label: 'Filter Causes/Consequences...', icon: 'filter', onSelect: () => actions.filterCausesConsequences(hit.eventNumber) },
     ],
   };
 }
@@ -217,7 +217,7 @@ function dependencySection(hit: Extract<HitObject, { kind: 'dependency' }>, labe
       { id: 'gotoConsequence', label: 'Go to Consequence Event', onSelect: () => actions.goToConsequenceEvent(hit.consequenceEventNumber) },
       { id: 'zoomToMessage', label: 'Zoom to Message', onSelect: () => actions.zoomToDependency(hit.causeTc, hit.consequenceTc) },
       { id: 'toggleBookmark', label: 'Toggle Bookmark', onSelect: () => actions.toggleDependencyBookmark(hit) },
-      { id: 'filterMessage', label: 'Filter Message...', disabled: messageId === null, onSelect: () => actions.filterMessage(hit) },
+      { id: 'filterMessage', label: 'Filter Message...', icon: 'filter', disabled: messageId === null, onSelect: () => actions.filterMessage(hit) },
     ],
   };
 }
@@ -285,8 +285,8 @@ function spacingSection(actions: ChartMenuActions): MenuEntry {
     submenu: [
       { id: 'spacing-balanced', label: 'Balanced Axes', onSelect: actions.spacingBalanced },
       { id: 'spacing-dense', label: 'Dense Axes', onSelect: actions.spacingDense },
-      { id: 'spacing-increase', label: 'Increase Spacing', onSelect: actions.spacingIncrease },
-      { id: 'spacing-decrease', label: 'Decrease Spacing', onSelect: actions.spacingDecrease },
+      { id: 'spacing-increase', label: 'Increase Spacing', icon: 'unfold', onSelect: actions.spacingIncrease },
+      { id: 'spacing-decrease', label: 'Decrease Spacing', icon: 'fold', onSelect: actions.spacingDecrease },
     ],
   };
 }
@@ -308,6 +308,7 @@ function showHideSection(displayFlags: ChartDisplayFlags, actions: ChartMenuActi
   return {
     id: 'showHide',
     label: 'Show/Hide',
+    icon: 'eye',
     submenu: buildShowHideEntries(displayFlags, actions),
   };
 }
@@ -330,7 +331,7 @@ export function buildChartContextMenu(params: ChartMenuBuildParams): MenuEntry[]
   if (axes.length > 0) entries.push({ separator: true });
 
   // ---- phase U8: axis-management static sections (contributor's menu order) ----
-  entries.push({ id: 'selectModules', label: 'Select Modules...', onSelect: actions.openSelectModulesDialog });
+  entries.push({ id: 'selectModules', label: 'Select Modules...', icon: 'list-tree', onSelect: actions.openSelectModulesDialog });
   entries.push(presetSection(actions));
   entries.push(axisOrderingSection(currentAxisOrderingMode, actions));
   entries.push(spacingSection(actions));
@@ -352,8 +353,8 @@ export function buildChartContextMenu(params: ChartMenuBuildParams): MenuEntry[]
     id: 'zoom',
     label: 'Zoom',
     submenu: [
-      { id: 'defaultZoom', label: 'Default Zoom', onSelect: actions.defaultZoom },
-      { id: 'zoomToFit', label: 'Zoom to Fit', onSelect: actions.zoomToFitAll },
+      { id: 'defaultZoom', label: 'Default Zoom', icon: 'screen-normal', onSelect: actions.defaultZoom },
+      { id: 'zoomToFit', label: 'Zoom to Fit', icon: 'screen-full', onSelect: actions.zoomToFitAll },
       { id: 'zoomIn', label: 'Zoom In', icon: 'zoom-in', onSelect: actions.zoomIn },
       { id: 'zoomOut', label: 'Zoom Out', icon: 'zoom-out', onSelect: actions.zoomOut },
     ],
@@ -369,8 +370,8 @@ export function buildChartContextMenu(params: ChartMenuBuildParams): MenuEntry[]
       { id: 'gotoEvent', label: 'Go to Event...', onSelect: actions.openGotoEventDialog },
       { id: 'gotoSimTime', label: 'Go to Simulation Time...', onSelect: actions.openGotoSimTimeDialog },
       { separator: true },
-      { id: 'gotoBegin', label: 'Go to Begin', onSelect: actions.gotoBegin },
-      { id: 'gotoEnd', label: 'Go to End', onSelect: actions.gotoEnd },
+      { id: 'gotoBegin', label: 'Go to Begin', icon: 'home', onSelect: actions.gotoBegin },
+      { id: 'gotoEnd', label: 'Go to End', icon: 'arrow-right', onSelect: actions.gotoEnd },
     ],
   });
 
