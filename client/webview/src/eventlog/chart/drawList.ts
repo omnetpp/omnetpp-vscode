@@ -83,7 +83,7 @@ export type DrawPrimitive =
   | { kind: 'axisLabel'; moduleId: number; x: number; y: number; text: string; color: string; bold?: boolean }
   /** Phase U11 — a selected/hovered axis's Eclipse selection mark: two thin colored lines just above and below the axis line, spanning the content width (`drawAxisMark()`, SequenceChart.java:3668-3680). */
   | { kind: 'axisSelectionMark'; x1: number; x2: number; y: number; lineHeight: number; color: string }
-  | { kind: 'axisHeaderBox'; x: number; y0: number; y1: number; label: string; color: string }
+  | { kind: 'axisHeaderBox'; x: number; y0: number; y1: number; label: string; color: string; textColor: string }
   | { kind: 'tick'; x: number; y0: number; y1: number; color: string }
   | { kind: 'eventMark'; eventNumber: number; moduleId: number; x: number; xEnd: number; y: number; radius: number; color: string }
   | { kind: 'selfEventMark'; eventNumber: number; moduleId: number; x: number; xEnd: number; y: number; radius: number; color: string }
@@ -388,7 +388,7 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       const y1 = axisRowY(lastAxis.y, viewport) + lastAxis.lineHeight;
       if (y1 < GUTTER_TOP_HEIGHT || y0 > viewport.canvasHeight) continue;
       const x = 2 + level * HEADER_LEVEL_WIDTH;
-      primitives.push({ kind: 'axisHeaderBox', x, y0, y1, label: header.label, color: theme.isDark ? '#2f5060' : '#d7f2f2' });
+      primitives.push({ kind: 'axisHeaderBox', x, y0, y1, label: header.label, color: theme.isDark ? '#2f5060' : '#d7f2f2', textColor: theme.isDark ? '#e0f0f0' : '#000000' });
       // Phase U8 -- per-header glyphs (Java `layoutAxisHeader()`'s ModuleActions),
       // stacked vertically at the top of the header band: [expand][collapse][close]
       // top-down. Close on a HEADER removes the whole subtree (scope: 'header').

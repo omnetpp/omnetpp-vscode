@@ -79,6 +79,34 @@ export function findModuleIdByFullName(fullName: string, tree: ElogModule | null
   return null;
 }
 
+/** A module's full dotted path (ancestor `fullName`s joined with `.`, e.g. `"SingleQueue.source"`), used to build the axis-HEADER hierarchy (the merge logic splits on `.` to group siblings under their common compound ancestor). `null` if the id isn't in the tree. */
+export function findModuleFullPath(moduleId: number, tree: ElogModule | null): string | null {
+  const walk = (node: ElogModule, prefix: string): string | null => {
+    const path = prefix ? `${prefix}.${node.fullName}` : node.fullName;
+    if (node.moduleId === moduleId) return path;
+    for (const child of node.children) {
+      const found = walk(child, path);
+      if (found !== null) return found;
+    }
+    return null;
+  };
+  return tree === null ? null : walk(tree, '');
+}
+
+/** Resolves a full dotted path (`findModuleFullPath`'s output, e.g. `"SingleQueue.source"`) back to its module id, walking the tree segment by segment. Used to map an axis HEADER (which carries a dotted path) back to its compound module for the expand/collapse/close glyphs. `null` if any segment doesn't resolve. */
+export function findModuleIdByFullPath(fullPath: string, tree: ElogModule | null): number | null {
+  if (tree === null || fullPath === '') return null;
+  const segments = fullPath.split('.');
+  if (segments[0] !== tree.fullName) return null;
+  let node: ElogModule = tree;
+  for (let i = 1; i < segments.length; i++) {
+    const next = node.children.find((c) => c.fullName === segments[i]);
+    if (!next) return null;
+    node = next;
+  }
+  return node.moduleId;
+}
+
 /** Flattens every module id in `tree` (all descendants, compound and simple alike) -- used by `deriveAxes()`'s `includeEmptyAxes` option. */
 function allModuleIds(tree: ElogModule | null): number[] {
   if (tree === null) return [];

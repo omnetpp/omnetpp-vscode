@@ -195,7 +195,7 @@ function emitPrimitive(b: SvgBuilder, p: DrawPrimitive, fontFamily: string): voi
         const cy = (p.y0 + p.y1) / 2;
         b.el(
           'text',
-          { x: 0, y: 0, fill: '#000000', 'font-size': 10, 'font-family': fontFamily, 'text-anchor': 'middle', 'dominant-baseline': 'middle', transform: `translate(${fmt(cx)} ${fmt(cy)}) rotate(-90)` },
+          { x: 0, y: 0, fill: p.textColor, 'font-size': 10, 'font-family': fontFamily, 'text-anchor': 'middle', 'dominant-baseline': 'middle', transform: `translate(${fmt(cx)} ${fmt(cy)}) rotate(-90)` },
           p.label,
         );
       }

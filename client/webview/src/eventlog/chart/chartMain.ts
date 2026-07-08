@@ -33,7 +33,7 @@ import { readPalette, watchThemeChange, type EventLogPalette } from '../common/t
 import { showContextMenu } from '../common/contextMenu';
 import { DEFAULT_FIND_TEXT_STATE, openFindTextDialog, openGotoEventDialog, openGotoSimTimeDialog, type FindTextState } from '../common/dialogs';
 import { classifyEngineError, mountNotificationOverlay, type NotificationOverlayHandle } from '../common/notificationOverlay';
-import { AUTO_AXIS_SPACING, clampAxisSpacing, DENSE_AXIS_SPACING, deriveAxes, findModuleIdByFullName, findModuleNode, layoutAxes, maxVerticalScroll, type AxesLayout, type AxisSpacingSpec } from './axes';
+import { AUTO_AXIS_SPACING, clampAxisSpacing, DENSE_AXIS_SPACING, deriveAxes, findModuleFullPath, findModuleIdByFullName, findModuleIdByFullPath, findModuleNode, layoutAxes, maxVerticalScroll, type AxesLayout, type AxisSpacingSpec } from './axes';
 import { calculateAxisHeaders, flattenDrawableAxisHeaders, type AxisHeaderNode } from './axisHeaders';
 import {
   applyOrdering,
@@ -644,7 +644,7 @@ function renderFrame(): void {
   const axisHeaderRoot = displayFlags.showAxisHeaders
     ? calculateAxisHeaders(
         axesLayout.axes.map((a) => a.moduleId),
-        (moduleId) => findModuleNode(moduleId, moduleTree)?.fullName ?? `Module #${moduleId}`,
+        (moduleId) => findModuleFullPath(moduleId, moduleTree) ?? findModuleNode(moduleId, moduleTree)?.fullName ?? `Module #${moduleId}`,
       )
     : null;
 
@@ -700,7 +700,7 @@ function buildHeaderGlyphs(axisHeaderRoot: AxisHeaderNode | null, nodeMap?: Map<
   if (axisHeaderRoot === null || moduleTree === null || openAxisModuleIds === null) return result;
   for (const header of flattenDrawableAxisHeaders(axisHeaderRoot)) {
     if (header.fullPath === '') continue;
-    const moduleId = header.moduleId ?? findModuleIdByFullName(header.fullPath, moduleTree);
+    const moduleId = header.moduleId ?? findModuleIdByFullPath(header.fullPath, moduleTree);
     if (moduleId === null) continue;
     const info = moduleGlyphInfo(moduleId, openAxisModuleIds, moduleTree, nodeMap);
     result.set(header.fullPath, { moduleId, expand: info.expand, collapse: info.collapse });
@@ -1069,7 +1069,7 @@ async function performExportSvg(result: ExportDialogResult, ctxBase: ExportRange
     const axisHeaderRoot = displayFlags.showAxisHeaders
       ? calculateAxisHeaders(
           axesLayout.axes.map((a) => a.moduleId),
-          (moduleId) => findModuleNode(moduleId, moduleTree)?.fullName ?? `Module #${moduleId}`,
+          (moduleId) => findModuleFullPath(moduleId, moduleTree) ?? findModuleNode(moduleId, moduleTree)?.fullName ?? `Module #${moduleId}`,
         )
       : null;
     const axisManagementLive = moduleTree !== null && openAxisModuleIds !== null;

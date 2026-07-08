@@ -158,7 +158,7 @@ export interface CanvasStackHandle {
   dispose(): void;
 }
 
-const NONCACHEABLE_KINDS = new Set<DrawPrimitive['kind']>(['gutter', 'tick', 'axisLabel', 'label', 'selectionMark', 'bookmarkMark', 'infoPanel', 'timeDifferenceLabel', 'moduleAction', 'mouseTick']);
+const NONCACHEABLE_KINDS = new Set<DrawPrimitive['kind']>(['gutter', 'tick', 'axisLabel', 'axisHeaderBox', 'label', 'selectionMark', 'bookmarkMark', 'infoPanel', 'timeDifferenceLabel', 'moduleAction', 'mouseTick']);
 
 /**
  * "Gutter chrome": overlay primitives that live in (or must stay on top of) the left/top
@@ -175,6 +175,7 @@ function isGutterChrome(p: DrawPrimitive): boolean {
     case 'gutter':
     case 'tick':
     case 'axisLabel':
+    case 'axisHeaderBox':
     case 'moduleAction':
     case 'infoPanel':
     case 'bookmarkMark':
@@ -278,7 +279,7 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       ctx.strokeRect(p.x, p.y0, w, Math.max(1, p.y1 - p.y0));
       if (p.y1 - p.y0 > 20) {
         ctx.save();
-        ctx.fillStyle = '#000000';
+        ctx.fillStyle = p.textColor;
         ctx.font = axisHeaderFont;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
