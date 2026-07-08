@@ -1,7 +1,7 @@
 import { test } from 'bun:test';
 import assert from 'node:assert';
 import { TimelineMode } from '@omnetpp/shared/elog-protocol';
-import { calculateTicks, formatTickLabel, formatTickTime } from '../eventlog/chart/ticks';
+import { adaptiveTimeFractionDigits, calculateTicks, formatMouseTime, formatTickLabel, formatTickTime } from '../eventlog/chart/ticks';
 
 // A simple affine simtime<->tc mapping (as if TimelineMode.SIMULATION_TIME, where tc IS simtime).
 function identitySimTimeAt(tc: number): number | null {
@@ -66,6 +66,24 @@ test('formatTickTime renders short unit-bearing ruler labels like Eclipse (0s / 
   assert.strictEqual(formatTickTime(5e-8), '50ns');
   // a non-linear tick's noisy interpolated time rounds to a clean single unit
   assert.strictEqual(formatTickTime(0.130189758243495), '130ms');
+});
+
+test('adaptiveTimeFractionDigits: coarsest digit count so a 1px move still changes the display', () => {
+  assert.strictEqual(adaptiveTimeFractionDigits(1), 0); // 1s/px -> whole seconds
+  assert.strictEqual(adaptiveTimeFractionDigits(0.01), 2); // 10ms/px -> 2 digits
+  assert.strictEqual(adaptiveTimeFractionDigits(0.001), 3); // 1ms/px -> 3 digits
+  assert.strictEqual(adaptiveTimeFractionDigits(1e-6), 6); // 1us/px -> 6 digits
+  assert.strictEqual(adaptiveTimeFractionDigits(10), 0); // >1s/px never negative
+  assert.strictEqual(adaptiveTimeFractionDigits(0), 3); // frozen zero-time region -> fallback
+});
+
+test('formatMouseTime: precision adapts to zoom, not to the magnitude (the >1s "rounds to 10ms" bug)', () => {
+  // Same time, different zooms -> different precision (short as possible, still changes per px).
+  assert.strictEqual(formatMouseTime(3.774, 0.001, null), '3s 774ms'); // 1ms/px keeps the ms digit even above 1s
+  assert.strictEqual(formatMouseTime(3.77, 1, null), '4s'); // 1s/px -> whole seconds
+  assert.strictEqual(formatMouseTime(3.774, 1e-6, null), '3s 774ms'); // trailing zero us chunk dropped -> still short
+  // Time Accuracy cap wins when it is coarser than the adaptive precision.
+  assert.strictEqual(formatMouseTime(0.13, 1e-9, 3), '130ms');
 });
 
 test('calculateTicks tolerates a simTimeAt that returns null (unresolvable tc) without throwing', () => {

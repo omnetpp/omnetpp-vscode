@@ -59,6 +59,34 @@ export function formatTickTime(seconds: number): string {
   return (neg ? '-' : '') + formatSimulationTime(numberToPlainDecimalString(rounded));
 }
 
+/**
+ * Fractional-seconds digits so that a ONE-PIXEL cursor move changes the displayed time,
+ * but no more than that (as short as possible). `secondsPerPixel` = |d simtime / d pixel|
+ * at the cursor. The coarsest power-of-ten step `s <= secondsPerPixel` guarantees a change
+ * every pixel (two reals ≥1 step apart always round to different multiples), and the digit
+ * count for that step is `-floor(log10(secondsPerPixel))`. Falls back to `fallback` (used
+ * for a frozen zero-simulation-time region, where `secondsPerPixel` is 0 and no precision
+ * would ever change the display).
+ */
+export function adaptiveTimeFractionDigits(secondsPerPixel: number, fallback = 3): number {
+  if (!Number.isFinite(secondsPerPixel) || secondsPerPixel <= 0) return fallback;
+  return Math.max(0, -Math.floor(Math.log10(secondsPerPixel)));
+}
+
+/**
+ * Formats the live mouse-cursor time with precision adapted to the current zoom
+ * (`secondsPerPixel`), instead of a fixed 3 significant figures: at 1px = 1ms it shows ms,
+ * at 1px = 1s it shows whole seconds -- always the shortest string that still changes as
+ * the cursor moves. `maxFractionDigits` (the Time Accuracy setting, or `null` = no cap)
+ * clamps it so the hairline never shows finer than the user asked for.
+ */
+export function formatMouseTime(seconds: number, secondsPerPixel: number, maxFractionDigits: number | null): string {
+  if (!Number.isFinite(seconds)) return '';
+  let digits = adaptiveTimeFractionDigits(secondsPerPixel, maxFractionDigits ?? 3);
+  if (maxFractionDigits != null) digits = Math.min(digits, maxFractionDigits);
+  return formatSimulationTime(numberToPlainDecimalString(seconds), digits);
+}
+
 export interface Tick {
   /** Timeline coordinate this tick's label should be drawn at. */
   tc: number;

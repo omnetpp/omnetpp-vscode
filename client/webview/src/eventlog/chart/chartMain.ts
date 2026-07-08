@@ -71,7 +71,7 @@ import { mergeDisplayFlags, presetDefaultFlags, presetNetworkCommunicationFlags,
 import { bookmarkDependencyKey, buildDrawList, type DrawPrimitive, type InfoPanelText } from './drawList';
 import { openSelectModulesDialog } from './selectModulesDialog';
 import { openListReorderDialog } from './reorderDialog';
-import { calculateTicks, formatTickLabel, formatTickTime } from './ticks';
+import { calculateTicks, formatMouseTime, formatTickLabel, formatTickTime } from './ticks';
 import { ANTIALIAS_TURN_OFF_AT_MSEC, ANTIALIAS_TURN_ON_AT_MSEC, createCanvasStack, DEFAULT_CHART_FONT_SIZE_PX, renderPrimitivesToCanvas, type CanvasStackHandle } from './canvasStack';
 import { openExportRangeDialog, type ExportDialogResult } from './exportDialog';
 import { buildChartSvg, computeExportWidthPx, resolveExportRange, type ExportRangeContext } from './svgExport';
@@ -617,6 +617,18 @@ function simTimeAt(tc: number): number | null {
   return tcToSimTimeApprox(tc, sampleTable);
 }
 
+/**
+ * The live "time under the cursor" label for the hairline. Precision adapts to the current
+ * zoom (`formatMouseTime`): we measure how much simulation time ONE pixel spans right here
+ * (`simTimeAt` at the cursor vs one pixel over) and show just enough digits that a
+ * one-pixel move changes the value -- no more. Capped by the Time Accuracy setting.
+ */
+function mouseTickLabel(px: number): string {
+  const sim = simTimeAt(fullCanvasPxToTc(px, viewport) ?? viewport.leftTc) ?? 0;
+  const simNext = simTimeAt(fullCanvasPxToTc(px + 1, viewport) ?? viewport.leftTc) ?? sim;
+  return formatMouseTime(sim, Math.abs(simNext - sim), timeAccuracy);
+}
+
 function renderFrame(): void {
   const empty = document.getElementById('empty')!;
   empty.style.display = summary && !summary.isEmpty ? 'none' : 'flex';
@@ -672,7 +684,7 @@ function renderFrame(): void {
     selectedMethodCallKeys: selection.methodCalls,
     selectedTimelineCoords: [...selection.timelineCoords].map((tc) => ({ tc, simulationTime: String(simTimeAt(tc) ?? 0) })),
     hovered,
-    mouseTick: mouseContentX !== null ? { x: mouseContentX, label: formatTickTime(simTimeAt(fullCanvasPxToTc(mouseContentX, viewport) ?? viewport.leftTc) ?? 0) } : undefined,
+    mouseTick: mouseContentX !== null ? { x: mouseContentX, label: mouseTickLabel(mouseContentX) } : undefined,
     bookmarkedEventNumbers,
     bookmarkedModuleIds,
     bookmarkedDependencyKeys,
