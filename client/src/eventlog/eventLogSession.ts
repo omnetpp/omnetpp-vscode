@@ -36,6 +36,9 @@ import {
   type GotoSimTimeParams,
   type LogSummary,
   type MapCoordsParams,
+  type ScListVectorsParams,
+  type ScAttachVectorParams,
+  type ScDetachVectorParams,
   type ReleaseMemoryResult,
   type RowWindowParams,
   type ScRelocateOriginParams,
@@ -385,6 +388,12 @@ export class EventLogSession {
         return wc.scGetViewport(params as ViewportParams, token);
       case ElogMethods.scMapCoords:
         return wc.scMapCoords(params as MapCoordsParams, token);
+      case ElogMethods.scListVectors:
+        return wc.scListVectors(params as ScListVectorsParams, token);
+      case ElogMethods.scAttachVector:
+        return wc.scAttachVector(params as ScAttachVectorParams, token);
+      case ElogMethods.scDetachVector:
+        return wc.scDetachVector(params as ScDetachVectorParams, token);
       case ElogMethods.scAdjacencyMatrix:
         return wc.scAdjacencyMatrix(params as AdjacencyParams, token);
       case ElogMethods.tableGetRows:

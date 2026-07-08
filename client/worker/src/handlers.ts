@@ -39,6 +39,12 @@ function dispatch(session: EngineSession, method: string, params: unknown): unkn
       return session.scRelocateOrigin(params as Parameters<EngineSession['scRelocateOrigin']>[0]);
     case ElogMethods.scGetViewport:
       return session.scGetViewport(params as Parameters<EngineSession['scGetViewport']>[0]);
+    case ElogMethods.scListVectors:
+      return session.scListVectors(params as Parameters<EngineSession['scListVectors']>[0]);
+    case ElogMethods.scAttachVector:
+      return session.scAttachVector(params as Parameters<EngineSession['scAttachVector']>[0]);
+    case ElogMethods.scDetachVector:
+      return session.scDetachVector(params as Parameters<EngineSession['scDetachVector']>[0]);
     case ElogMethods.scMapCoords:
       return session.scMapCoords(params as Parameters<EngineSession['scMapCoords']>[0]);
     case ElogMethods.scAdjacencyMatrix:

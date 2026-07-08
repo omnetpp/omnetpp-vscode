@@ -1,6 +1,6 @@
 import { test } from 'bun:test';
 import assert from 'node:assert';
-import { listVectors, parseColumns, parseEnumAttr, readVector, tokenizeVecLine } from '../vectorFileReader';
+import { listVectors, parseColumns, parseEnumAttr, readVector, tokenizeVecLine, vectorValueIndex, vectorValueText } from '../vectorFileReader';
 
 // A small hand-written .vec covering: run-level metadata, an ETV enum vector (id 0) and a
 // TV double vector (id 1) with a quoted module name, and interleaved data lines.
@@ -81,6 +81,21 @@ test('readVector on a TV vector yields null eventNumbers (aligns by simtime)', (
 
 test('readVector returns null for an unknown vector id', () => {
   assert.strictEqual(readVector(VEC, 99), null);
+});
+
+test('vectorValueIndex: enum/int + whole doubles bucket by value; fractional doubles by sample index', () => {
+  assert.strictEqual(vectorValueIndex(2, { type: 'enum' }, 5), 2);
+  assert.strictEqual(vectorValueIndex(3, { type: 'int' }, 5), 3);
+  assert.strictEqual(vectorValueIndex(4, { type: 'double' }, 5), 4); // whole double -> the integer
+  assert.strictEqual(vectorValueIndex(4.2, { type: 'double' }, 5), 5); // fractional -> sample index
+});
+
+test('vectorValueText: enum name when known, else integer or raw double', () => {
+  const info = { enum: new Map([[1, 'BUSY']]) };
+  assert.strictEqual(vectorValueText(1, info), 'BUSY');
+  assert.strictEqual(vectorValueText(2, info), '2'); // enum but value not a member -> number
+  assert.strictEqual(vectorValueText(3, { enum: null }), '3');
+  assert.strictEqual(vectorValueText(3.5, { enum: null }), '3.5');
 });
 
 test('readVector does not confuse a longer id with a prefix (id 1 vs 10/11)', () => {

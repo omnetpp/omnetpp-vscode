@@ -57,6 +57,10 @@ import {
   type LogSummary,
   type MapCoordsParams,
   type MapCoordsResult,
+  type ScListVectorsParams,
+  type ScListVectorsResult,
+  type ScAttachVectorParams,
+  type ScDetachVectorParams,
   type OpenParams,
   type ReleaseMemoryResult,
   type RowWindow,
@@ -304,6 +308,18 @@ export class WorkerClient {
 
   scMapCoords(params: MapCoordsParams, token?: CancellationToken): Promise<MapCoordsResult> {
     return this.rawRequest(ElogMethods.scMapCoords, params, token);
+  }
+
+  scListVectors(params: ScListVectorsParams, token?: CancellationToken): Promise<ScListVectorsResult> {
+    return this.rawRequest(ElogMethods.scListVectors, params, token);
+  }
+
+  scAttachVector(params: ScAttachVectorParams, token?: CancellationToken): Promise<void> {
+    return this.rawRequest(ElogMethods.scAttachVector, params, token);
+  }
+
+  scDetachVector(params: ScDetachVectorParams, token?: CancellationToken): Promise<void> {
+    return this.rawRequest(ElogMethods.scDetachVector, params, token);
   }
 
   scAdjacencyMatrix(params: AdjacencyParams, token?: CancellationToken): Promise<AdjacencyResult> {

@@ -76,6 +76,12 @@ export const ElogMethods = {
   scRelocateOrigin: 'elog/sc/relocateOrigin',
   /** request: ViewportParams → ViewportModel -- long-running, cancellable. */
   scGetViewport: 'elog/sc/getViewport',
+  /** request: ScListVectorsParams → ScListVectorsResult. ADDITIVE: read a `.vec` file's declarations for the "Attach Vector to Axis" picker. */
+  scListVectors: 'elog/sc/listVectors',
+  /** request: ScAttachVectorParams → void. ADDITIVE: attach a vector (by identity) to a module axis; the engine loads its samples for later viewport queries. */
+  scAttachVector: 'elog/sc/attachVector',
+  /** request: ScDetachVectorParams → void. ADDITIVE: remove a module axis's attached vector. */
+  scDetachVector: 'elog/sc/detachVector',
   /** request: MapCoordsParams → MapCoordsResult */
   scMapCoords: 'elog/sc/mapCoords',
   /** request: AdjacencyParams → AdjacencyResult -- long-running, cancellable. */
@@ -441,6 +447,70 @@ export interface ViewportModel {
   moduleIds: number[];
   /** `true` iff `maxEvents` truncated the result (port plan risk #4). */
   truncated: boolean;
+  /** ADDITIVE: per-axis vector-data strips (Eclipse `AxisVectorBarRenderer`), one entry per module with an attached vector, holding the value-step segments that fall in this viewport. Absent/empty when no vectors are attached. */
+  axisVectorStrips?: AxisVectorStrip[];
+}
+
+/** One value-step segment of an axis vector strip: the value is held over `[tcBegin, tcEnd]` (from a sample's event to the next sample's event). */
+export interface AxisVectorSegment {
+  tcBegin: number;
+  tcEnd: number;
+  /** Color bucket (Eclipse `getValueIndex`): a stable index → a "good light color"; equal values share a color. */
+  colorIndex: number;
+  /** Raw sample value (for tooltips / Zoom-to-Value). */
+  value: number;
+  /** Display text (enum name or number, Eclipse `getValueText`). */
+  valueText: string;
+}
+
+/** The vector-data strip for one module axis in a given viewport. */
+export interface AxisVectorStrip {
+  moduleId: number;
+  segments: AxisVectorSegment[];
+}
+
+// ---------------------------------------------------------------------------------
+// elog/sc/listVectors, attachVector, detachVector (axis vector data)
+// ---------------------------------------------------------------------------------
+
+/** A vector's identity within a `.vec` file (also the persisted attachment key parts). */
+export interface VectorIdentity {
+  /** Run name the vector belongs to (empty string = the file's single/only run). */
+  run: string;
+  /** The vector's recording module full path (e.g. `Aloha.server`). */
+  vectorModule: string;
+  /** The vector's name (e.g. `serverState:vector`). */
+  vectorName: string;
+}
+
+export interface ScListVectorsParams {
+  /** Whole `.vec` file contents (the host reads the file and passes text; the worker has no workspace access of its own). */
+  content: string;
+}
+
+/** One selectable vector for the attach picker. */
+export interface ScVectorChoice extends VectorIdentity {
+  /** The columnSpec string, e.g. `ETV`/`TV`. */
+  columns: string;
+  /** `'int' | 'double' | 'enum'` or null. */
+  type: string | null;
+}
+
+export interface ScListVectorsResult {
+  runs: string[];
+  vectors: ScVectorChoice[];
+}
+
+export interface ScAttachVectorParams {
+  /** The axis module the vector is attached to. */
+  moduleId: number;
+  /** Whole `.vec` file contents. */
+  content: string;
+  vector: VectorIdentity;
+}
+
+export interface ScDetachVectorParams {
+  moduleId: number;
 }
 
 // ---------------------------------------------------------------------------------

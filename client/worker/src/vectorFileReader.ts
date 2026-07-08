@@ -198,6 +198,31 @@ export function listVectors(content: string): VecListing {
 }
 
 /**
+ * Color bucket for a sample value (Eclipse `AxisVectorBarRenderer.getValueIndex`): enum/int
+ * types and whole-number doubles use the integer value itself (so equal values share a
+ * color); non-integer doubles fall back to the sample index (each distinct value → a
+ * distinct color). The index is fed to a "good light color" palette on the client.
+ */
+export function vectorValueIndex(value: number, info: Pick<VecVectorInfo, 'type'>, sampleIndex: number): number {
+  if (info.type === 'enum' || info.type === 'int') return Math.floor(value);
+  if (value === Math.floor(value)) return Math.floor(value);
+  return sampleIndex;
+}
+
+/**
+ * Display text for a sample value (Eclipse `getValueText`): an enum's symbolic name when the
+ * vector is an enum and the value is a known member; otherwise the integer (for whole
+ * numbers) or the raw double.
+ */
+export function vectorValueText(value: number, info: Pick<VecVectorInfo, 'enum'>): string {
+  if (info.enum) {
+    const name = info.enum.get(Math.floor(value));
+    if (name !== undefined) return name;
+  }
+  return value === Math.floor(value) ? String(Math.floor(value)) : String(value);
+}
+
+/**
  * Loads ONE vector (by id) fully into memory: its info plus every `(eventNumber?, simtime,
  * value)` sample, streaming the whole file once. Returns null if the id has no declaration.
  */

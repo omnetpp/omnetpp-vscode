@@ -88,7 +88,14 @@ import type {
   RenderDependency,
   RenderMethodCall,
   ReleaseMemoryResult,
+  AxisVectorStrip,
+  AxisVectorSegment,
+  ScListVectorsParams,
+  ScListVectorsResult,
+  ScAttachVectorParams,
+  ScDetachVectorParams,
 } from '@omnetpp/shared/elog-protocol';
+import { listVectors, readVector, vectorValueIndex, vectorValueText, type VecSample, type VecVectorInfo } from './vectorFileReader';
 
 /** Thrown by `runJob()` when the job's cancel flag is observed set (see engineThread.ts). Mapped to `ErrorCodes.RequestCancelled` there. */
 export class RequestCancelledError extends Error {
@@ -129,6 +136,14 @@ export class EngineSession {
   private logVersion = 0;
 
   private pinnedViewportEventNumbers: number[] = [];
+
+  /**
+   * Axis vector-data attachments (Eclipse's `moduleIdToAxisRendererMap` for
+   * `AxisVectorBarRenderer`s): module id → the fully-loaded vector. Each `scGetViewport`
+   * emits the visible value-step segments for these. Survives a filter change (like Java,
+   * which does not clear the map on filter); dropped on `close()`.
+   */
+  private attachedVectors = new Map<number, { info: VecVectorInfo; samples: VecSample[] }>();
 
   /**
    * Phase E9 (live follow): the event number of the last event as of the most recent
@@ -354,6 +369,7 @@ export class EngineSession {
     this.tableFacade = null;
     this.pinnedViewportEventNumbers = [];
     this.pinnedLastEventNumber = null;
+    this.attachedVectors.clear();
   }
 
   private rebuildFacades(log: IEventLog): void {
@@ -529,6 +545,8 @@ export class EngineSession {
       }
     }
 
+    const axisVectorStrips = this.attachedVectors.size > 0 ? this.buildAxisVectorStrips(startEvent, endEvent) : undefined;
+
     return {
       coordinateSystemVersion: facade.getTimelineCoordinateSystemVersion(),
       events,
@@ -536,7 +554,86 @@ export class EngineSession {
       methodCalls,
       moduleIds: [...moduleIds],
       truncated,
+      axisVectorStrips,
     };
+  }
+
+  // ---- axis vector data (Eclipse AxisVectorBarRenderer) ------------------------------
+
+  /** `elog/sc/listVectors` -- parse a `.vec` file's declarations for the attach picker. */
+  scListVectors(params: ScListVectorsParams): ScListVectorsResult {
+    const { runs, vectors } = listVectors(params.content);
+    return {
+      runs,
+      vectors: vectors.map((v) => ({ run: runs[0] ?? '', vectorModule: v.module, vectorName: v.name, columns: v.columns.spec, type: v.type })),
+    };
+  }
+
+  /** `elog/sc/attachVector` -- load the chosen vector's samples and attach it to a module axis. */
+  scAttachVector(params: ScAttachVectorParams): void {
+    const { vectors } = listVectors(params.content);
+    const decl = vectors.find((v) => v.module === params.vector.vectorModule && v.name === params.vector.vectorName);
+    if (!decl) throw new Error(`attachVector: vector ${params.vector.vectorModule}:${params.vector.vectorName} not found`);
+    const data = readVector(params.content, decl.id);
+    if (!data) throw new Error(`attachVector: could not read vector id ${decl.id}`);
+    this.attachedVectors.set(params.moduleId, data);
+  }
+
+  /** `elog/sc/detachVector` -- drop a module axis's attached vector. */
+  scDetachVector(params: ScDetachVectorParams): void {
+    this.attachedVectors.delete(params.moduleId);
+  }
+
+  /**
+   * Builds the per-axis value-step segments for every attached vector that overlaps the
+   * `[startEvent, endEvent]` window (Eclipse `AxisVectorBarRenderer.drawAxis`): each sample
+   * holds its value from its own event to the next sample's event; the segment's `[tcBegin,
+   * tcEnd]` comes from mapping those event numbers to timeline coordinates (falling back to
+   * the sample's simulation time when the event is filtered out / unknown).
+   */
+  private buildAxisVectorStrips(startEvent: IEvent | null, endEvent: IEvent | null): AxisVectorStrip[] {
+    const facade = this.sc;
+    const startNo = startEvent?.getEventNumber() ?? 0;
+    const endNo = endEvent?.getEventNumber() ?? Number.MAX_SAFE_INTEGER;
+    const strips: AxisVectorStrip[] = [];
+    for (const [moduleId, data] of this.attachedVectors) {
+      const segments: AxisVectorSegment[] = [];
+      const s = data.samples;
+      for (let i = 0; i < s.length; i++) {
+        const next = s[i + 1];
+        // The segment spans this sample's event .. the next sample's event (or +inf for the
+        // last one). Cull segments entirely outside the visible event window (a coarse but
+        // cheap bound; the client clips to pixels).
+        const segEndNo = next ? next.eventNumber ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER;
+        const segStartNo = s[i].eventNumber ?? 0;
+        if (segEndNo < startNo || segStartNo > endNo) continue;
+        const tcBegin = this.vectorSampleTc(facade, s[i]);
+        const tcEnd = next ? this.vectorSampleTc(facade, next) : tcBegin;
+        if (tcBegin === null) continue;
+        segments.push({
+          tcBegin,
+          tcEnd: tcEnd ?? tcBegin,
+          colorIndex: vectorValueIndex(s[i].value, data.info, i),
+          value: s[i].value,
+          valueText: vectorValueText(s[i].value, data.info),
+        });
+      }
+      if (segments.length > 0) strips.push({ moduleId, segments });
+    }
+    return strips;
+  }
+
+  /** Maps a vector sample to a timeline coordinate: by its event number when present/known, else by its simulation time (Eclipse's filtered-event fallback). */
+  private vectorSampleTc(facade: SequenceChartFacade, sample: VecSample): number | null {
+    if (sample.eventNumber !== null) {
+      const event = this.log.getEventForEventNumber(sample.eventNumber);
+      if (event !== null) return facade.getTimelineCoordinateBegin(event);
+    }
+    try {
+      return facade.getTimelineCoordinateForSimulationTime(BigDecimal.parse(String(sample.simtime)));
+    } catch {
+      return null;
+    }
   }
 
   private resolveViewportRange(range: ViewportParams['range'], marginTc: number): { startEvent: IEvent | null; endEvent: IEvent | null } {
