@@ -429,7 +429,12 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       // STEP/NONLINEAR modes with `separateEventLogEntries` on (the engine returns
       // `tcEnd === tcBegin` otherwise -- see SequenceChartFacade.getTimelineCoordinateDelta).
       const xEnd = event.tcEnd === event.tcBegin ? x : contentX(event.tcEnd, viewport);
-      if (xEnd < GUTTER_LEFT_WIDTH - EVENT_RADIUS || x > viewport.canvasWidth + EVENT_RADIUS) continue;
+      // Cull only against the CANVAS edges, not the left gutter: the leaf-label strip is
+      // transparent and the axis lines run under it, so events whose x lands there (e.g. the
+      // init event #0 at t=0, right at the left edge) must still be drawn -- they were
+      // vanishing when clipped at GUTTER_LEFT_WIDTH. The opaque compound band (overlay, on
+      // top) naturally covers the tiny slice behind it.
+      if (xEnd < -EVENT_RADIUS || x > viewport.canvasWidth + EVENT_RADIUS) continue;
 
       const xKey = Math.round(x);
       let col = columnDensity.get(xKey);
