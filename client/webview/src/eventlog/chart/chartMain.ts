@@ -154,6 +154,14 @@ interface PersistedChartState {
    * "Empty" preset) and must round-trip as such.
    */
   openAxisModulePaths?: string[];
+  /**
+   * Axis vector-data attachments, keyed by module FULL PATH (same ids-in-memory /
+   * paths-persisted rule as `openAxisModulePaths` -- module ids aren't stable across worker
+   * reloads). Only the vector's identity + file uri is stored (never sample data); on load
+   * the host re-reads the `.vec` and re-loads the vector (Eclipse persists the identity and
+   * reloads too).
+   */
+  axisVectorAttachments?: { modulePath: string; fileUri: string; vector: VectorIdentity }[];
   /** Phase U8 -- `SequenceChart.AxisOrderingMode`, persisted like `timelineMode`. */
   axisOrderingMode?: AxisOrderingMode;
   /** Phase U8 -- `ManualAxisOrder.lastAxisModuleOrder` as module full paths (the persistent TOTAL order over every module ever seen -- both the Manual mode and Minimize Crossings' re-basing read it). */
@@ -180,7 +188,7 @@ interface PersistedChartState {
 }
 
 /** Phase U10 -- bump whenever `PersistedChartState`'s shape changes in a way older code could misinterpret; see `persistedState.ts`'s header for the tolerant-load policy this gates. */
-const CHART_STATE_VERSION = 1;
+const CHART_STATE_VERSION = 2;
 
 const vscode = acquireVsCodeApi();
 const rpc = new EngineRpc(vscode);
@@ -393,9 +401,39 @@ function setOpenAxisModules(ids: number[]): void {
   scheduleRender();
 }
 
+/** Serializes the runtime axis-vector-attachment map to persisted state, keyed by module full path (see `PersistedChartState.axisVectorAttachments`). No-op without a tree (can't resolve paths). */
+function syncVectorAttachmentsToState(): void {
+  if (moduleTree === null) return;
+  const entries: NonNullable<PersistedChartState['axisVectorAttachments']> = [];
+  for (const [moduleId, att] of axisVectorAttachments) {
+    const modulePath = findModuleFullPath(moduleId, moduleTree);
+    if (modulePath !== null) entries.push({ modulePath, fileUri: att.fileUri, vector: att.vector });
+  }
+  state = { ...state, axisVectorAttachments: entries };
+  persistState();
+}
+
+/**
+ * After the module tree loads, ask the host to re-attach any persisted vectors (resolving
+ * module path → id against the CURRENT tree; the host re-reads each `.vec`). Posts for every
+ * resolvable persisted entry (not gated on the current map) so an `overwritten` reload -- in
+ * which the worker dropped its attachments on close -- restores them too; the host re-attach
+ * is idempotent and tree (re)loads are infrequent.
+ */
+function reattachPersistedVectors(): void {
+  if (moduleTree === null || !state.axisVectorAttachments) return;
+  for (const att of state.axisVectorAttachments) {
+    const moduleId = findModuleIdByFullPath(att.modulePath, moduleTree);
+    if (moduleId !== null) vscode.postMessage({ type: 'reattachAxisVector', moduleId, fileUri: att.fileUri, vector: att.vector });
+  }
+}
+
 /** Resolves the persisted open set (or applies Java's default, `openModuleRecursively(root)`) once the module tree is available. Also re-run after an `overwritten` change re-fetches the tree (paths re-resolve against the NEW tree; ids would not). */
 function initializeOpenAxisModules(): void {
   if (moduleTree === null) return;
+  // Re-attach persisted axis vectors now the tree (and thus module paths) resolve; also
+  // covers an `overwritten` reload, where the worker dropped its attachments on close.
+  reattachPersistedVectors();
   const persisted = state.openAxisModulePaths;
   if (persisted === undefined) {
     openAxisModuleIds = defaultOpenAxisModules(moduleTree);
@@ -2467,7 +2505,7 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
       // keyed by range/version, which don't change when only the attachment set does).
       if (message.attachment) axisVectorAttachments.set(message.moduleId, message.attachment);
       else axisVectorAttachments.delete(message.moduleId);
-      persistState();
+      syncVectorAttachmentsToState();
       renderModelCache.invalidateAll();
       scheduleRender();
       break;
