@@ -368,7 +368,8 @@ test('buildChartContextMenu: Show/Hide submenu lists every toggle, checked state
   const flags = { ...DEFAULT_DISPLAY_FLAGS, showEventNumbers: false };
   const entries = buildChartContextMenu(makeParams(actions, { displayFlags: flags }));
   const sub = submenuOf(entries, 'showHide');
-  assert.ok(sub.length >= 24, 'expected ~25 Show/Hide toggles');
+  assert.equal(sub.length, 25, 'all 25 Eclipse Show/Hide toggles are present');
+  assert.ok(findEntry(sub, 'flag-showAxisVectorData'), 'Axis Vector Data toggle present (Eclipse parity)');
 
   const eventNumbersEntry = findEntry(sub, 'flag-showEventNumbers')! as { checked: boolean; onSelect: () => void };
   assert.equal(eventNumbersEntry.checked, false);
@@ -383,7 +384,7 @@ test('buildShowHideEntries (phase U10, chart toolbar Show/Hide button): same ite
   const flags = { ...DEFAULT_DISPLAY_FLAGS, showEventNumbers: false };
   const calls: unknown[][] = [];
   const entries = buildShowHideEntries(flags, { toggleDisplayFlag: (...args) => calls.push(args) });
-  assert.ok(entries.length >= 24, 'expected ~25 Show/Hide toggles');
+  assert.equal(entries.length, 25, 'all 25 Eclipse Show/Hide toggles are present');
   const eventNumbersEntry = findEntry(entries, 'flag-showEventNumbers')! as { checked: boolean; onSelect: () => void };
   assert.equal(eventNumbersEntry.checked, false);
   eventNumbersEntry.onSelect();

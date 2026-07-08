@@ -8,12 +8,12 @@
  * modes" — see `sequenceChartEditor.ts`'s per-uri `workspaceState` blob, mirroring
  * `eventLogTableView.ts`'s `TABLE_STATE_KEY` pattern).
  *
- * `showAxisVectorData` is kept in the shape (state round-trips it, so restoring an
- * older/newer persisted blob never drops an unrelated field) but has NO toggle in
- * `TOGGLE_ORDER` and NO rendering effect — the `.vec` axis-data strips themselves are
- * out of scope for this whole port (per the port plan's decision record), so there is
- * nothing for this flag to gate; it stays present only so a hand-written blob shaped
- * like Java's real persisted state doesn't fail to round-trip.
+ * `showAxisVectorData` now HAS a `TOGGLE_ORDER` entry (for full parity with Eclipse's
+ * Show/Hide list — all 25 options present), but still has NO rendering effect: the `.vec`
+ * axis-data strips themselves are out of scope for this whole port (per the port plan's
+ * decision record), so there is nothing for this flag to gate yet. It persists/round-trips
+ * like every other flag; toggling it simply has no visual effect until `.vec` rendering
+ * lands in a later phase.
  */
 
 export interface ChartDisplayFlags {
@@ -102,6 +102,10 @@ export const TOGGLE_ORDER: [keyof ChartDisplayFlags, string][] = [
   ['showAxes', 'Axes'],
   ['showAxisLabels', 'Axis Labels'],
   ['showAxisHeaders', 'Axis Headers'],
+  // Present for full parity with Eclipse's Show/Hide list (all 25 options). The `.vec`
+  // axis-data strip RENDERING is still out of scope for this port, so toggling this has no
+  // visual effect yet -- it round-trips/persists like the others so the menu matches Eclipse.
+  ['showAxisVectorData', 'Axis Vector Data'],
   ['showEmptyAxes', 'Empty Axes'],
   ['showHairlines', 'Hairlines'],
   ['showZeroSimulationTimeRegions', 'Zero Simulation Time Regions'],
