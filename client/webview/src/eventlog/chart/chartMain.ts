@@ -70,7 +70,7 @@ import { mergeDisplayFlags, presetDefaultFlags, presetNetworkCommunicationFlags,
 import { bookmarkDependencyKey, buildDrawList, type DrawPrimitive, type InfoPanelText } from './drawList';
 import { openSelectModulesDialog } from './selectModulesDialog';
 import { openListReorderDialog } from './reorderDialog';
-import { calculateTicks, formatTickLabel } from './ticks';
+import { calculateTicks, formatTickLabel, formatTickTime } from './ticks';
 import { ANTIALIAS_TURN_OFF_AT_MSEC, ANTIALIAS_TURN_ON_AT_MSEC, createCanvasStack, DEFAULT_CHART_FONT_SIZE_PX, renderPrimitivesToCanvas, type CanvasStackHandle } from './canvasStack';
 import { openExportRangeDialog, type ExportDialogResult } from './exportDialog';
 import { buildChartSvg, computeExportWidthPx, resolveExportRange, type ExportRangeContext } from './svgExport';
@@ -224,6 +224,8 @@ let selection: ChartSelectionState = EMPTY_CHART_SELECTION;
 /** Phase U11 -- the object(s) currently under the cursor, highlighted "bold red" on hover (Java `highlightedObjects`). `hoverSignature` guards re-renders so a hover that doesn't change the target is a no-op. */
 let hovered: { events: Set<number>; dependencyKeys: Set<string>; axisModuleIds: Set<number> } = { events: new Set(), dependencyKeys: new Set(), axisModuleIds: new Set() };
 let hoverSignature = '';
+/** Phase U11 -- the content-area canvas x of the cursor, for the live "tick under the mouse" hairline (`drawTickUnderMouse()`); `null` when the pointer is off the content area. */
+let mouseContentX: number | null = null;
 /** Phase U5 -- the ~25 Show/Hide toggles (`displayFlags.ts`), including `showTimeDifferences` (Tab toggle, port of `SequenceChart.java`'s `setShowTimeDifferences`). */
 let displayFlags: ChartDisplayFlags = mergeDisplayFlags(state.displayFlags);
 /**
@@ -651,6 +653,7 @@ function renderFrame(): void {
     selectedAxisModuleIds: selection.axes,
     selectedTimelineCoords: [...selection.timelineCoords].map((tc) => ({ tc, simulationTime: String(simTimeAt(tc) ?? 0) })),
     hovered,
+    mouseTick: mouseContentX !== null ? { x: mouseContentX, label: formatTickTime(simTimeAt(fullCanvasPxToTc(mouseContentX, viewport) ?? viewport.leftTc) ?? 0) } : undefined,
     bookmarkedEventNumbers,
     bookmarkedModuleIds,
     bookmarkedDependencyKeys,
@@ -1365,17 +1368,23 @@ function updateHover(px: number, py: number): void {
     else if (hit.kind === 'dependency') dependencyKeys.add(dependencyKey(hit));
     else if (hit.kind === 'axis') axisModuleIds.add(hit.moduleId);
   }
+  // Live mouse-time hairline follows the cursor, so a plain move (no target change) must
+  // still repaint. Track the content-area x here and repaint if EITHER it or the hover
+  // target changed. rAF-coalesced by scheduleRender(), same cost profile as a drag.
+  const newMouseX = px >= GUTTER_LEFT_WIDTH && px <= viewport.canvasWidth ? px : null;
   const sig = `e:${[...events].sort((a, b) => a - b).join(',')}|d:${[...dependencyKeys].sort().join(',')}|a:${[...axisModuleIds].sort((a, b) => a - b).join(',')}`;
-  if (sig === hoverSignature) return;
+  if (sig === hoverSignature && newMouseX === mouseContentX) return;
   hoverSignature = sig;
   hovered = { events, dependencyKeys, axisModuleIds };
+  mouseContentX = newMouseX;
   scheduleRender();
 }
 
 function clearHover(): void {
-  if (hoverSignature === '') return;
+  if (hoverSignature === '' && mouseContentX === null) return;
   hoverSignature = '';
   hovered = { events: new Set(), dependencyKeys: new Set(), axisModuleIds: new Set() };
+  mouseContentX = null;
   scheduleRender();
 }
 

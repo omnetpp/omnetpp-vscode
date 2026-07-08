@@ -279,7 +279,9 @@ function emitPrimitive(b: SvgBuilder, p: DrawPrimitive, fontFamily: string): voi
       return;
     }
     case 'moduleAction':
-      // Interactive-only chart chrome -- not exported, see this file's header.
+    case 'mouseTick':
+      // Interactive-only chart chrome (glyph hotspots / the live mouse-time hairline) --
+      // not exported, see this file's header.
       return;
   }
 }

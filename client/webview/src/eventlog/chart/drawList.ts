@@ -100,6 +100,8 @@ export type DrawPrimitive =
   | { kind: 'selectionMark'; x: number; xEnd: number; y: number; radius: number; color: string }
   /** Phase U11 — a selected timeline coordinate (a background click): a vertical line spanning the content height (Java `drawTimelineMark()`). */
   | { kind: 'timelineMark'; x: number; y0: number; y1: number; color: string }
+  /** Phase U11 — the live "tick under the mouse" (Java `drawTickUnderMouse()`): a vertical hairline following the cursor plus a small labelled box, in the top gutter, showing the exact simulation time under the pointer. */
+  | { kind: 'mouseTick'; x: number; y0: number; y1: number; label: string; lineColor: string; textColor: string; bgColor: string }
   /**
    * Phase U6 — a bookmark mark: a small filled "flag" glyph, port of Eclipse's
    * bookmark ring/flag decoration on the event mark (`IMarker.BOOKMARK`'s default
@@ -250,6 +252,8 @@ export interface BuildDrawListParams {
   selectedAxisModuleIds?: ReadonlySet<number>;
   /** Phase U11 — selected timeline coordinates (background clicks): each draws a vertical `'timelineMark'` line AND participates in the time-difference measurement. The caller resolves each tc's simulation time (this pure module has no simtime<->tc table). */
   selectedTimelineCoords?: ReadonlyArray<{ tc: number; simulationTime: string }>;
+  /** Phase U11 — the live tick under the mouse (`drawTickUnderMouse()`): a vertical hairline + a top-gutter time box following the cursor. `x` is the content-area canvas x; `label` the formatted simulation time. Omitted when the pointer is off the content area. */
+  mouseTick?: { x: number; label: string };
   /** Phase U11 — the object(s) under the cursor (hover), redrawn "bold" in the highlight color (Java `drawHightlightedObjects()`, `highlightedObjects` populated on mouseMove). Usually holds the single hit group at the pointer. */
   hovered?: { events?: ReadonlySet<number>; dependencyKeys?: ReadonlySet<string>; axisModuleIds?: ReadonlySet<number> };
   /** Phase U6 — event numbers with an `'Event'`-kind bookmark; each gets a `'bookmarkMark'` flag near its event mark. */
@@ -547,6 +551,12 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
 
   // Phase U11 -- selection/hover emphasis last, so it layers on top of the base scene.
   for (const p of emphasis) primitives.push(p);
+
+  // Phase U11 -- the live "tick under the mouse": a vertical hairline + a top-gutter time
+  // box, drawn on the very top so it tracks the cursor over everything else.
+  if (params.mouseTick && params.mouseTick.x >= GUTTER_LEFT_WIDTH && params.mouseTick.x <= viewport.canvasWidth) {
+    primitives.push({ kind: 'mouseTick', x: params.mouseTick.x, y0: GUTTER_TOP_HEIGHT, y1: viewport.canvasHeight, label: params.mouseTick.label, lineColor: theme.descriptionForeground, textColor: theme.isDark ? theme.foreground : '#000000', bgColor: theme.isDark ? '#264f4f' : '#e0ffff' });
+  }
   return primitives;
 }
 

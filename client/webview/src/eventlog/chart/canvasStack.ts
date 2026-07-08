@@ -158,7 +158,7 @@ export interface CanvasStackHandle {
   dispose(): void;
 }
 
-const NONCACHEABLE_KINDS = new Set<DrawPrimitive['kind']>(['gutter', 'tick', 'axisLabel', 'label', 'selectionMark', 'bookmarkMark', 'infoPanel', 'timeDifferenceLabel', 'moduleAction']);
+const NONCACHEABLE_KINDS = new Set<DrawPrimitive['kind']>(['gutter', 'tick', 'axisLabel', 'label', 'selectionMark', 'bookmarkMark', 'infoPanel', 'timeDifferenceLabel', 'moduleAction', 'mouseTick']);
 
 /**
  * "Gutter chrome": overlay primitives that live in (or must stay on top of) the left/top
@@ -178,6 +178,7 @@ function isGutterChrome(p: DrawPrimitive): boolean {
     case 'moduleAction':
     case 'infoPanel':
     case 'bookmarkMark':
+    case 'mouseTick':
       return true;
     case 'label':
       return p.y < GUTTER_TOP_HEIGHT;
@@ -362,6 +363,33 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       ctx.stroke();
       ctx.lineWidth = 1;
       break;
+    case 'mouseTick': {
+      // The live "time under the mouse": a dashed vertical hairline + a small labelled box
+      // in the top gutter (Java `drawTickUnderMouse()`).
+      ctx.strokeStyle = p.lineColor;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 2]);
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y0);
+      ctx.lineTo(p.x, p.y1);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = secondaryFont;
+      ctx.textBaseline = 'middle';
+      const tw = ctx.measureText(p.label).width;
+      const boxW = tw + 8;
+      const boxH = 15;
+      const boxX = Math.max(0, p.x - boxW / 2);
+      const boxY = 3;
+      ctx.fillStyle = p.bgColor;
+      ctx.fillRect(boxX, boxY, boxW, boxH);
+      ctx.strokeStyle = p.lineColor;
+      ctx.strokeRect(boxX, boxY, boxW, boxH);
+      ctx.fillStyle = p.textColor;
+      ctx.textAlign = 'center';
+      ctx.fillText(p.label, boxX + boxW / 2, boxY + boxH / 2);
+      break;
+    }
     case 'eventMark':
     case 'selfEventMark': {
       // Port of Java `drawEvent()` (SequenceChart.java:3900-3911): a plain filled disc
