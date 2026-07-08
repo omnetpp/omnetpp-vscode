@@ -322,8 +322,11 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
   }
 
   // ---- gutter backgrounds (drawn first, everything else on top) ----
+  // Only the TOP (ruler) gutter gets an opaque background. The LEFT (axis-label) gutter is
+  // intentionally transparent so the axis lines / chart show through the leaf-label strip
+  // (the compound-module band draws its own opaque background); this keeps the left column
+  // from covering the sequence chart. (No 'left' gutter fill is pushed.)
   primitives.push({ kind: 'gutter', part: 'top', x: 0, y: 0, w: viewport.canvasWidth, h: GUTTER_TOP_HEIGHT, color: theme.background });
-  primitives.push({ kind: 'gutter', part: 'left', x: 0, y: 0, w: GUTTER_LEFT_WIDTH, h: viewport.canvasHeight, color: theme.background });
 
   // ---- simtime ruler ticks (vertical hairlines spanning the content height; labels drawn separately as 'label') ----
   // Phase U10 (cheap-gap fix): the hairline itself (`showHairlines`, Java's `drawGutters()`
@@ -345,7 +348,9 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
     for (const axis of axesLayout.axes) {
       const y = axisRowY(axis.y, viewport);
       if (y < GUTTER_TOP_HEIGHT - axis.lineHeight || y > viewport.canvasHeight + axis.lineHeight) continue;
-      primitives.push({ kind: 'axisLine', moduleId: axis.moduleId, x1: GUTTER_LEFT_WIDTH, x2: viewport.canvasWidth, y, lineHeight: axis.lineHeight, color: theme.foreground });
+      // Axis line spans the FULL width (from x=0), so it runs under the transparent
+      // leaf-label strip -- the label reads as sitting on the chart, not on an opaque band.
+      primitives.push({ kind: 'axisLine', moduleId: axis.moduleId, x1: 0, x2: viewport.canvasWidth, y, lineHeight: axis.lineHeight, color: theme.foreground });
       const axisHovered = hovered?.axisModuleIds?.has(axis.moduleId) ?? false;
       const axisSelected = selectedAxisModuleIds?.has(axis.moduleId) ?? false;
       // Hover only makes the label BOLD (same color); selection turns it red -- see this
@@ -356,22 +361,20 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       // draws on top of everything.
       if (axisSelected) emphasis.push({ kind: 'axisSelectionMark', x1: GUTTER_LEFT_WIDTH, x2: viewport.canvasWidth, y, lineHeight: axis.lineHeight, color: emphasisColor });
       if (bookmarkedModuleIds?.has(axis.moduleId)) primitives.push({ kind: 'bookmarkMark', x: GUTTER_LEFT_WIDTH - 6, y, color: bookmarkMarkColor(theme) });
-      // Phase U8 -- per-axis expand/collapse/close glyphs (Java `layoutAxis()`'s
-      // ModuleActions). Right-aligned inside the left gutter (Java lays them out just
-      // right of the measured label text; this port has no synchronous text metrics in
-      // a pure module, so a fixed right-edge slot is used -- documented deviation,
-      // same hotspots either way). Order: [expand][collapse][close], close rightmost.
+      // Phase U8 -- per-axis expand/collapse glyphs (Java `layoutAxis()`'s ModuleActions),
+      // right-aligned in the left gutter. The "close" (remove-from-canvas) glyph is
+      // intentionally omitted: filtering / Select Modules already removes axes, and the
+      // per-axis X only cluttered the narrow strip. Leaf axes have neither expand nor
+      // collapse, so they show no glyph at all -- just their label.
       if (params.axisGlyphs) {
         const info = params.axisGlyphs.get(axis.moduleId);
         const gy = y - Math.round(MODULE_ACTION_SIZE / 2);
         let gx = GUTTER_LEFT_WIDTH - 4 - MODULE_ACTION_SIZE;
-        primitives.push({ kind: 'moduleAction', action: 'close', moduleId: axis.moduleId, scope: 'axis', x: gx, y: gy, size: MODULE_ACTION_SIZE, color: theme.descriptionForeground });
         if (info?.collapse) {
-          gx -= MODULE_ACTION_SIZE + 2;
           primitives.push({ kind: 'moduleAction', action: 'collapse', moduleId: axis.moduleId, scope: 'axis', x: gx, y: gy, size: MODULE_ACTION_SIZE, color: theme.descriptionForeground });
+          gx -= MODULE_ACTION_SIZE + 2;
         }
         if (info?.expand) {
-          gx -= MODULE_ACTION_SIZE + 2;
           primitives.push({ kind: 'moduleAction', action: 'expand', moduleId: axis.moduleId, scope: 'axis', x: gx, y: gy, size: MODULE_ACTION_SIZE, color: theme.descriptionForeground });
         }
       }
@@ -389,19 +392,18 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       if (y1 < GUTTER_TOP_HEIGHT || y0 > viewport.canvasHeight) continue;
       const x = 2 + level * HEADER_LEVEL_WIDTH;
       primitives.push({ kind: 'axisHeaderBox', x, y0, y1, label: header.label, color: theme.isDark ? '#2f5060' : '#d7f2f2', textColor: theme.isDark ? '#e0f0f0' : '#000000' });
-      // Phase U8 -- per-header glyphs (Java `layoutAxisHeader()`'s ModuleActions),
-      // stacked vertically at the top of the header band: [expand][collapse][close]
-      // top-down. Close on a HEADER removes the whole subtree (scope: 'header').
+      // Phase U8 -- per-header expand/collapse glyphs (Java `layoutAxisHeader()`'s
+      // ModuleActions), stacked at the top of the header band. The "close" glyph is
+      // omitted here too (see the per-axis note above).
       const headerInfo = params.headerGlyphs?.get(header.fullPath);
       if (headerInfo) {
         let gy = Math.max(y0, GUTTER_TOP_HEIGHT) + 2;
-        const pushGlyph = (action: 'expand' | 'collapse' | 'close'): void => {
+        const pushGlyph = (action: 'expand' | 'collapse'): void => {
           primitives.push({ kind: 'moduleAction', action, moduleId: headerInfo.moduleId, scope: 'header', x: x - 1, y: gy, size: MODULE_ACTION_SIZE, color: theme.descriptionForeground });
           gy += MODULE_ACTION_SIZE + 2;
         };
         if (headerInfo.expand) pushGlyph('expand');
         if (headerInfo.collapse) pushGlyph('collapse');
-        pushGlyph('close');
       }
     }
   }

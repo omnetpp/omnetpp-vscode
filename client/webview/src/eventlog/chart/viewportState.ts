@@ -25,8 +25,8 @@
  *    the viewport alone (Java: `eventLogChanged()`).
  */
 
-/** CSS px reserved on the left for axis labels — pinned, does not pan horizontally (Java: axis header column). */
-export const GUTTER_LEFT_WIDTH = 160;
+/** CSS px reserved on the left for axis labels — pinned, does not pan horizontally (Java: axis header column). Kept narrow: the compound-module hierarchy shows as a thin vertical band and the leaf-label strip is TRANSPARENT (the axis lines / chart show through it), so it needn't be wide. */
+export const GUTTER_LEFT_WIDTH = 110;
 /** CSS px reserved at the top for the simtime ruler — pans horizontally with content, fixed vertically (Java: `drawGutters`). */
 export const GUTTER_TOP_HEIGHT = 24;
 /** Java `SequenceChartStyleProvider.axisOffset` — px gap before the first axis and reserved below the last. */

@@ -171,16 +171,14 @@ test('events/dependencies referencing an axis not in axesLayout are skipped rath
   assert.strictEqual(primitives.filter((p) => p.kind === 'eventMark' || p.kind === 'selfEventMark').length, 0);
 });
 
-test('gutter backgrounds are always emitted, sized to the top/left gutter dimensions', () => {
+test('only the TOP (ruler) gutter gets an opaque background; the LEFT label strip is transparent (no left fill)', () => {
   const v = baseViewport(800, 600);
   const primitives = draw(v, [], []);
   const gutters = primitives.filter((p) => p.kind === 'gutter') as { part: string; w: number; h: number }[];
   const top = gutters.find((g) => g.part === 'top')!;
-  const left = gutters.find((g) => g.part === 'left')!;
   assert.strictEqual(top.w, v.canvasWidth);
   assert.strictEqual(top.h, GUTTER_TOP_HEIGHT);
-  assert.strictEqual(left.w, GUTTER_LEFT_WIDTH);
-  assert.strictEqual(left.h, v.canvasHeight);
+  assert.strictEqual(gutters.find((g) => g.part === 'left'), undefined, 'left gutter is transparent -- no fill emitted');
 });
 
 // ---------------------------------------------------------------------------------
@@ -422,7 +420,7 @@ test('displayFlags.showZeroSimulationTimeRegions=false -> no regionBand primitiv
 // phase U8: moduleAction glyphs + closed-submodule -> ancestor-axis attribution
 // ---------------------------------------------------------------------------------
 
-test('U8 axisGlyphs: close always, expand/collapse per the passed visibility info', () => {
+test('U8 axisGlyphs: expand/collapse per the passed visibility info (no "close" glyph -- filtering removes axes instead)', () => {
   const viewport = baseViewport();
   const axesLayout = deriveAxes(new Set([1, 2]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
   const axisGlyphs = new Map([
@@ -432,8 +430,9 @@ test('U8 axisGlyphs: close always, expand/collapse per the passed visibility inf
   const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, displayFlags: DEFAULT_DISPLAY_FLAGS, axisGlyphs });
   const glyphs = primitives.filter((p) => p.kind === 'moduleAction');
   const forModule = (id: number) => glyphs.filter((g) => g.moduleId === id).map((g) => g.action).sort();
-  assert.deepEqual(forModule(1), ['close', 'expand']);
-  assert.deepEqual(forModule(2), ['close', 'collapse']);
+  assert.deepEqual(forModule(1), ['expand']);
+  assert.deepEqual(forModule(2), ['collapse']);
+  assert.ok(glyphs.every((g) => g.action !== 'close'), 'no close glyphs');
   assert.ok(glyphs.every((g) => g.scope === 'axis'));
   // glyphs live inside the left gutter (right-aligned hotspot slots)
   assert.ok(glyphs.every((g) => g.x >= 0 && g.x + g.size <= GUTTER_LEFT_WIDTH));
