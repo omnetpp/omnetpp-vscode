@@ -42,7 +42,7 @@
 
 import type { ElogModule, EventDetail, RenderDependency, RenderMethodCall, TimelineEvent } from '@omnetpp/shared/elog-protocol';
 import { findModuleNode } from './axes';
-import { formatTickLabel } from './ticks';
+import { formatTickTime } from './ticks';
 import { formatSimulationTime, subtractDecimalStrings } from '../common/decimalTime';
 
 export { formatSimulationTime, subtractDecimalStrings };
@@ -163,7 +163,7 @@ export function buildMethodCallTooltip(call: RenderMethodCall, ctx: LabelProvide
 // ---------------------------------------------------------------------------------
 
 export function buildTimestampTooltip(simTime: number | null, beforeEventNumber: number | null, afterEventNumber: number | null): string {
-  let result = `<b>At</b> t = <b>${simTime !== null ? formatTickLabel(simTime) : '?'}</b>`;
+  let result = `<b>At</b> t = <b>${simTime !== null ? formatTickTime(simTime) : '?'}</b>`;
   if (beforeEventNumber !== null) result += `, just after event #${beforeEventNumber}`;
   if (afterEventNumber !== null) result += `, just before event #${afterEventNumber}`;
   return result;
