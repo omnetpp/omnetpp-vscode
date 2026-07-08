@@ -274,20 +274,21 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       ctx.fillRect(p.x, p.y, p.w, p.h);
       break;
     case 'axisHeaderBox': {
-      ctx.fillStyle = p.color;
-      const w = HEADER_BOX_WIDTH;
-      ctx.fillRect(p.x, p.y0, w, Math.max(1, p.y1 - p.y0));
-      ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(p.x, p.y0, w, Math.max(1, p.y1 - p.y0));
+      // Fully transparent band -- no fill/border covers the chart; only the rotated compound
+      // name is drawn, with a faint halo (p.color) so it stays legible over the timeline,
+      // zero-time regions and selection lines that now show through the hierarchy column.
       if (p.y1 - p.y0 > 20) {
         ctx.save();
-        ctx.fillStyle = p.textColor;
         ctx.font = axisHeaderFont;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.translate(p.x + w / 2, (p.y0 + p.y1) / 2);
+        ctx.translate(p.x + HEADER_BOX_WIDTH / 2, (p.y0 + p.y1) / 2);
         ctx.rotate(-Math.PI / 2);
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = p.color;
+        ctx.strokeText(p.label, 0, 0);
+        ctx.fillStyle = p.textColor;
         ctx.fillText(p.label, 0, 0);
         ctx.restore();
       }
@@ -296,7 +297,7 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
     case 'ellipseArc': {
       ctx.strokeStyle = p.color;
       ctx.lineWidth = p.width ?? 1;
-      ctx.setLineDash([]);
+      ctx.setLineDash(p.dash ?? []);
       const cx = (p.x1 + p.x2) / 2;
       const rx = Math.abs(p.x2 - p.x1) / 2;
       const ry = p.height;
@@ -307,6 +308,7 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       if (rx > 0) ctx.ellipse(cx, p.y, rx, ry, 0, startAngle, endAngle);
       else ctx.moveTo(cx, p.y - ry), ctx.lineTo(cx, p.y);
       ctx.stroke();
+      ctx.setLineDash([]);
       ctx.lineWidth = 1;
       break;
     }

@@ -189,14 +189,14 @@ function emitPrimitive(b: SvgBuilder, p: DrawPrimitive, fontFamily: string): voi
       b.el('text', { x: p.x, y: p.y - 2, fill: p.color, 'font-size': 12, 'font-weight': p.bold ? 'bold' : 'normal', 'font-family': fontFamily, 'text-anchor': 'start', 'dominant-baseline': 'text-after-edge' }, p.text);
       return;
     case 'axisHeaderBox': {
+      // Transparent band -- just the rotated name with a halo (p.color), no fill (see canvasStack.ts).
       const h = Math.max(1, p.y1 - p.y0);
-      b.el('rect', { x: p.x, y: p.y0, width: HEADER_BOX_WIDTH, height: h, fill: p.color, stroke: 'rgba(0,0,0,0.3)' });
       if (h > 20) {
         const cx = p.x + HEADER_BOX_WIDTH / 2;
         const cy = (p.y0 + p.y1) / 2;
         b.el(
           'text',
-          { x: 0, y: 0, fill: p.textColor, 'font-size': 10, 'font-family': fontFamily, 'text-anchor': 'middle', 'dominant-baseline': 'middle', transform: `translate(${fmt(cx)} ${fmt(cy)}) rotate(-90)` },
+          { x: 0, y: 0, fill: p.textColor, stroke: p.color, 'stroke-width': 3, 'paint-order': 'stroke', 'stroke-linejoin': 'round', 'font-size': 10, 'font-family': fontFamily, 'text-anchor': 'middle', 'dominant-baseline': 'middle', transform: `translate(${fmt(cx)} ${fmt(cy)}) rotate(-90)` },
           p.label,
         );
       }
@@ -232,12 +232,13 @@ function emitPrimitive(b: SvgBuilder, p: DrawPrimitive, fontFamily: string): voi
       const cx = (p.x1 + p.x2) / 2;
       const rx = Math.abs(p.x2 - p.x1) / 2;
       const ry = p.height;
+      const dashAttr = p.dash ? { 'stroke-dasharray': p.dash.join(',') } : {};
       if (rx <= 0) {
-        b.el('line', { x1: cx, y1: p.y - ry, x2: cx, y2: p.y, stroke: p.color, 'stroke-width': p.width ?? 1 });
+        b.el('line', { x1: cx, y1: p.y - ry, x2: cx, y2: p.y, stroke: p.color, 'stroke-width': p.width ?? 1, ...dashAttr });
         return;
       }
       const [startAngle, endAngle] = p.quarter === 0 ? [Math.PI, 1.5 * Math.PI] : p.quarter === 1 ? [1.5 * Math.PI, 2 * Math.PI] : [Math.PI, 2 * Math.PI];
-      b.el('path', { d: ellipseArcPolylinePath(cx, p.y, rx, ry, startAngle, endAngle), stroke: p.color, fill: 'none', 'stroke-width': p.width ?? 1 });
+      b.el('path', { d: ellipseArcPolylinePath(cx, p.y, rx, ry, startAngle, endAngle), stroke: p.color, fill: 'none', 'stroke-width': p.width ?? 1, ...dashAttr });
       return;
     }
     case 'parallelogram': {

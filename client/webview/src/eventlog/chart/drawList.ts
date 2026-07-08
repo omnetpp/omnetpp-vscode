@@ -90,7 +90,7 @@ export type DrawPrimitive =
   | { kind: 'eventDensityLine'; x: number; y0: number; y1: number; color: string }
   | { kind: 'arrow'; arrowKind: ArrowKind; x1: number; y1: number; x2: number; y2: number; color: string; dash?: number[]; ref?: ArrowRef; width?: number }
   | { kind: 'arrowHead'; x: number; y: number; angle: number; color: string; length: number; width: number }
-  | { kind: 'ellipseArc'; x1: number; x2: number; y: number; height: number; quarter: 0 | 1 | -1; color: string; ref?: ArrowRef; width?: number }
+  | { kind: 'ellipseArc'; x1: number; x2: number; y: number; height: number; quarter: 0 | 1 | -1; color: string; ref?: ArrowRef; width?: number; dash?: number[] }
   | { kind: 'parallelogram'; points: [[number, number], [number, number], [number, number], [number, number]]; color: string }
   | { kind: 'zigzag'; segments: LineSegment[]; color: string }
   | { kind: 'label'; x: number; y: number; text: string; color: string; align?: 'left' | 'center' | 'right'; rotateDeg?: number }
@@ -318,8 +318,10 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
     for (const region of computeZeroSimTimeRegions(events)) {
       const x0 = contentX(region.tcBegin, viewport);
       const x1 = contentX(region.tcEnd, viewport);
-      if (x1 < GUTTER_LEFT_WIDTH || x0 > viewport.canvasWidth) continue;
-      primitives.push({ kind: 'regionBand', x: Math.max(GUTTER_LEFT_WIDTH, x0), y: GUTTER_TOP_HEIGHT, w: Math.max(0, Math.min(viewport.canvasWidth, x1) - Math.max(GUTTER_LEFT_WIDTH, x0)), h: viewport.canvasHeight - GUTTER_TOP_HEIGHT, color: theme.regionBandColor });
+      // Extend into the (transparent) left label column, down to x=0 -- the module names /
+      // hierarchy band overlay it transparently, so zero-simtime regions stay visible there.
+      if (x1 < 0 || x0 > viewport.canvasWidth) continue;
+      primitives.push({ kind: 'regionBand', x: Math.max(0, x0), y: GUTTER_TOP_HEIGHT, w: Math.max(0, Math.min(viewport.canvasWidth, x1) - Math.max(0, x0)), h: viewport.canvasHeight - GUTTER_TOP_HEIGHT, color: theme.regionBandColor });
     }
   }
 
@@ -336,7 +338,9 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
   // hairline and has no Java flag of its own -- it is the ruler text drawn regardless.
   for (const tick of ticks) {
     const x = contentX(tick.tc, viewport);
-    if (x < GUTTER_LEFT_WIDTH || x > viewport.canvasWidth) continue;
+    // Ruler hairlines run all the way to the left canvas edge (x=0), through the transparent
+    // label column, so the timeline grid is visible behind the module names.
+    if (x < 0 || x > viewport.canvasWidth) continue;
     if (flags.showHairlines) primitives.push({ kind: 'tick', x, y0: GUTTER_TOP_HEIGHT, y1: viewport.canvasHeight, color: theme.border });
     primitives.push({ kind: 'label', x: x + 2, y: GUTTER_TOP_HEIGHT - 4, text: tick.label, color: theme.descriptionForeground, align: 'left' });
   }
@@ -391,7 +395,10 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       const y1 = axisRowY(lastAxis.y, viewport) + lastAxis.lineHeight;
       if (y1 < GUTTER_TOP_HEIGHT || y0 > viewport.canvasHeight) continue;
       const x = 2 + level * HEADER_LEVEL_WIDTH;
-      primitives.push({ kind: 'axisHeaderBox', x, y0, y1, label: header.label, color: theme.isDark ? '#2f5060' : '#d7f2f2', textColor: theme.isDark ? '#e0f0f0' : '#000000' });
+      // Transparent band: `color` is now a faint HALO behind the rotated name (drawn by the
+      // renderer as a text outline) instead of an opaque fill -- so the timeline/regions/
+      // selection lines behind the hierarchy stay fully visible (nothing is covered).
+      primitives.push({ kind: 'axisHeaderBox', x, y0, y1, label: header.label, color: theme.isDark ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.8)', textColor: theme.isDark ? '#cfe6e6' : '#123' });
       // (No per-header glyphs: when a compound is expanded it is ALSO drawn as an axis
       // row, whose expand/collapse glyph -- now placed right before its name above --
       // already controls it, so a second glyph in the band would just duplicate it.)
@@ -529,7 +536,8 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
   // selected time (Java `drawTimelineSelectionMarks()`), on top of the scene. ----
   for (const coord of selectedTimelineCoords ?? []) {
     const cx = contentX(coord.tc, viewport);
-    if (cx < GUTTER_LEFT_WIDTH || cx > viewport.canvasWidth) continue;
+    // The red time-selection line runs to the left canvas edge too, visible through the band.
+    if (cx < 0 || cx > viewport.canvasWidth) continue;
     emphasis.push({ kind: 'timelineMark', x: cx, y0: GUTTER_TOP_HEIGHT, y1: viewport.canvasHeight, color: emphasisColor });
   }
 
@@ -646,6 +654,10 @@ function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx:
   const consequenceX = dep.consequenceTc === null ? null : contentX(dep.consequenceTc, viewport);
 
   if (isSelf) {
+    // Self-message arcs are drawn DOTTED -- reuses (matching Java) AND self-message sends
+    // (per request, to set self-messages apart from cross-module sends). Emphasis (hover/
+    // selection) stays solid, so reuse `override` already cleared `dash` above.
+    const arcDash = override ? dash : [2, 2];
     let y = axisRowY(causeAxis.y, viewport);
     [y] = adjustEndpointsForEventRadius(y, y, EVENT_RADIUS, flags.showEventMarks);
     const geom = computeSelfArrowGeometry({
@@ -660,9 +672,9 @@ function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx:
     if (!geom) return;
     for (const seg of geom.segments) {
       if (Math.abs(seg.x2 - seg.x1) < 1 && !vlineBuffer.addAndCheck((seg.x1 + seg.x2) / 2, seg.y1, seg.y2)) continue;
-      primitives.push({ kind: 'arrow', arrowKind, x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2, color, dash: seg.dashed ? OFFSCREEN_DASH : dash, ref: depRef, width: arrowWidth });
+      primitives.push({ kind: 'arrow', arrowKind, x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2, color, dash: seg.dashed ? OFFSCREEN_DASH : arcDash, ref: depRef, width: arrowWidth });
     }
-    if (geom.ellipse) primitives.push({ kind: 'ellipseArc', ...geom.ellipse, color, ref: depRef, width: arrowWidth });
+    if (geom.ellipse) primitives.push({ kind: 'ellipseArc', ...geom.ellipse, color, ref: depRef, width: arrowWidth, dash: arcDash });
     if (geom.arrowhead) primitives.push({ kind: 'arrowHead', x: geom.arrowhead.x, y: geom.arrowhead.y, angle: geom.arrowhead.angle, color: geom.arrowhead.long ? LONG_ARROWHEAD_COLOR : color, length: geom.arrowhead.length, width: geom.arrowhead.width });
     if (isFiltered && geom.signAnchor) primitives.push({ kind: 'zigzag', segments: buildFilteredSignSegments(geom.signAnchor), color });
     if (flags.showMessageNames && showLabels && dep.messageName) primitives.push({ kind: 'label', x: geom.labelAnchor.x + (isFiltered ? 7 : 0), y: geom.labelAnchor.y, text: dep.messageName, color, align: 'left' });
