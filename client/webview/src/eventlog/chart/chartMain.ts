@@ -506,6 +506,19 @@ document.getElementById('root')!.innerHTML = `
 
 const canvasContainer = document.getElementById('chartCanvasContainer')!;
 const canvasStack: CanvasStackHandle = createCanvasStack(canvasContainer);
+// Phase U11 -- the Ctrl-drag rubber-band marquee, a DOM overlay (styled via CSSOM, since
+// the webview CSP blocks inline style attributes) so it follows the mouse without a
+// per-move canvas rebuild. Positioned relative to the (absolute) canvas container, whose
+// top-left is the content-area canvas origin the rect coordinates use.
+const marqueeEl = document.createElement('div');
+marqueeEl.style.position = 'absolute';
+marqueeEl.style.border = '1px dashed var(--vscode-focusBorder, #007fd4)';
+marqueeEl.style.background = 'var(--vscode-focusBorder, #007fd4)';
+marqueeEl.style.opacity = '0.18';
+marqueeEl.style.pointerEvents = 'none';
+marqueeEl.style.display = 'none';
+marqueeEl.style.zIndex = '5';
+canvasContainer.appendChild(marqueeEl);
 notificationOverlay = mountNotificationOverlay(document.getElementById('notificationHost')!, refreshFromOverlay);
 
 const hscrollEl = document.getElementById('hscroll')!;
@@ -1918,6 +1931,33 @@ attachInteractions(canvasContainer, {
   getCursorAt: (px, py) => (hitTestAt(px, py).some((h) => h.kind === 'moduleAction') ? 'pointer' : null),
   onHover: updateHover,
   onHoverEnd: clearHover,
+  onRubberBand: (rect) => {
+    if (!rect) {
+      marqueeEl.style.display = 'none';
+      return;
+    }
+    marqueeEl.style.left = `${Math.min(rect.x0, rect.x1)}px`;
+    marqueeEl.style.top = `${Math.min(rect.y0, rect.y1)}px`;
+    marqueeEl.style.width = `${Math.abs(rect.x1 - rect.x0)}px`;
+    marqueeEl.style.height = `${Math.abs(rect.y1 - rect.y0)}px`;
+    marqueeEl.style.display = 'block';
+  },
+  onZoomToRect: (rect) => {
+    marqueeEl.style.display = 'none';
+    // Horizontal: zoom-to-fit the rectangle's tc span (mapped from screen px with the
+    // pre-zoom viewport). Vertical: the port has no vertical zoom, so scroll the axis
+    // stack to bring the rectangle's top into view.
+    const tc0 = fullCanvasPxToTc(rect.x0, viewport);
+    const tc1 = fullCanvasPxToTc(rect.x1, viewport);
+    const ryTop = Math.min(rect.y0, rect.y1);
+    const axesLayout = currentAxesLayout();
+    const targetVscroll = ryTop - GUTTER_TOP_HEIGHT + viewport.vscroll;
+    if (tc0 !== null && tc1 !== null && Math.abs(tc1 - tc0) > 1e-12) {
+      viewport = zoomToFit(viewport, Math.min(tc0, tc1), Math.max(tc0, tc1), 0);
+    }
+    viewport = scrollVerticalTo(viewport, targetVscroll, maxVerticalScroll(axesLayout, contentHeight(viewport)));
+    scheduleRender();
+  },
   onClick: handleClick,
   onDoubleClick: handleDoubleClick,
   onContextMenu: openChartContextMenu,

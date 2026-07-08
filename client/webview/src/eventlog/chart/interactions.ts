@@ -67,6 +67,10 @@ export interface InteractionCallbacks {
   onHover?(px: number, py: number): void;
   /** Phase U11 — the pointer left the canvas, or a drag started; clear any hover highlight. */
   onHoverEnd?(): void;
+  /** Phase U11 — a Ctrl/Cmd-drag rubber-band rectangle is in progress (content-area canvas px); `null` when it ends/cancels. Used to draw the marquee. */
+  onRubberBand?(rect: { x0: number; y0: number; x1: number; y1: number } | null): void;
+  /** Phase U11 — a Ctrl/Cmd-drag rubber-band was released; zoom the viewport to fit the rectangle (Java's rubber-band `zoomToRectangle`). */
+  onZoomToRect?(rect: { x0: number; y0: number; x1: number; y1: number }): void;
   onContextMenu(clientX: number, clientY: number, hits: HitObject[]): void;
   onEscape(): void;
   onRefresh(): void;
@@ -93,6 +97,13 @@ export function attachInteractions(canvas: HTMLElement, cb: InteractionCallbacks
   let dragMoved = false;
   let lastClientX = 0;
   let lastClientY = 0;
+  // Phase U11 -- Ctrl/Cmd-drag rubber-band zoom. `rubberBanding` is armed on a modified
+  // mousedown; `rbStart` holds the anchor (content-area canvas px). It becomes a real
+  // marquee only once movement crosses the click/drag threshold (`dragMoved`), so a plain
+  // Ctrl-click still toggles selection instead of zooming.
+  let rubberBanding = false;
+  let rbStartX = 0;
+  let rbStartY = 0;
 
   function mutate(fn: (v: ViewportState, axesLayout: AxesLayout) => ViewportState): void {
     const v = cb.getViewport();
@@ -112,17 +123,31 @@ export function attachInteractions(canvas: HTMLElement, cb: InteractionCallbacks
 
   const onMouseDown = (e: MouseEvent): void => {
     if (e.button !== 0) return;
-    dragging = true;
     dragMoved = false;
     lastClientX = e.clientX;
     lastClientY = e.clientY;
-    cb.onHoverEnd?.(); // no hover highlight while grabbing
+    cb.onHoverEnd?.(); // no hover highlight while grabbing/marquee
+    // Ctrl/Cmd+drag -> rubber-band zoom rectangle instead of pan.
+    if ((e.ctrlKey || e.metaKey) && cb.onZoomToRect) {
+      rubberBanding = true;
+      const { px, py } = contentPoint(e);
+      rbStartX = px;
+      rbStartY = py;
+      return;
+    }
+    dragging = true;
     // Cursor stays the plain arrow on button-down; the 4-way panning cursor only appears
     // once movement actually crosses the drag threshold (see onMouseMove) -- a mousedown
     // that turns out to be a click never flashes the pan cursor.
   };
 
   const onMouseMove = (e: MouseEvent): void => {
+    if (rubberBanding) {
+      const { px, py } = contentPoint(e);
+      if (Math.abs(e.clientX - lastClientX) > CLICK_DRAG_THRESHOLD_PX || Math.abs(e.clientY - lastClientY) > CLICK_DRAG_THRESHOLD_PX) dragMoved = true;
+      if (dragMoved) cb.onRubberBand?.({ x0: rbStartX, y0: rbStartY, x1: px, y1: py });
+      return;
+    }
     if (!dragging) {
       // hover cursor override (phase U8) + hover highlight (phase U11) -- only when the
       // pointer is actually over the canvas.
@@ -147,7 +172,18 @@ export function attachInteractions(canvas: HTMLElement, cb: InteractionCallbacks
     });
   };
 
-  const onMouseUp = (): void => {
+  const onMouseUp = (e: MouseEvent): void => {
+    if (rubberBanding) {
+      rubberBanding = false;
+      cb.onRubberBand?.(null);
+      if (dragMoved) {
+        const { px, py } = contentPoint(e);
+        cb.onZoomToRect?.({ x0: rbStartX, y0: rbStartY, x1: px, y1: py });
+      }
+      // if it never moved, dragMoved stays false -> the native click fires and is handled
+      // as a normal Ctrl-click (selection toggle) by onClick below.
+      return;
+    }
     dragging = false;
     canvas.style.cursor = 'default';
   };
