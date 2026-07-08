@@ -8,6 +8,7 @@ import type {
   IniDocument,
   IniFileConfigs,
   ListConfigurationsParams,
+  NedDefaultStatistic,
   ParamHierarchyChildrenParams,
   ParamHierarchyParams,
   ViewFocusParams,
@@ -151,6 +152,20 @@ export function registerViewRequests(
     const c = ctx(state);
     if (!c) return [];
     return computeTypeHierarchySubtypes(params.fqName, c);
+  });
+
+  // A NED type's `@defaultStatistic(vectorName; module=subPath)` -- the Sequence Chart uses
+  // it to auto-attach a vector to a module axis (Eclipse's `@defaultStatistic` auto-attach).
+  connection.onRequest(OmnetppMethods.nedDefaultStatistic, (params: FqNameParams): NedDefaultStatistic | null => {
+    const c = ctx(state);
+    const prop = c?.nedCache.getType(params.fqName)?.findTypeProperty('defaultStatistic');
+    if (!prop) return null;
+    // First value = the statistic/vector name; a `module=...` tag = the sub-path (Eclipse
+    // reads the property's default value + optional `module` key).
+    const vectorName = prop.tags.find((t) => t.key === undefined || t.key === '')?.value?.trim() || prop.tags[0]?.value?.trim() || '';
+    if (!vectorName) return null;
+    const moduleSubPath = prop.tags.find((t) => t.key === 'module')?.value?.trim() || null;
+    return { vectorName, moduleSubPath };
   });
 
   // ---- configuration listing for the Configurations view ----

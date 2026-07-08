@@ -14,6 +14,8 @@ import {
   gateNodes,
   implementsNodes,
   leadingDocComment,
+  nedPropertyInfo,
+  type NedPropertyInfo,
   paramInfo,
   paramNodes,
   propertyNodes,
@@ -366,5 +368,22 @@ export class NedTypeInfo {
     collect(this);
     for (const base of this.ancestors()) collect(base);
     return names;
+  }
+
+  /**
+   * The first type-level `@<name>(...)` property with the given name (its parsed tags/
+   * values via `nedPropertyInfo`), searching local declarations first then inherited
+   * (`ancestors()`), or `null` if absent. Used e.g. for `@defaultStatistic` (the Sequence
+   * Chart's axis-vector auto-attach).
+   */
+  findTypeProperty(name: string): NedPropertyInfo | null {
+    const search = (t: NedTypeInfo): NedPropertyInfo | null => {
+      for (const p of propertyNodes(t.node)) {
+        const info = nedPropertyInfo(p);
+        if (info.name === name) return info;
+      }
+      return null;
+    };
+    return search(this) ?? this.ancestors().map(search).find((r) => r !== null) ?? null;
   }
 }

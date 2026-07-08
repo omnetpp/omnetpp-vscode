@@ -413,6 +413,31 @@ function syncVectorAttachmentsToState(): void {
   persistState();
 }
 
+/** Guards `maybeAutoAttachVectors()` so `@defaultStatistic` auto-attach is attempted once per session (not re-run on every tree reload, which would re-attach vectors the user detached). */
+let autoAttachAttempted = false;
+
+/**
+ * `@defaultStatistic` auto-attach (Eclipse `calculateModuleIdToAxisRendererMap`): once, on
+ * first tree load, hand the host every visible axis that has a NED type and neither a live
+ * nor a persisted attachment; the host checks each type's `@defaultStatistic` and attaches a
+ * matching sibling-`.vec` vector. Best-effort -- most axes have no `@defaultStatistic` and
+ * are simply skipped host-side.
+ */
+function maybeAutoAttachVectors(): void {
+  if (autoAttachAttempted || moduleTree === null) return;
+  autoAttachAttempted = true;
+  const persistedPaths = new Set((state.axisVectorAttachments ?? []).map((a) => a.modulePath));
+  const candidates: { moduleId: number; moduleFullPath: string; nedTypeName: string }[] = [];
+  for (const axis of currentAxesLayout().axes) {
+    if (axisVectorAttachments.has(axis.moduleId)) continue;
+    const node = findModuleNode(axis.moduleId, moduleTree);
+    const path = findModuleFullPath(axis.moduleId, moduleTree);
+    if (!node || !node.nedTypeName || path === null || persistedPaths.has(path)) continue;
+    candidates.push({ moduleId: axis.moduleId, moduleFullPath: path, nedTypeName: node.nedTypeName });
+  }
+  if (candidates.length > 0) vscode.postMessage({ type: 'autoAttachAxisVectors', candidates });
+}
+
 /**
  * After the module tree loads, ask the host to re-attach any persisted vectors (resolving
  * module path → id against the CURRENT tree; the host re-reads each `.vec`). Posts for every
@@ -2372,6 +2397,7 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
         void rpc.request<ElogModule | null>(ElogMethods.getModuleTree, undefined).then((tree) => {
           moduleTree = tree;
           initializeOpenAxisModules(); // phase U8 -- resolve persisted paths / apply the default open set
+          maybeAutoAttachVectors(); // @defaultStatistic auto-attach (once, first tree load)
           filterPanel.setModuleTree(tree);
           recomputeBookmarkIndexes();
           scheduleRender();

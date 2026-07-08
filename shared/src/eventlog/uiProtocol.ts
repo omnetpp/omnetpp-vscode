@@ -252,7 +252,14 @@ export type WebviewToHostMessage =
    * re-reads `fileUri` and re-loads the vector into the worker. `fileUri` is a
    * `vscode.Uri.toString()`.
    */
-  | { type: 'reattachAxisVector'; moduleId: number; fileUri: string; vector: VectorIdentity };
+  | { type: 'reattachAxisVector'; moduleId: number; fileUri: string; vector: VectorIdentity }
+  /**
+   * ADDITIVE (axis vector data): best-effort `@defaultStatistic` auto-attach. For each
+   * candidate axis (a module with a NED type, no vector attached, not persisted), the host
+   * looks up the type's `@defaultStatistic`, and if a sibling `.vec` records that vector for
+   * the module, attaches it (replying `axisVectorAttachmentChanged`). Silent on any miss.
+   */
+  | { type: 'autoAttachAxisVectors'; candidates: { moduleId: number; moduleFullPath: string; nedTypeName: string }[] };
 
 // ---------------------------------------------------------------------------------
 // host -> webview

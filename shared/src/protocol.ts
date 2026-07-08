@@ -48,6 +48,8 @@ export const OmnetppMethods = {
   inheritanceRoots: 'omnetpp/inheritanceRoots',
   /** request: FqNameParams → NedHierarchyItem[] */
   subtypes: 'omnetpp/subtypes',
+  /** request: FqNameParams → NedDefaultStatistic | null (the type's `@defaultStatistic`, for the Sequence Chart's axis-vector auto-attach) */
+  nedDefaultStatistic: 'omnetpp/nedDefaultStatistic',
   /** request: ViewFocusParams → ModuleHierNode[] */
   moduleHierarchy: 'omnetpp/moduleHierarchy',
   /** request: FqNameParams → ModuleHierNode[] */
@@ -136,6 +138,14 @@ export interface ViewFocusParams {
 
 export interface FqNameParams {
   fqName: string;
+}
+
+/** Result of `omnetpp/nedDefaultStatistic`: a NED type's `@defaultStatistic(vectorName; module=subPath)`. */
+export interface NedDefaultStatistic {
+  /** The default statistic/vector name (the property's first value), e.g. `queueLength`. */
+  vectorName: string;
+  /** The optional `module=...` sub-path relative to the axis module, or null. */
+  moduleSubPath: string | null;
 }
 
 /** The globally-selected active configuration (ini file + config name). */

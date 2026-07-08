@@ -150,3 +150,21 @@ test('@enum values parse without stray quotes regardless of spacing after commas
   // Before the fix, values after the first kept a leading quote ('"trueLength').
   assert.deepEqual(p.enumValues, ['projected', 'trueLength', 'isometric']);
 });
+
+test('findTypeProperty resolves @defaultStatistic (local) and inherits it, exposing its value + module tag', () => {
+  return nedCache({
+    'file:///Q.ned':
+      'simple Base { @defaultStatistic(queueLength; module=q); }\n' +
+      'simple Queue extends Base { }\n' +
+      'simple Plain { }',
+  }).then((cache) => {
+    const base = cache.getType('Base')!.findTypeProperty('defaultStatistic')!;
+    assert.ok(base, 'local @defaultStatistic found');
+    assert.strictEqual(base.tags.find((t) => t.key === undefined || t.key === '')?.value, 'queueLength');
+    assert.strictEqual(base.tags.find((t) => t.key === 'module')?.value, 'q');
+    // inherited through extends
+    assert.ok(cache.getType('Queue')!.findTypeProperty('defaultStatistic'), 'inherited @defaultStatistic found');
+    // absent -> null
+    assert.strictEqual(cache.getType('Plain')!.findTypeProperty('defaultStatistic'), null);
+  });
+});

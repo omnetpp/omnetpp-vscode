@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import type { LanguageClient } from 'vscode-languageclient/node';
 import type { EventLogUiSettings, HostToWebviewMessage, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
 import { ElogMethods, type ScListVectorsResult, type VectorIdentity } from '@omnetpp/shared/elog-protocol';
+import { OmnetppMethods } from '@omnetpp/shared/protocol';
 import { handleToggleBookmarkMessage } from './bookmarks';
 import type { EventLogController } from './eventLogController';
 import type { EventLogSession } from './eventLogSession';
@@ -196,6 +197,10 @@ export class SequenceChartEditorProvider implements vscode.CustomReadonlyEditorP
         void reattachAxisVectorFlow(session, sink, message.moduleId, message.fileUri, message.vector);
         return;
       }
+      if (message.type === 'autoAttachAxisVectors') {
+        void autoAttachAxisVectorsFlow(this.languageClient, session, sink, document.uri, message.candidates);
+        return;
+      }
       void handleWebviewMessage(session, sink, document.uri, message);
     });
   }
@@ -276,6 +281,52 @@ async function reattachAxisVectorFlow(session: EventLogSession, sink: VectorSink
   } catch {
     // The .vec moved/changed since it was persisted -- drop the stale attachment quietly.
     sink.postMessage({ type: 'axisVectorAttachmentChanged', moduleId, attachment: null });
+  }
+}
+
+/**
+ * Best-effort `@defaultStatistic` auto-attach (Eclipse `calculateModuleIdToAxisRendererMap`):
+ * for each candidate axis, look up its NED type's `@defaultStatistic`; if a sibling `.vec`
+ * (input-name stem + `.vec`) records that vector for the module, attach it. Every step
+ * degrades silently (no NED index, no sibling file, no matching vector → just skip).
+ */
+async function autoAttachAxisVectorsFlow(
+  languageClient: LanguageClient | undefined,
+  session: EventLogSession,
+  sink: VectorSink,
+  docUri: vscode.Uri,
+  candidates: { moduleId: number; moduleFullPath: string; nedTypeName: string }[],
+): Promise<void> {
+  if (!languageClient || candidates.length === 0) return;
+  const vecUri = docUri.with({ path: docUri.path.replace(/\.[^./]*$/, '') + '.vec' });
+  let content: string;
+  try {
+    content = Buffer.from(await vscode.workspace.fs.readFile(vecUri)).toString('utf8');
+  } catch {
+    return; // no sibling .vec -> nothing to auto-attach
+  }
+  const listing = (await session.handleEngineRequest(ElogMethods.scListVectors, { content }, new vscode.CancellationTokenSource().token)) as ScListVectorsResult;
+  const run = listing.runs[0] ?? '';
+  for (const cand of candidates) {
+    let stat: { vectorName: string; moduleSubPath: string | null } | null = null;
+    try {
+      stat = await languageClient.sendRequest<{ vectorName: string; moduleSubPath: string | null } | null>(OmnetppMethods.nedDefaultStatistic, { fqName: cand.nedTypeName });
+    } catch {
+      stat = null;
+    }
+    if (!stat) continue;
+    const targetModule = stat.moduleSubPath ? `${cand.moduleFullPath}.${stat.moduleSubPath}` : cand.moduleFullPath;
+    // The @defaultStatistic value is a statistic name; the recorded vector is usually
+    // "<name>:vector" (accept either form) on the target module.
+    const found = listing.vectors.find((v) => v.vectorModule === targetModule && (v.vectorName === stat!.vectorName || v.vectorName === `${stat!.vectorName}:vector`));
+    if (!found) continue;
+    const vector: VectorIdentity = { run, vectorModule: found.vectorModule, vectorName: found.vectorName };
+    try {
+      await loadVectorIntoWorker(session, cand.moduleId, content, vector);
+      sink.postMessage({ type: 'axisVectorAttachmentChanged', moduleId: cand.moduleId, attachment: { fileUri: vecUri.toString(), vector } });
+    } catch {
+      /* skip this one */
+    }
   }
 }
 
