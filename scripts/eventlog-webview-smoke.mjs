@@ -174,8 +174,8 @@ assert((totals.arc ?? 0) + (totals.ellipse ?? 0) > 0, `canvas drew event marks/a
 
 const emptyEl = document.getElementById('empty');
 assert(emptyEl && emptyEl.style.display === 'none', 'empty-state placeholder is hidden');
-const statusText = document.getElementById('status')?.textContent ?? '';
-assert(statusText.includes('Events:'), `status strip shows summary (got: ${JSON.stringify(statusText.slice(0, 80))})`);
+// The chart no longer has a top status strip (removed); the toolbar stands in for it.
+assert(document.getElementById('status') === null, 'chart has no top status strip');
 assert(errors.length === 0, `no runtime errors${errors.length ? `:\n${errors.join('\n')}` : ''}`);
 assert(nonFiniteArgs === 0, `no non-finite canvas coordinates (got ${nonFiniteArgs})`);
 assert(styleAttrViolations.length === 0, `no CSP-blocked style attributes${styleAttrViolations.length ? `:\n${styleAttrViolations.join('\n')}` : ''}`);

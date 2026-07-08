@@ -494,7 +494,6 @@ const renderModelCache = new RenderModelCache(engineSource, {
 
 document.getElementById('root')!.innerHTML = `
   <div id="toolbar"></div>
-  <div id="status"></div>
   <div class="elog-body" id="body">
     <div id="chartCanvasContainer" class="elog-chart-canvas-container" role="application" aria-label="Sequence Chart"></div>
     <div class="elog-empty" id="empty">Open a Sequence Chart to see events here.</div>
@@ -725,19 +724,16 @@ function computeInfoPanelText(): InfoPanelText | undefined {
   return { positionAndRange, eventLogInfo };
 }
 
+/**
+ * The chart no longer shows a top status strip (file / event range / simulation time /
+ * view) -- that information is available in the ruler, the info-panel overlays, and
+ * hovers, and the strip only ate vertical space. Kept as a guarded no-op so its many call
+ * sites need no change; it does nothing when the `#status` element is absent.
+ */
 function renderStatus(): void {
-  const statusEl = document.getElementById('status')!;
+  const statusEl = document.getElementById('status');
+  if (!statusEl) return;
   renderSummaryStrip(statusEl, fileName(), summary);
-  if (summary && !summary.isEmpty) {
-    const range = visibleTcRange(viewport);
-    const leftSim = simTimeAt(viewport.leftTc);
-    const rightSim = simTimeAt(range.rightTc);
-    const span = document.createElement('span');
-    const leftLabel = leftSim !== null ? formatTickLabel(leftSim) : '?';
-    const rightLabel = rightSim !== null ? formatTickLabel(rightSim) : '?';
-    span.textContent = `View: ${leftLabel} – ${rightLabel}  (${viewport.pixelsPerTc.toPrecision(3)} px/tc)${viewport.followEnd ? '  •  following end' : ''}${antialiasEnabled ? '' : '  •  perf: reduced detail'}${statusNote ? `  •  ${statusNote}` : ''}`;
-    statusEl.appendChild(span);
-  }
 }
 
 function updateHScrollbar(): void {
