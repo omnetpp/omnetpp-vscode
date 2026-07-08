@@ -90,7 +90,7 @@ export type DrawPrimitive =
   | { kind: 'eventDensityLine'; x: number; y0: number; y1: number; color: string }
   | { kind: 'arrow'; arrowKind: ArrowKind; x1: number; y1: number; x2: number; y2: number; color: string; dash?: number[]; ref?: ArrowRef; width?: number }
   | { kind: 'arrowHead'; x: number; y: number; angle: number; color: string; length: number; width: number }
-  | { kind: 'ellipseArc'; x1: number; x2: number; y: number; height: number; quarter: 0 | 1 | -1; color: string; ref?: ArrowRef }
+  | { kind: 'ellipseArc'; x1: number; x2: number; y: number; height: number; quarter: 0 | 1 | -1; color: string; ref?: ArrowRef; width?: number }
   | { kind: 'parallelogram'; points: [[number, number], [number, number], [number, number], [number, number]]; color: string }
   | { kind: 'zigzag'; segments: LineSegment[]; color: string }
   | { kind: 'label'; x: number; y: number; text: string; color: string; align?: 'left' | 'center' | 'right'; rotateDeg?: number }
@@ -632,7 +632,7 @@ function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx:
       if (Math.abs(seg.x2 - seg.x1) < 1 && !vlineBuffer.addAndCheck((seg.x1 + seg.x2) / 2, seg.y1, seg.y2)) continue;
       primitives.push({ kind: 'arrow', arrowKind, x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2, color, dash: seg.dashed ? OFFSCREEN_DASH : dash, ref: depRef, width: arrowWidth });
     }
-    if (geom.ellipse) primitives.push({ kind: 'ellipseArc', ...geom.ellipse, color, ref: depRef });
+    if (geom.ellipse) primitives.push({ kind: 'ellipseArc', ...geom.ellipse, color, ref: depRef, width: arrowWidth });
     if (geom.arrowhead) primitives.push({ kind: 'arrowHead', x: geom.arrowhead.x, y: geom.arrowhead.y, angle: geom.arrowhead.angle, color: geom.arrowhead.long ? LONG_ARROWHEAD_COLOR : color, length: geom.arrowhead.length, width: geom.arrowhead.width });
     if (isFiltered && geom.signAnchor) primitives.push({ kind: 'zigzag', segments: buildFilteredSignSegments(geom.signAnchor), color });
     if (flags.showMessageNames && showLabels && dep.messageName) primitives.push({ kind: 'label', x: geom.labelAnchor.x + (isFiltered ? 7 : 0), y: geom.labelAnchor.y, text: dep.messageName, color, align: 'left' });

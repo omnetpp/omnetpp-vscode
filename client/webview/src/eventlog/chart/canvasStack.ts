@@ -290,7 +290,7 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
     }
     case 'ellipseArc': {
       ctx.strokeStyle = p.color;
-      ctx.lineWidth = 1;
+      ctx.lineWidth = p.width ?? 1;
       ctx.setLineDash([]);
       const cx = (p.x1 + p.x2) / 2;
       const rx = Math.abs(p.x2 - p.x1) / 2;
@@ -302,6 +302,7 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       if (rx > 0) ctx.ellipse(cx, p.y, rx, ry, 0, startAngle, endAngle);
       else ctx.moveTo(cx, p.y - ry), ctx.lineTo(cx, p.y);
       ctx.stroke();
+      ctx.lineWidth = 1;
       break;
     }
     case 'parallelogram': {

@@ -254,6 +254,15 @@ test('time differences: selected events + timeline coords produce a dashed polyl
   assert.strictEqual(primitives.filter((p) => p.kind === 'timeDifferenceLabel').length, 2);
 });
 
+test('hovering a self-message arc widens its ellipseArc (so hover is visible on arcs, not just straight arrows)', () => {
+  // deps4[3] is a self-dependency on module 2 (#5 -> #6) -> dependencyKey 'send:5:6'.
+  const base = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport: baseViewport(), events: events3, dependencies: deps4, methodCalls: [], axesLayout: deriveAxes(new Set([1, 2, 3]), null, 600 - GUTTER_TOP_HEIGHT), ticks: [], theme, displayFlags: BASE_TEST_FLAGS });
+  assert.ok(base.some((p) => p.kind === 'ellipseArc'), 'the self-dependency draws an ellipseArc');
+  const hovered = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport: baseViewport(), events: events3, dependencies: deps4, methodCalls: [], axesLayout: deriveAxes(new Set([1, 2, 3]), null, 600 - GUTTER_TOP_HEIGHT), ticks: [], theme, displayFlags: BASE_TEST_FLAGS, hovered: { dependencyKeys: new Set(['send:5:6']) } });
+  const wide = hovered.filter((p): p is Extract<typeof p, { kind: 'ellipseArc' }> => p.kind === 'ellipseArc' && (p.width ?? 1) > 1);
+  assert.ok(wide.length >= 1, 'the hovered self-arc should be redrawn wider');
+});
+
 test('no selection/hover params: no emphasis primitives (axisSelectionMark, bold label, thick arrow)', () => {
   const primitives = draw();
   assert.strictEqual(primitives.filter((p) => p.kind === 'axisSelectionMark').length, 0);

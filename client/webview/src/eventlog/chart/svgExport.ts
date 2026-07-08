@@ -232,11 +232,11 @@ function emitPrimitive(b: SvgBuilder, p: DrawPrimitive, fontFamily: string): voi
       const rx = Math.abs(p.x2 - p.x1) / 2;
       const ry = p.height;
       if (rx <= 0) {
-        b.el('line', { x1: cx, y1: p.y - ry, x2: cx, y2: p.y, stroke: p.color, 'stroke-width': 1 });
+        b.el('line', { x1: cx, y1: p.y - ry, x2: cx, y2: p.y, stroke: p.color, 'stroke-width': p.width ?? 1 });
         return;
       }
       const [startAngle, endAngle] = p.quarter === 0 ? [Math.PI, 1.5 * Math.PI] : p.quarter === 1 ? [1.5 * Math.PI, 2 * Math.PI] : [Math.PI, 2 * Math.PI];
-      b.el('path', { d: ellipseArcPolylinePath(cx, p.y, rx, ry, startAngle, endAngle), stroke: p.color, fill: 'none', 'stroke-width': 1 });
+      b.el('path', { d: ellipseArcPolylinePath(cx, p.y, rx, ry, startAngle, endAngle), stroke: p.color, fill: 'none', 'stroke-width': p.width ?? 1 });
       return;
     }
     case 'parallelogram': {
