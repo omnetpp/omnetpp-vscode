@@ -80,6 +80,8 @@ export interface AxisModuleMenuInfo {
   canCollapse: boolean;
   /** Phase U10 -- the module's fully-qualified NED type name (`ElogModule.nedTypeName`), or `null` when unknown/empty (disables "Go to NED Declaration" -- there is nothing to resolve). */
   nedTypeName: string | null;
+  /** Whether this axis currently has a vector attached (Attach vs Detach + Zoom-to-Value gating). */
+  hasVectorAttached: boolean;
 }
 
 export interface ChartMenuActions {
@@ -97,6 +99,12 @@ export interface ChartMenuActions {
   centerOnAxis(moduleId: number): void;
   /** Phase U10 -- "Go to NED Declaration": opens the module's NED type declaration (see `uiProtocol.ts`'s `gotoNedDeclaration` message doc); the caller re-resolves the module's `nedTypeName` (already known not to be `null`, since the menu item disables itself otherwise -- see `axisSection()`). */
   gotoNedDeclaration(moduleId: number): void;
+  /** Axis vector data: "Attach Vector to Axis" (host opens the `.vec` file/run/vector chooser). */
+  attachVectorToAxis(moduleId: number): void;
+  /** Axis vector data: "Detach Vector from Axis". */
+  detachVectorFromAxis(moduleId: number): void;
+  /** Axis vector data: "Zoom to Value" -- zoom to the strip sample under the right-click. */
+  zoomToAxisVectorValue(moduleId: number): void;
   /** Phase U7 -- "Filter Causes/Consequences..." (per-event section). */
   filterCausesConsequences(eventNumber: number): void;
   /** Phase U7 -- "Filter Message..." (per-dependency section); only invoked when the hit resolves to a `RenderDependency` with a non-null `messageId` (see `resolveDependencyLabel`'s sibling `resolveDependencyMessageId` below). */
@@ -232,6 +240,14 @@ function axisSection(hit: Extract<HitObject, { kind: 'axis' }>, info: AxisModule
       { id: 'toggleBookmark', label: 'Toggle Bookmark', onSelect: () => actions.toggleAxisBookmark(hit.moduleId) },
       // Phase U10 -- disabled when the module tree hasn't loaded, or the resolved node has no (known) NED type name.
       { id: 'gotoNedDeclaration', label: 'Go to NED Declaration', disabled: info?.nedTypeName == null, onSelect: () => actions.gotoNedDeclaration(hit.moduleId) },
+      { separator: true },
+      // Axis vector data (Eclipse: Attach/Detach Vector to Axis + Zoom to Value).
+      ...(info?.hasVectorAttached
+        ? [
+            { id: 'detachVector', label: 'Detach Vector from Axis', onSelect: () => actions.detachVectorFromAxis(hit.moduleId) },
+            { id: 'zoomToVectorValue', label: 'Zoom to Value', onSelect: () => actions.zoomToAxisVectorValue(hit.moduleId) },
+          ]
+        : [{ id: 'attachVector', label: 'Attach Vector to Axis...', onSelect: () => actions.attachVectorToAxis(hit.moduleId) }]),
       { separator: true },
       { id: 'removeAxisModule', label: 'Remove Axis Module', disabled: noTree, onSelect: () => actions.removeAxisModule(hit.moduleId) },
       { id: 'openCompoundModule', label: 'Open Compound Module', disabled: noTree, onSelect: () => actions.openCompoundModule(hit.moduleId) },

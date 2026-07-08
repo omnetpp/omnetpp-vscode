@@ -20,6 +20,7 @@ import {
   type ScSetTimelineModeParams,
   type ScState,
   type TimelineEvent,
+  type VectorIdentity,
   type ViewportModel,
   type ViewportParams,
 } from '@omnetpp/shared/elog-protocol';
@@ -234,6 +235,9 @@ let hoverSignature = '';
 let mouseContentX: number | null = null;
 /** The current tick prefix (Java `tickPrefix`) computed by the last `calculateTicks`; the hairline shows its time relative to this ("+340ms") when non-zero. */
 let currentTickPrefix = 0;
+
+/** Axis vector-data attachments (module id → the vector's file + identity), mirrored from the host's worker state via `axisVectorAttachmentChanged`. Drives the Attach/Detach menu state and is persisted (by module full path). */
+const axisVectorAttachments = new Map<number, { fileUri: string; vector: VectorIdentity }>();
 /** Phase U5 -- the ~25 Show/Hide toggles (`displayFlags.ts`), including `showTimeDifferences` (Tab toggle, port of `SequenceChart.java`'s `setShowTimeDifferences`). */
 let displayFlags: ChartDisplayFlags = mergeDisplayFlags(state.displayFlags);
 /**
@@ -632,6 +636,21 @@ function simTimeAt(tc: number): number | null {
  * (`simTimeAt` at the cursor vs one pixel over) and show just enough digits that a
  * one-pixel move changes the value -- no more. Capped by the Time Accuracy setting.
  */
+/**
+ * "Zoom to Value" (Eclipse `zoomToAxisValue`): zoom the viewport to the time span of the
+ * vector-strip sample under the cursor (the last hovered content-x), with 10% margins.
+ */
+function zoomToAxisVectorValue(moduleId: number): void {
+  const strip = lastModel?.axisVectorStrips?.find((s) => s.moduleId === moduleId);
+  if (!strip || strip.segments.length === 0 || mouseContentX === null) return;
+  const tc = fullCanvasPxToTc(mouseContentX, viewport);
+  if (tc === null) return;
+  const seg = strip.segments.find((s) => tc >= s.tcBegin && tc < s.tcEnd) ?? [...strip.segments].reverse().find((s) => tc >= s.tcBegin) ?? strip.segments[0];
+  const end = seg.tcEnd > seg.tcBegin ? seg.tcEnd : seg.tcBegin + 1 / viewport.pixelsPerTc;
+  viewport = zoomToFit(viewport, seg.tcBegin, end, 0.1);
+  scheduleRender();
+}
+
 function mouseTickLabel(px: number): string {
   const sim = simTimeAt(fullCanvasPxToTc(px, viewport) ?? viewport.leftTc) ?? 0;
   const simNext = simTimeAt(fullCanvasPxToTc(px + 1, viewport) ?? viewport.leftTc) ?? sim;
@@ -1710,6 +1729,7 @@ function resolveAxisMenuInfo(moduleId: number): AxisModuleMenuInfo | null {
     canCollapse: glyphs.collapse,
     // Phase U10 -- "Go to NED Declaration"; `nedTypeName` defaults to '' when the log never recorded one, treated as unresolvable.
     nedTypeName: node.nedTypeName || null,
+    hasVectorAttached: axisVectorAttachments.has(moduleId),
   };
 }
 
@@ -1751,6 +1771,12 @@ function openChartContextMenu(clientX: number, clientY: number, hits: HitObject[
       const typeName = resolveAxisMenuInfo(moduleId)?.nedTypeName;
       if (typeName) vscode.postMessage({ type: 'gotoNedDeclaration', typeName });
     },
+    attachVectorToAxis: (moduleId) => {
+      const path = findModuleFullPath(moduleId, moduleTree) ?? findModuleNode(moduleId, moduleTree)?.fullName ?? '';
+      vscode.postMessage({ type: 'attachAxisVector', moduleId, moduleFullPath: path });
+    },
+    detachVectorFromAxis: (moduleId) => vscode.postMessage({ type: 'detachAxisVector', moduleId }),
+    zoomToAxisVectorValue: (moduleId) => zoomToAxisVectorValue(moduleId),
     filterCausesConsequences: filterCausesConsequencesFor,
     filterMessage: (hit) => {
       const dep = findDependency(hit);
@@ -2433,6 +2459,17 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
         pendingNedQueries.delete(message.id);
         resolve(message.properties);
       }
+      break;
+    }
+    case 'axisVectorAttachmentChanged': {
+      // The host attached/detached a vector on this axis (in the worker). Mirror it for the
+      // menu Attach/Detach state + persistence, then force a fresh viewport (the cache is
+      // keyed by range/version, which don't change when only the attachment set does).
+      if (message.attachment) axisVectorAttachments.set(message.moduleId, message.attachment);
+      else axisVectorAttachments.delete(message.moduleId);
+      persistState();
+      renderModelCache.invalidateAll();
+      scheduleRender();
       break;
     }
     case 'command':

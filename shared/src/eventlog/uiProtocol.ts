@@ -36,7 +36,7 @@
  *    persist, opaquely, back into `workspaceState`.
  */
 
-import type { FilterParams, LogSummary, RowRef } from './elogProtocol';
+import type { FilterParams, LogSummary, RowRef, VectorIdentity } from './elogProtocol';
 
 // ---------------------------------------------------------------------------------
 // Shared payload shapes
@@ -236,7 +236,23 @@ export type WebviewToHostMessage =
    * further to do either way -- an unresolvable type or a missing language client
    * degrades to a plain VS Code status message host-side.
    */
-  | { type: 'gotoNedDeclaration'; typeName: string };
+  | { type: 'gotoNedDeclaration'; typeName: string }
+  /**
+   * ADDITIVE (axis vector data): the user chose "Attach Vector to Axis" on `moduleId`. The
+   * host opens a native `.vec` file dialog, then run/vector QuickPicks (the webview can't
+   * open native UI), loads the vector into the worker, and replies with
+   * `axisVectorAttachmentChanged`. `moduleFullPath` lets the host pre-filter the vector list
+   * to the axis module (mirrors Eclipse's pre-filtered vector chooser).
+   */
+  | { type: 'attachAxisVector'; moduleId: number; moduleFullPath: string }
+  /** ADDITIVE (axis vector data): "Detach Vector from Axis" -- host drops the worker attachment and replies with a cleared `axisVectorAttachmentChanged`. */
+  | { type: 'detachAxisVector'; moduleId: number }
+  /**
+   * ADDITIVE (axis vector data): re-attach a persisted vector on load (no dialog) -- host
+   * re-reads `fileUri` and re-loads the vector into the worker. `fileUri` is a
+   * `vscode.Uri.toString()`.
+   */
+  | { type: 'reattachAxisVector'; moduleId: number; fileUri: string; vector: VectorIdentity };
 
 // ---------------------------------------------------------------------------------
 // host -> webview
@@ -300,4 +316,11 @@ export type HostToWebviewMessage =
    * without the `@`), or `null` when the type could not be resolved (no language
    * client, no NED index, or an unknown/unqualified type name).
    */
-  | { type: 'nedTypeQueryResult'; id: number; properties: Record<string, string[] | null> };
+  | { type: 'nedTypeQueryResult'; id: number; properties: Record<string, string[] | null> }
+  /**
+   * ADDITIVE (axis vector data): the host attached/detached a vector on `moduleId` (reply to
+   * `attachAxisVector`/`detachAxisVector`/`reattachAxisVector`, or a failed/cancelled attach
+   * with `attachment: null`). The webview updates its attachment map (menu Attach-vs-Detach
+   * state + persistence) and refreshes the chart. `fileUri` is a `vscode.Uri.toString()`.
+   */
+  | { type: 'axisVectorAttachmentChanged'; moduleId: number; attachment: { fileUri: string; vector: VectorIdentity } | null };

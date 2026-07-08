@@ -72,6 +72,9 @@ function fakeActions(): ChartMenuActions & Record<string, unknown> {
     copyImage: record('copyImage'),
     exportSvg: record('exportSvg'),
     gotoNedDeclaration: record('gotoNedDeclaration'),
+    attachVectorToAxis: record('attachVectorToAxis'),
+    detachVectorFromAxis: record('detachVectorFromAxis'),
+    zoomToAxisVectorValue: record('zoomToAxisVectorValue'),
   } as unknown as ChartMenuActions & Record<string, unknown>;
 }
 
@@ -174,7 +177,7 @@ test('buildChartContextMenu: unresolvable dependency label falls back to a gener
 test('buildChartContextMenu: axis hit -- full U8 action set wired, enablement from resolveAxisInfo', () => {
   const actions = fakeActions();
   const hits: HitObject[] = [{ kind: 'axis', moduleId: 7 }];
-  const info: AxisModuleMenuInfo = { label: 'net.host[7] (id = 7)', hasParent: true, canExpand: true, canCollapse: false, nedTypeName: 'inet.node.Host' };
+  const info: AxisModuleMenuInfo = { label: 'net.host[7] (id = 7)', hasParent: true, canExpand: true, canCollapse: false, nedTypeName: 'inet.node.Host', hasVectorAttached: false };
   const entries = buildChartContextMenu(makeParams(actions, { hits, resolveAxisInfo: () => info }));
   const axisEntry = findEntry(entries, 'axis-7')! as { label: string };
   assert.equal(axisEntry.label, 'net.host[7] (id = 7)');
@@ -226,6 +229,29 @@ test('buildChartContextMenu: axis hit with a resolved node but no NED type name 
   const sub = submenuOf(entries, 'axis-7');
   assert.ok((findEntry(sub, 'gotoNedDeclaration') as { disabled: boolean }).disabled);
   assert.ok(!(findEntry(sub, 'removeAxisModule') as { disabled: boolean }).disabled);
+});
+
+test('buildChartContextMenu: axis vector data -- "Attach" when none, "Detach"+"Zoom to Value" when attached', () => {
+  const hits: HitObject[] = [{ kind: 'axis', moduleId: 7 }];
+
+  // no vector attached -> Attach offered, Detach/Zoom absent
+  const noVec = fakeActions();
+  const infoNo: AxisModuleMenuInfo = { label: 'a (id = 7)', hasParent: false, canExpand: false, canCollapse: false, nedTypeName: null, hasVectorAttached: false };
+  const subNo = submenuOf(buildChartContextMenu(makeParams(noVec, { hits, resolveAxisInfo: () => infoNo })), 'axis-7');
+  const attach = findEntry(subNo, 'attachVector') as { onSelect: () => void } | undefined;
+  assert.ok(attach && !findEntry(subNo, 'detachVector') && !findEntry(subNo, 'zoomToVectorValue'));
+  attach!.onSelect();
+  assert.deepEqual(noVec.calls.attachVectorToAxis, [7]);
+
+  // vector attached -> Detach + Zoom to Value offered, Attach absent
+  const yesVec = fakeActions();
+  const infoYes: AxisModuleMenuInfo = { ...infoNo, hasVectorAttached: true };
+  const subYes = submenuOf(buildChartContextMenu(makeParams(yesVec, { hits, resolveAxisInfo: () => infoYes })), 'axis-7');
+  assert.ok(!findEntry(subYes, 'attachVector'));
+  (findEntry(subYes, 'detachVector') as { onSelect: () => void }).onSelect();
+  assert.deepEqual(yesVec.calls.detachVectorFromAxis, [7]);
+  (findEntry(subYes, 'zoomToVectorValue') as { onSelect: () => void }).onSelect();
+  assert.deepEqual(yesVec.calls.zoomToAxisVectorValue, [7]);
 });
 
 test('buildChartContextMenu: methodCall hits do not get a dedicated section (matches Java -- verified no such submenu in SequenceChartContributor)', () => {

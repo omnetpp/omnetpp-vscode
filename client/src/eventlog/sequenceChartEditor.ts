@@ -2,6 +2,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { LanguageClient } from 'vscode-languageclient/node';
 import type { EventLogUiSettings, HostToWebviewMessage, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
+import { ElogMethods, type ScListVectorsResult, type VectorIdentity } from '@omnetpp/shared/elog-protocol';
 import { handleToggleBookmarkMessage } from './bookmarks';
 import type { EventLogController } from './eventLogController';
 import type { EventLogSession } from './eventLogSession';
@@ -181,6 +182,20 @@ export class SequenceChartEditorProvider implements vscode.CustomReadonlyEditorP
         void gotoNedDeclaration(this.languageClient, message.typeName);
         return;
       }
+      // Axis vector data: attach/detach need native file dialog + QuickPicks (host-only UI)
+      // and drive the worker directly through `session`; the webview only tracks the result.
+      if (message.type === 'attachAxisVector') {
+        void attachAxisVectorFlow(session, sink, document.uri, message.moduleId, message.moduleFullPath);
+        return;
+      }
+      if (message.type === 'detachAxisVector') {
+        void detachAxisVectorFlow(session, sink, message.moduleId);
+        return;
+      }
+      if (message.type === 'reattachAxisVector') {
+        void reattachAxisVectorFlow(session, sink, message.moduleId, message.fileUri, message.vector);
+        return;
+      }
       void handleWebviewMessage(session, sink, document.uri, message);
     });
   }
@@ -188,6 +203,80 @@ export class SequenceChartEditorProvider implements vscode.CustomReadonlyEditorP
 
 function basename(uri: vscode.Uri): string {
   return uri.fsPath.split(/[\\/]/).pop() ?? uri.fsPath;
+}
+
+// ---------------------------------------------------------------------------------
+// Axis vector data: attach / detach flows (host side -- native dialogs + worker calls)
+// ---------------------------------------------------------------------------------
+
+type VectorSink = { postMessage(message: HostToWebviewMessage): void };
+
+async function loadVectorIntoWorker(session: EventLogSession, moduleId: number, content: string, vector: VectorIdentity): Promise<void> {
+  await session.handleEngineRequest(ElogMethods.scAttachVector, { moduleId, content, vector }, new vscode.CancellationTokenSource().token);
+}
+
+/**
+ * "Attach Vector to Axis": native `.vec` file dialog → run/vector QuickPicks (pre-filtered to
+ * the axis module, mirroring Eclipse's chained choosers) → load the vector into the worker →
+ * tell the webview so it renders + persists. Any cancellation aborts silently.
+ */
+async function attachAxisVectorFlow(session: EventLogSession, sink: VectorSink, docUri: vscode.Uri, moduleId: number, moduleFullPath: string): Promise<void> {
+  // Default the dialog to a sibling `.vec` next to the .elog (Eclipse guesses the same).
+  const guess = docUri.with({ path: docUri.path.replace(/\.[^./]*$/, '') + '.vec' });
+  const picked = await vscode.window.showOpenDialog({ title: 'Attach Vector to Axis', canSelectMany: false, defaultUri: guess, filters: { 'OMNeT++ vector files': ['vec'], 'All files': ['*'] } });
+  if (!picked || picked.length === 0) return;
+  const fileUri = picked[0];
+  let content: string;
+  try {
+    content = Buffer.from(await vscode.workspace.fs.readFile(fileUri)).toString('utf8');
+  } catch (err) {
+    void vscode.window.showErrorMessage(`Could not read ${basename(fileUri)}: ${err instanceof Error ? err.message : String(err)}`);
+    return;
+  }
+  const listing = (await session.handleEngineRequest(ElogMethods.scListVectors, { content }, new vscode.CancellationTokenSource().token)) as ScListVectorsResult;
+  if (listing.vectors.length === 0) {
+    void vscode.window.showWarningMessage(`No output vectors found in ${basename(fileUri)}.`);
+    return;
+  }
+  // Run: auto-pick when there is only one, else ask.
+  let run = listing.runs[0] ?? '';
+  if (listing.runs.length > 1) {
+    const chosen = await vscode.window.showQuickPick(listing.runs, { title: 'Select run' });
+    if (chosen === undefined) return;
+    run = chosen;
+  }
+  // Vector: list "module:name"; float the axis module's own vectors to the top (pre-filter).
+  const items = listing.vectors
+    .map((v) => ({ label: `${v.vectorModule}:${v.vectorName}`, description: v.type ?? '', v, match: v.vectorModule === moduleFullPath }))
+    .sort((a, b) => (a.match === b.match ? 0 : a.match ? -1 : 1));
+  const chosenVec = await vscode.window.showQuickPick(items, { title: `Select vector for ${moduleFullPath}`, matchOnDescription: true });
+  if (chosenVec === undefined) return;
+  const vector: VectorIdentity = { run, vectorModule: chosenVec.v.vectorModule, vectorName: chosenVec.v.vectorName };
+  try {
+    await loadVectorIntoWorker(session, moduleId, content, vector);
+  } catch (err) {
+    void vscode.window.showErrorMessage(`Could not attach vector: ${err instanceof Error ? err.message : String(err)}`);
+    return;
+  }
+  sink.postMessage({ type: 'axisVectorAttachmentChanged', moduleId, attachment: { fileUri: fileUri.toString(), vector } });
+}
+
+/** "Detach Vector from Axis": drop the worker attachment, tell the webview to clear + refresh. */
+async function detachAxisVectorFlow(session: EventLogSession, sink: VectorSink, moduleId: number): Promise<void> {
+  await session.handleEngineRequest(ElogMethods.scDetachVector, { moduleId }, new vscode.CancellationTokenSource().token);
+  sink.postMessage({ type: 'axisVectorAttachmentChanged', moduleId, attachment: null });
+}
+
+/** Re-attach a persisted vector on load (no dialog): re-read the file and re-load into the worker. */
+async function reattachAxisVectorFlow(session: EventLogSession, sink: VectorSink, moduleId: number, fileUri: string, vector: VectorIdentity): Promise<void> {
+  try {
+    const content = Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.parse(fileUri))).toString('utf8');
+    await loadVectorIntoWorker(session, moduleId, content, vector);
+    sink.postMessage({ type: 'axisVectorAttachmentChanged', moduleId, attachment: { fileUri, vector } });
+  } catch {
+    // The .vec moved/changed since it was persisted -- drop the stale attachment quietly.
+    sink.postMessage({ type: 'axisVectorAttachmentChanged', moduleId, attachment: null });
+  }
 }
 
 /**
