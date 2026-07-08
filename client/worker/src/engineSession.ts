@@ -545,11 +545,17 @@ export class EngineSession {
       kind,
       causeEventNumber: dep.getCauseEventNumber(),
       causeModuleId: causeEvent?.getModuleId() ?? null,
-      causeTc: this.simTimeToTcOrNull(facade, causeEvent, dep.getCauseSimulationTime()),
+      // Java `drawMessageDependency()` (SequenceChart.java:4540-4548): the cause endpoint is
+      // the cause event's END (right edge of the pill), or -- for a non-reuse (send)
+      // dependency -- the specific send entry's timeline coordinate, which SPREADS several
+      // outgoing arrows across the cause pill instead of stacking them on one point.
+      causeTc: this.dependencyCauseTc(facade, causeEvent, dep.getCauseSimulationTime(), kind === 'send' ? beginMessage : null),
       causeSimulationTime: dep.getCauseSimulationTime().toString(),
       consequenceEventNumber: dep.getConsequenceEventNumber(),
       consequenceModuleId: consequenceEvent?.getModuleId() ?? null,
-      consequenceTc: this.simTimeToTcOrNull(facade, consequenceEvent, dep.getConsequenceSimulationTime()),
+      // Consequence endpoint: the consequence event's BEGIN (left edge), or -- for a reuse
+      // dependency -- the reused entry's coordinate (spread across the consequence pill).
+      consequenceTc: this.dependencyConsequenceTc(facade, consequenceEvent, dep.getConsequenceSimulationTime(), kind === 'reuse' ? beginMessage : null),
       consequenceSimulationTime: dep.getConsequenceSimulationTime().toString(),
       messageName: beginMessage?.messageName ?? null,
       messageClassName: beginMessage?.messageClassName ?? null,
@@ -622,6 +628,49 @@ export class EngineSession {
    */
   private simTimeToTcOrNull(facade: SequenceChartFacade, event: IEvent | null, simTime: BigDecimal): number | null {
     if (event !== null) return facade.getTimelineCoordinateBegin(event);
+    const log = this.log;
+    if (log.isEmpty()) return null;
+    if (simTime.less(log.getFirstSimulationTime()) || simTime.greater(log.getLastSimulationTime())) return null;
+    return facade.getTimelineCoordinateForSimulationTime(simTime);
+  }
+
+  /**
+   * Coordinate for a `RenderDependency`'s CAUSE endpoint (Java `getEventXViewportCoordinate*`
+   * for the cause side). Defaults to the cause event's END (the pill's right edge); if a
+   * spread `entry` is given (the send entry of a non-reuse dependency, living in the cause
+   * event), uses that entry's own timeline coordinate so multiple sends fan out across the
+   * pill. Falls back to the simulation-time mapping when the cause event is off the parsed
+   * range (a split/offscreen arrow). Zero-width events (SIMULATION_TIME/EVENT_NUMBER, or no
+   * entry separation) collapse begin==end, so this is unchanged there.
+   */
+  private dependencyCauseTc(facade: SequenceChartFacade, event: IEvent | null, simTime: BigDecimal, entry: EventLogEntry | null): number | null {
+    if (event === null) return this.offscreenTc(facade, simTime);
+    let tc = facade.getTimelineCoordinateEnd(event);
+    if (entry !== null) {
+      try {
+        if (entry.getEvent()?.getEventNumber() === event.getEventNumber()) tc = facade.EventLogEntry_getTimelineCoordinate(entry);
+      } catch {
+        /* keep the default end-of-pill coordinate */
+      }
+    }
+    return tc;
+  }
+
+  /** Consequence endpoint: the consequence event's BEGIN (pill's left edge), or the reused entry's coordinate (spread) when `entry` is given. See `dependencyCauseTc()`. */
+  private dependencyConsequenceTc(facade: SequenceChartFacade, event: IEvent | null, simTime: BigDecimal, entry: EventLogEntry | null): number | null {
+    if (event === null) return this.offscreenTc(facade, simTime);
+    let tc = facade.getTimelineCoordinateBegin(event);
+    if (entry !== null) {
+      try {
+        if (entry.getEvent()?.getEventNumber() === event.getEventNumber()) tc = facade.EventLogEntry_getTimelineCoordinate(entry);
+      } catch {
+        /* keep the default begin-of-pill coordinate */
+      }
+    }
+    return tc;
+  }
+
+  private offscreenTc(facade: SequenceChartFacade, simTime: BigDecimal): number | null {
     const log = this.log;
     if (log.isEmpty()) return null;
     if (simTime.less(log.getFirstSimulationTime()) || simTime.greater(log.getLastSimulationTime())) return null;
