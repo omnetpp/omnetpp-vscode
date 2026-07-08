@@ -30,9 +30,34 @@
  */
 
 import { TimelineMode } from '@omnetpp/shared/elog-protocol';
+import { formatSimulationTime } from '../common/decimalTime';
 
 /** `SequenceChartStyleProvider.getTickSpacing()` default. */
 export const TICK_SPACING_PX = 100;
+
+/** Expands a JS number to a plain (non-scientific) decimal string so `formatSimulationTime` (which parses decimal digits, not `1e-8`) can consume it. */
+function numberToPlainDecimalString(x: number): string {
+  const s = String(x);
+  if (!/[eE]/.test(s)) return s;
+  return x.toFixed(20).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+/**
+ * Formats a simulation time (in seconds) the way Eclipse's ruler does
+ * (`TimeUtils.secondsToTimeString`): short, unit-bearing labels like `0` -> "0s",
+ * `0.13` -> "130ms", `5e-8` -> "50ns", instead of a bare decimal such as
+ * "0.130189758243495". The value is first rounded to 3 significant digits (Eclipse's
+ * ruler labels are 2-3 significant figures — e.g. "10ms", "120ms", "260ms") so a
+ * non-linear tick whose interpolated time carries double-precision tail digits still
+ * reads as one clean unit rather than a long multi-unit breakdown.
+ */
+export function formatTickTime(seconds: number): string {
+  if (!Number.isFinite(seconds)) return '';
+  if (seconds === 0) return '0s';
+  const neg = seconds < 0;
+  const rounded = Number(Math.abs(seconds).toPrecision(3));
+  return (neg ? '-' : '') + formatSimulationTime(numberToPlainDecimalString(rounded));
+}
 
 export interface Tick {
   /** Timeline coordinate this tick's label should be drawn at. */
@@ -210,7 +235,7 @@ export function calculateTicks(
       // tc is an affine function of simtime in this mode -- linear interpolation between the two
       // simtimes we already sampled (left/right) recovers it without a further engine round trip.
       const tc = rightSimTime === leftSimTime ? leftTc : leftTc + ((t - leftSimTime) * (rightTc - leftTc)) / (rightSimTime - leftSimTime);
-      ticks.push({ tc, simTime: t, label: formatTickLabel(t) });
+      ticks.push({ tc, simTime: t, label: formatTickTime(t) });
     }
   } else {
     const tcStep = TICK_SPACING_PX / pixelsPerTc;
@@ -225,7 +250,7 @@ export function calculateTicks(
       const tMin = simTimeAt(tc - tcStep / 2) ?? simulationTime;
       const tMax = simTimeAt(tc + tcStep / 2) ?? simulationTime;
       const tick = calculateTick(simulationTime, tMin, tMax);
-      if (tick >= 0 && tick <= lastSimTime) ticks.push({ tc, simTime: tick, label: formatTickLabel(tick) });
+      if (tick >= 0 && tick <= lastSimTime) ticks.push({ tc, simTime: tick, label: formatTickTime(tick) });
     }
   }
 

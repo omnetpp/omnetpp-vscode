@@ -1,7 +1,7 @@
 import { test } from 'bun:test';
 import assert from 'node:assert';
 import { TimelineMode } from '@omnetpp/shared/elog-protocol';
-import { calculateTicks, formatTickLabel } from '../eventlog/chart/ticks';
+import { calculateTicks, formatTickLabel, formatTickTime } from '../eventlog/chart/ticks';
 
 // A simple affine simtime<->tc mapping (as if TimelineMode.SIMULATION_TIME, where tc IS simtime).
 function identitySimTimeAt(tc: number): number | null {
@@ -56,6 +56,16 @@ test('formatTickLabel renders nice numbers without floating-point noise or scien
   assert.strictEqual(formatTickLabel(1), '1');
   assert.strictEqual(formatTickLabel(2.5), '2.5');
   assert.strictEqual(formatTickLabel(100), '100');
+});
+
+test('formatTickTime renders short unit-bearing ruler labels like Eclipse (0s / 130ms / 50ns), not raw decimals', () => {
+  assert.strictEqual(formatTickTime(0), '0s');
+  assert.strictEqual(formatTickTime(0.13), '130ms');
+  assert.strictEqual(formatTickTime(0.26), '260ms');
+  assert.strictEqual(formatTickTime(1.79), '1s 790ms');
+  assert.strictEqual(formatTickTime(5e-8), '50ns');
+  // a non-linear tick's noisy interpolated time rounds to a clean single unit
+  assert.strictEqual(formatTickTime(0.130189758243495), '130ms');
 });
 
 test('calculateTicks tolerates a simTimeAt that returns null (unresolvable tc) without throwing', () => {
