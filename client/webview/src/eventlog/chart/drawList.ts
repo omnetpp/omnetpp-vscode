@@ -410,9 +410,17 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
   const columnDensity = new Map<number, { count: number; y0: number; y1: number }>();
   if (flags.showEventMarks) {
     for (const event of events) {
+      // Java `drawEvent()` init branch (SequenceChart.java:3860-3884): the initialization
+      // event (#0) is NOT drawn on its own (compound) module axis but as a pill on EACH
+      // consequence's target-module axis, so it shows up on every module it delivers an
+      // initial message to (source/sink/fifo/... in the Eclipse view), at the event's full
+      // `[xBegin, xEnd]` width. Hidden unless `showInitializationEvent`.
+      if (event.eventNumber === 0) {
+        if (flags.showInitializationEvent) pushInitializationEvent(primitives, emphasis, event, { axisByModuleId, viewport, theme, dependencies, showLabels: showLabels && flags.showEventNumbers, selectedEventNumbers, hovered, emphasisColor, bookmarkedEventNumbers });
+        continue;
+      }
       const axis = axisByModuleId.get(event.moduleId);
       if (!axis) continue;
-      if (!flags.showInitializationEvent && event.eventNumber === 0) continue;
       const y = axisRowY(axis.y, viewport);
       if (y < GUTTER_TOP_HEIGHT - EVENT_RADIUS || y > viewport.canvasHeight + EVENT_RADIUS) continue;
       const x = contentX(event.tcBegin, viewport);
@@ -559,6 +567,63 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
     primitives.push({ kind: 'mouseTick', x: params.mouseTick.x, y0: GUTTER_TOP_HEIGHT, y1: viewport.canvasHeight, label: params.mouseTick.label, lineColor: theme.descriptionForeground, textColor: theme.isDark ? theme.foreground : '#000000', bgColor: theme.isDark ? '#264f4f' : '#e0ffff' });
   }
   return primitives;
+}
+
+/**
+ * Draws the initialization event (#0) as a pill on each of its consequences' target-module
+ * axes (Java `drawEvent()`'s `isInitializationEvent` branch), instead of once on its own
+ * (compound) axis. The consequence axes come from the loaded dependencies whose cause is
+ * event #0; each unique axis gets a mark at the event's full `[x, xEnd]` width, plus the
+ * usual event-number label / selection ring / hover emphasis / bookmark. If none of #0's
+ * consequences resolve to a visible axis, it falls back to its own axis so it never
+ * silently vanishes.
+ */
+function pushInitializationEvent(
+  primitives: DrawPrimitive[],
+  emphasis: DrawPrimitive[],
+  event: TimelineEvent,
+  ctx: {
+    axisByModuleId: Map<number, AxisInfo>;
+    viewport: ViewportState;
+    theme: EventLogPalette;
+    dependencies: RenderDependency[];
+    showLabels: boolean;
+    selectedEventNumbers?: ReadonlySet<number>;
+    hovered?: { events?: ReadonlySet<number> };
+    emphasisColor: string;
+    bookmarkedEventNumbers?: ReadonlySet<number>;
+  },
+): void {
+  const { axisByModuleId, viewport, theme, dependencies, showLabels, selectedEventNumbers, hovered, emphasisColor, bookmarkedEventNumbers } = ctx;
+  const x = contentX(event.tcBegin, viewport);
+  const xEnd = event.tcEnd === event.tcBegin ? x : contentX(event.tcEnd, viewport);
+  if (xEnd < GUTTER_LEFT_WIDTH - EVENT_RADIUS || x > viewport.canvasWidth + EVENT_RADIUS) return;
+  const evSelected = selectedEventNumbers?.has(0) ?? false;
+  const evHovered = hovered?.events?.has(0) ?? false;
+
+  const drawAt = (moduleId: number, y: number): void => {
+    if (y < GUTTER_TOP_HEIGHT - EVENT_RADIUS || y > viewport.canvasHeight + EVENT_RADIUS) return;
+    primitives.push({ kind: 'eventMark', eventNumber: 0, moduleId, x, xEnd, y, radius: EVENT_RADIUS, color: theme.eventColor });
+    if (showLabels) primitives.push({ kind: 'label', x: x + 2, y: y + 10, text: '#0', color: theme.descriptionForeground, align: 'left' });
+    if (evSelected) primitives.push({ kind: 'selectionMark', x, xEnd, y, radius: EVENT_RADIUS + 3, color: emphasisColor });
+    if (evSelected || evHovered) emphasis.push({ kind: 'eventMark', eventNumber: 0, moduleId, x, xEnd, y, radius: evHovered ? EVENT_RADIUS + 2 : EVENT_RADIUS, color: evSelected ? emphasisColor : theme.eventColor });
+    if (bookmarkedEventNumbers?.has(0)) primitives.push({ kind: 'bookmarkMark', x: x - EVENT_RADIUS - 3, y: y - EVENT_RADIUS - 3, color: bookmarkMarkColor(theme) });
+  };
+
+  const drawnYs = new Set<number>();
+  for (const dep of dependencies) {
+    if (dep.causeEventNumber !== 0 || dep.consequenceModuleId === null) continue;
+    const axis = axisByModuleId.get(dep.consequenceModuleId);
+    if (!axis) continue;
+    const y = axisRowY(axis.y, viewport);
+    if (drawnYs.has(y)) continue; // one mark per axis row
+    drawnYs.add(y);
+    drawAt(dep.consequenceModuleId, y);
+  }
+  if (drawnYs.size === 0) {
+    const axis = axisByModuleId.get(event.moduleId);
+    if (axis) drawAt(event.moduleId, axisRowY(axis.y, viewport));
+  }
 }
 
 function pushInfoPanel(primitives: DrawPrimitive[], theme: EventLogPalette, lines: [string, string], canvasWidth: number, anchorY: number, edge: 'top' | 'bottom'): void {

@@ -263,6 +263,25 @@ test('hovering a self-message arc widens its ellipseArc (so hover is visible on 
   assert.ok(wide.length >= 1, 'the hovered self-arc should be redrawn wider');
 });
 
+test('initialization event (#0) draws a pill on EACH consequence axis (not its own compound axis), only when shown', () => {
+  const initEvent = event_(0, 1, 0, { tcEnd: 5 }); // #0 on module 1, nonzero width
+  const initDeps: RenderDependency[] = [
+    dep_({ causeEventNumber: 0, consequenceEventNumber: 4, causeModuleId: 1, causeTc: 0, consequenceModuleId: 2, consequenceTc: 0 }),
+    dep_({ causeEventNumber: 0, consequenceEventNumber: 7, causeModuleId: 1, causeTc: 0, consequenceModuleId: 3, consequenceTc: 0 }),
+  ];
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  // hidden by default
+  const hidden = buildDrawList({ timelineMode: TimelineMode.STEP, viewport, events: [initEvent], dependencies: initDeps, methodCalls: [], axesLayout, ticks: [], theme });
+  assert.strictEqual(hidden.filter((p) => p.kind === 'eventMark' && p.eventNumber === 0).length, 0, 'hidden unless showInitializationEvent');
+  // shown -> one pill per consequence axis (modules 2 and 3), pill-shaped (xEnd > x), NOT on module 1
+  const shown = buildDrawList({ timelineMode: TimelineMode.STEP, viewport, events: [initEvent], dependencies: initDeps, methodCalls: [], axesLayout, ticks: [], theme, displayFlags: { ...DEFAULT_DISPLAY_FLAGS, showInitializationEvent: true } });
+  const marks = shown.filter((p): p is Extract<typeof p, { kind: 'eventMark' }> => p.kind === 'eventMark' && p.eventNumber === 0);
+  assert.strictEqual(marks.length, 2, 'one init mark per consequence axis');
+  assert.deepStrictEqual(new Set(marks.map((m) => m.moduleId)), new Set([2, 3]), 'drawn on the consequence modules, not the compound module 1');
+  assert.ok(marks.every((m) => m.xEnd > m.x), 'each init mark is pill-shaped (has the event width)');
+});
+
 test('no selection/hover params: no emphasis primitives (axisSelectionMark, bold label, thick arrow)', () => {
   const primitives = draw();
   assert.strictEqual(primitives.filter((p) => p.kind === 'axisSelectionMark').length, 0);
