@@ -96,3 +96,27 @@ test('maxVerticalScroll is zero when content fits, positive when it overflows', 
   const tall = deriveAxes(new Set(Array.from({ length: 200 }, (_, i) => i)), null, 100);
   assert.ok(maxVerticalScroll(tall, 100) > 0);
 });
+
+test('totalHeight (and so maxVerticalScroll) includes a BOTTOM margin matching the top one, so the last axis is fully reachable by scrolling -- not just short of it', () => {
+  // Regression for: "sometimes I cannot drag the canvas to make the server module at the
+  // bottom visible" (Aloha example). Java's calculateVirtualSize() reserves axisOffset*2
+  // (top AND bottom margin); this port's totalHeight used to only account for the top one
+  // baked into the loop's starting y, so maxVerticalScroll came up short by up to
+  // 2*AXIS_OFFSET px -- sometimes clamping to 0 outright even though the last axis
+  // genuinely extends past the visible content height.
+  const spacing = { mode: 'manual' as const, manualSpacing: 15 };
+  const layout = layoutAxes([1, 2], null, 600, spacing); // 2 simple axes, lineHeight=1 each
+  const last = layout.axes[layout.axes.length - 1];
+
+  // A content height that comfortably exceeds the OLD (buggy) totalHeight but is still less
+  // than the actual bottom-of-content extent -- exactly the "old formula clamps scroll to 0,
+  // but the last axis is genuinely clipped" case.
+  const contentHeightPx = 40;
+  const max = maxVerticalScroll(layout, contentHeightPx);
+  assert.ok(max > 0, `expected scrolling to be possible/needed, got maxVerticalScroll=${max}`);
+
+  // At the maximum allowed scroll, the last axis's line must be fully within the visible
+  // content window [0, contentHeightPx] (axis lines are centered on their y, 1px thick here).
+  const visibleY = last.y - max;
+  assert.ok(visibleY - last.lineHeight / 2 >= 0 && visibleY + last.lineHeight / 2 <= contentHeightPx, `last axis (y=${last.y}) not fully visible at max scroll (${max}): visibleY=${visibleY}`);
+});

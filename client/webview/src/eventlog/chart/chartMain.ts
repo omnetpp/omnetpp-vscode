@@ -1166,7 +1166,11 @@ async function performExportSvg(result: ExportDialogResult, ctxBase: ExportRange
       leftTc: range.tcBegin,
       pixelsPerTc: viewport.pixelsPerTc,
       canvasWidth: GUTTER_LEFT_WIDTH + widthPx,
-      canvasHeight: GUTTER_TOP_HEIGHT + axesLayout.totalHeight + 40,
+      // `axesLayout.totalHeight` already includes BOTH the top and bottom axis-offset
+      // margins (axes.ts's layoutAxes()), so no extra fudge factor is needed here to fit
+      // every axis without clipping -- a prior `+ 40` (== 2*AXIS_OFFSET) was compensating
+      // for that margin being missing from `totalHeight`; now redundant.
+      canvasHeight: GUTTER_TOP_HEIGHT + axesLayout.totalHeight,
       vscroll: 0,
       followEnd: false,
       coordinateSystemVersion: model.coordinateSystemVersion,

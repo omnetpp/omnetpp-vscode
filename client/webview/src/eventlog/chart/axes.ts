@@ -174,7 +174,17 @@ export function layoutAxes(orderedModuleIds: readonly number[], moduleTree: Elog
     y += a.lineHeight;
   }
 
-  return { axes, totalHeight: Math.max(0, y - AXIS_OFFSET), spacing: effectiveSpacing };
+  // Java `calculateVirtualSize()`: the scrollable content height is `totalAxesHeight +
+  // n*spacing + axisOffset*2` -- a BOTTOM margin mirroring the TOP one already baked into
+  // `y`'s starting point (`y = AXIS_OFFSET` above), so the axis stack gets the same
+  // breathing room below its last axis as above its first. Without this second AXIS_OFFSET,
+  // `maxVerticalScroll()` came up short by up to 2*AXIS_OFFSET px -- sometimes clamping to
+  // 0 outright -- leaving the LAST axis permanently just out of reach of any scroll/drag,
+  // however tall the axis stack (reported: couldn't drag far enough to see e.g. Aloha's
+  // "server" module at the bottom). An empty axis stack legitimately needs no margin at all.
+  const totalHeight = resolved.length === 0 ? 0 : Math.max(0, y + AXIS_OFFSET);
+
+  return { axes, totalHeight, spacing: effectiveSpacing };
 }
 
 /**
