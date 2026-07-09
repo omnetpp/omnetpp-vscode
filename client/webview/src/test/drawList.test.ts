@@ -2,7 +2,7 @@ import { test } from 'bun:test';
 import assert from 'node:assert';
 import { TimelineMode, type RenderDependency, type RenderMethodCall, type TimelineEvent } from '@omnetpp/shared/elog-protocol';
 import type { EventLogPalette } from '../eventlog/common/theme';
-import { deriveAxes } from '../eventlog/chart/axes';
+import { AUTO_AXIS_SPACING, AXIS_VECTOR_STRIP_HEIGHT, deriveAxes, layoutAxes } from '../eventlog/chart/axes';
 import { DEFAULT_DISPLAY_FLAGS } from '../eventlog/chart/displayFlags';
 import { BOOKMARK_MARK_COLOR, bookmarkDependencyKey, buildDrawList, MAX_EVENT_MARKS_PER_COLUMN, SELECTION_MARK_COLOR } from '../eventlog/chart/drawList';
 import { GUTTER_LEFT_WIDTH, GUTTER_TOP_HEIGHT, createViewportState, resize } from '../eventlog/chart/viewportState';
@@ -452,7 +452,7 @@ test('U8 axisGlyphs: expand/collapse per the passed visibility info (no "close" 
   assert.ok(glyphs.every((g) => g.x >= 0 && g.x + g.size <= GUTTER_LEFT_WIDTH));
 });
 
-test('axis vector strip: shown (in place of the line) only when the flag is on AND a strip exists', () => {
+test('axis vector strip: shown as an OVERLAY on top of the (always-drawn) axis line, only when the flag is on AND a strip exists', () => {
   const viewport = baseViewport();
   const axesLayout = deriveAxes(new Set([1, 2]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
   const strips = [
@@ -466,18 +466,48 @@ test('axis vector strip: shown (in place of the line) only when the flag is on A
   ];
   const base = { timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [] as TimelineEvent[], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, axisVectorStrips: strips };
 
-  // flag ON: module 1 renders a strip (2 segments) and NO axis line; module 2 still a line.
+  // flag ON: module 1 renders a strip (2 segments) PLUS its axis line still underneath (so
+  // the axis stays visible outside the strip's covered range); module 2 (no strip) has just its line.
   const on = buildDrawList({ ...base, displayFlags: { ...DEFAULT_DISPLAY_FLAGS, showAxisVectorData: true } });
   const strip = on.find((p): p is Extract<typeof p, { kind: 'axisVectorStrip' }> => p.kind === 'axisVectorStrip');
   assert.ok(strip && strip.moduleId === 1 && strip.segments.length === 2, 'strip with two segments');
   assert.ok(strip!.segments[0].color !== strip!.segments[1].color, 'distinct values get distinct colors');
-  assert.ok(!on.some((p) => p.kind === 'axisLine' && p.moduleId === 1), 'strip replaces the axis line for module 1');
+  assert.ok(on.some((p) => p.kind === 'axisLine' && p.moduleId === 1), 'the axis line is still drawn UNDER the strip for module 1');
   assert.ok(on.some((p) => p.kind === 'axisLine' && p.moduleId === 2), 'module 2 keeps its line');
 
   // flag OFF: no strip, module 1 keeps its plain line.
   const off = buildDrawList({ ...base, displayFlags: { ...DEFAULT_DISPLAY_FLAGS, showAxisVectorData: false } });
   assert.ok(!off.some((p) => p.kind === 'axisVectorStrip'));
   assert.ok(off.some((p) => p.kind === 'axisLine' && p.moduleId === 1));
+});
+
+test('a vector-strip axis keeps a THIN underlying axisLine (compound/simple thickness), even though its row reserves the taller strip height for layout', () => {
+  const viewport = baseViewport();
+  // simple (non-compound) module -> axes.ts would normally give lineHeight=1; layoutAxes'
+  // stripModuleIds param bumps the RESERVED row height to AXIS_VECTOR_STRIP_HEIGHT (12) --
+  // the rendered axisLine primitive must still use the thin 1px thickness, not 12.
+  const axesLayout = layoutAxes([1], null, viewport.canvasHeight - GUTTER_TOP_HEIGHT, AUTO_AXIS_SPACING, new Set([1]));
+  const strips = [{ moduleId: 1, segments: [{ tcBegin: 0, tcEnd: 10, colorIndex: 0, value: 0, valueText: 'A' }] }];
+  const primitives = buildDrawList({
+    timelineMode: TimelineMode.SIMULATION_TIME,
+    viewport,
+    events: [] as TimelineEvent[],
+    dependencies: [],
+    methodCalls: [],
+    axesLayout,
+    ticks: [],
+    theme,
+    axisVectorStrips: strips,
+    displayFlags: { ...DEFAULT_DISPLAY_FLAGS, showAxisVectorData: true },
+    selectedAxisModuleIds: new Set([1]),
+  });
+  const line = primitives.find((p): p is Extract<typeof p, { kind: 'axisLine' }> => p.kind === 'axisLine' && p.moduleId === 1)!;
+  assert.strictEqual(line.lineHeight, 1, 'the drawn axis line stays 1px thick (simple module), not the 12px strip row height');
+  // The selection mark, in contrast, MUST carry the full strip height so its bracket lines
+  // (drawn symmetrically around it by canvasStack.ts/svgExport.ts) actually bracket the strip
+  // instead of sitting inside it -- this is the "incorrectly offsetted" bug being fixed.
+  const mark = primitives.find((p): p is Extract<typeof p, { kind: 'axisSelectionMark' }> => p.kind === 'axisSelectionMark')!;
+  assert.strictEqual(mark.lineHeight, AXIS_VECTOR_STRIP_HEIGHT, 'the selection mark height tracks the strip row, not the thin line');
 });
 
 test('U8 axisGlyphs: the glyph sits immediately BEFORE (to the left of) the module name', () => {

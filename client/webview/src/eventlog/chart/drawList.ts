@@ -378,10 +378,19 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
     for (const axis of axesLayout.axes) {
       const y = axisRowY(axis.y, viewport);
       if (y < GUTTER_TOP_HEIGHT - axis.lineHeight || y > viewport.canvasHeight + axis.lineHeight) continue;
+      // The plain axis line is ALWAYS drawn (full width, from x=0, so it runs under the
+      // transparent leaf-label strip too) -- a vector-data strip is an OVERLAY on top of it,
+      // not a replacement, since the vector's samples rarely cover the module's entire
+      // lifetime; outside the strip's covered range the plain line keeps the axis visible
+      // (e.g. before the vector's first sample, or after its last one -- a fixed-width "last
+      // segment" would misrepresent an unknown value as held forever). Uses the traditional
+      // compound(3px)/simple(1px) thickness, NOT `axis.lineHeight` (which is the taller
+      // strip row-height reservation for layout purposes when a strip is shown).
+      primitives.push({ kind: 'axisLine', moduleId: axis.moduleId, x1: 0, x2: viewport.canvasWidth, y, lineHeight: axis.compound ? 3 : 1, color: theme.foreground });
       const strip = stripByModuleId.get(axis.moduleId);
       if (strip) {
-        // Multi-color step bar centered on the axis line (in place of the line). Segments are
-        // culled to the canvas; contentX maps each held-value span's tc edges to pixels.
+        // Multi-color step bar centered on the axis line, drawn on top. Segments are culled
+        // to the canvas; contentX maps each held-value span's tc edges to pixels.
         const segments: { x1: number; x2: number; color: string; value: number; valueText: string }[] = [];
         for (const seg of strip.segments) {
           const x1 = contentX(seg.tcBegin, viewport);
@@ -390,10 +399,6 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
           segments.push({ x1, x2, color: getGoodLightColor(seg.colorIndex), value: seg.value, valueText: seg.valueText });
         }
         if (segments.length > 0) primitives.push({ kind: 'axisVectorStrip', moduleId: axis.moduleId, y, height: AXIS_VECTOR_STRIP_HEIGHT, borderColor: theme.foreground, labelColor: '#000000', clipLeft: GUTTER_LEFT_WIDTH, clipRight: viewport.canvasWidth, segments });
-      } else {
-        // Axis line spans the FULL width (from x=0), so it runs under the transparent
-        // leaf-label strip -- the label reads as sitting on the chart, not on an opaque band.
-        primitives.push({ kind: 'axisLine', moduleId: axis.moduleId, x1: 0, x2: viewport.canvasWidth, y, lineHeight: axis.lineHeight, color: theme.foreground });
       }
       const axisHovered = hovered?.axisModuleIds?.has(axis.moduleId) ?? false;
       const axisSelected = selectedAxisModuleIds?.has(axis.moduleId) ?? false;
