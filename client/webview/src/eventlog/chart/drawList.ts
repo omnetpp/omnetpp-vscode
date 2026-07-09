@@ -467,9 +467,18 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       // the rest of the left column are transparent) -- `color` is the fill, `textColor` the
       // rotated name.
       primitives.push({ kind: 'axisHeaderBox', x, y0, y1, label: header.label, color: theme.isDark ? '#2f5060' : '#d7f2f2', textColor: theme.isDark ? '#e0f0f0' : '#000000' });
-      // (No per-header glyphs: when a compound is expanded it is ALSO drawn as an axis
-      // row, whose expand/collapse glyph -- now placed right before its name above --
-      // already controls it, so a second glyph in the band would just duplicate it.)
+      // Expand/collapse glyph pinned at the TOP of the band -- "before" the vertically-
+      // written name, mirroring the axis row's glyph-before-name placement. A header can
+      // exist WITHOUT a matching axis row of its own (its children are open but the
+      // compound itself isn't), so it can't always rely on an axis-row glyph to control it;
+      // this is the only way to collapse/expand such a group. At most one of the two
+      // applies at once (matching the axis-row glyph); prefer collapse if somehow both.
+      const headerInfo = params.headerGlyphs?.get(header.fullPath);
+      if (headerInfo) {
+        const gy = Math.max(y0, GUTTER_TOP_HEIGHT) + 2;
+        if (headerInfo.collapse) primitives.push({ kind: 'moduleAction', action: 'collapse', moduleId: headerInfo.moduleId, scope: 'header', x: x - 1, y: gy, size: MODULE_ACTION_SIZE, color: theme.descriptionForeground });
+        else if (headerInfo.expand) primitives.push({ kind: 'moduleAction', action: 'expand', moduleId: headerInfo.moduleId, scope: 'header', x: x - 1, y: gy, size: MODULE_ACTION_SIZE, color: theme.descriptionForeground });
+      }
     }
   }
 

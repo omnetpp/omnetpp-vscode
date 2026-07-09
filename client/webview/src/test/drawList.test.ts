@@ -3,6 +3,7 @@ import assert from 'node:assert';
 import { TimelineMode, type RenderDependency, type RenderMethodCall, type TimelineEvent } from '@omnetpp/shared/elog-protocol';
 import type { EventLogPalette } from '../eventlog/common/theme';
 import { AUTO_AXIS_SPACING, AXIS_VECTOR_STRIP_HEIGHT, deriveAxes, layoutAxes } from '../eventlog/chart/axes';
+import { calculateAxisHeaders } from '../eventlog/chart/axisHeaders';
 import { DEFAULT_DISPLAY_FLAGS } from '../eventlog/chart/displayFlags';
 import { BOOKMARK_MARK_COLOR, bookmarkDependencyKey, buildDrawList, MAX_EVENT_MARKS_PER_COLUMN, SELECTION_MARK_COLOR } from '../eventlog/chart/drawList';
 import { GUTTER_LEFT_WIDTH, GUTTER_TOP_HEIGHT, createViewportState, resize } from '../eventlog/chart/viewportState';
@@ -629,6 +630,26 @@ test('a zero-duration method call (tcEnd == tc) is still a single line, no bar',
 test('U8 axisGlyphs omitted: no moduleAction primitives at all (module tree not loaded)', () => {
   const primitives = draw();
   assert.equal(primitives.filter((p) => p.kind === 'moduleAction').length, 0);
+});
+
+test('a compound-module axis HEADER band gets its own collapse/expand glyph, even when the compound has no axis row of its own', () => {
+  // Two leaf axes (2 "Net.host1", 3 "Net.host2") merge under a "Net" header band -- but
+  // "Net" (module 1) is NOT itself an open axis (only its children are), so there is no
+  // axis-row glyph anywhere to control it; the header band's own glyph is the only way to
+  // collapse/expand this group.
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const axisHeaderRoot = calculateAxisHeaders([2, 3], (id) => (id === 2 ? 'Net.host1' : 'Net.host2'));
+  const headerGlyphs = new Map([['Net', { moduleId: 1, expand: false, collapse: true }]]);
+
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, displayFlags: DEFAULT_DISPLAY_FLAGS, axisHeaderRoot, headerGlyphs });
+
+  assert.ok(primitives.some((p) => p.kind === 'axisHeaderBox' && p.label === 'Net'), 'the "Net" header band is drawn');
+  assert.ok(!primitives.some((p) => p.kind === 'moduleAction' && p.scope === 'axis' && p.moduleId === 1), 'module 1 (Net) has no axis row, so no axis-scoped glyph for it');
+  const headerGlyph = primitives.find((p): p is Extract<typeof p, { kind: 'moduleAction' }> => p.kind === 'moduleAction' && p.scope === 'header');
+  assert.ok(headerGlyph, 'the header band itself carries a moduleAction glyph');
+  assert.strictEqual(headerGlyph!.moduleId, 1);
+  assert.strictEqual(headerGlyph!.action, 'collapse');
 });
 
 test('U8 moduleIdToAxisModuleId: events/deps of a closed submodule draw on the ancestor axis', () => {
