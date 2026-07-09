@@ -377,11 +377,12 @@ function strippedModuleIds(): ReadonlySet<number> | undefined {
 function currentAxesLayout(): AxesLayout {
   const spacing: AxisSpacingSpec = axisSpacingMode === 'manual' ? { mode: 'manual', manualSpacing: axisSpacingManual } : AUTO_AXIS_SPACING;
   const strips = strippedModuleIds();
+  const activeIds = lastModel && lastModel.moduleIds.length > 0 ? new Set(lastModel.moduleIds) : knownModuleIds;
   if (moduleTree === null || openAxisModuleIds === null) {
-    if (spacing.mode === 'manual') return layoutAxes([...knownModuleIds].sort((a, b) => a - b), moduleTree, contentHeight(viewport), spacing, strips);
-    return deriveAxes(knownModuleIds, moduleTree, contentHeight(viewport), displayFlags.showEmptyAxes);
+    if (spacing.mode === 'manual') return layoutAxes([...activeIds].sort((a, b) => a - b), moduleTree, contentHeight(viewport), spacing, strips);
+    return deriveAxes(activeIds, moduleTree, contentHeight(viewport), displayFlags.showEmptyAxes);
   }
-  const visible = computeVisibleAxisModuleIds(openAxisModuleIds, knownModuleIds, moduleTree, displayFlags.showEmptyAxes);
+  const visible = computeVisibleAxisModuleIds(openAxisModuleIds, activeIds, moduleTree, displayFlags.showEmptyAxes);
   return layoutAxes(orderVisibleAxes(visible), moduleTree, contentHeight(viewport), spacing, strips);
 }
 
