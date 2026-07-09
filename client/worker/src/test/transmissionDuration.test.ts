@@ -43,7 +43,11 @@ test('viewport on a transmission-delay log decorates send dependencies and does 
     const decorated = viewport.dependencies.filter((d) => d.transmissionDurationFraction !== undefined);
     assert.ok(decorated.length > 0, 'at least one send dependency carries a transmission duration');
     for (const dep of decorated) {
-      assert.ok(dep.transmissionDurationFraction! >= 0 && dep.transmissionDurationFraction! <= 1);
+      assert.ok(dep.transmissionDurationFraction! >= 0);
+      assert.ok(typeof dep.transmissionDurationTc1 === 'number');
+      assert.ok(typeof dep.transmissionDurationTc2 === 'number');
+      assert.ok(typeof dep.transmissionDurationTc3 === 'number');
+      assert.ok(typeof dep.transmissionDurationTc4 === 'number');
       assert.ok(typeof dep.isReceptionStart === 'boolean', 'isReceptionStart populated alongside the fraction');
     }
   } finally {

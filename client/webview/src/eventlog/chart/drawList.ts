@@ -93,7 +93,7 @@ export type DrawPrimitive =
   | { kind: 'arrow'; arrowKind: ArrowKind; x1: number; y1: number; x2: number; y2: number; color: string; dash?: number[]; ref?: ArrowRef; width?: number }
   | { kind: 'arrowHead'; x: number; y: number; angle: number; color: string; length: number; width: number }
   | { kind: 'ellipseArc'; x1: number; x2: number; y: number; height: number; quarter: 0 | 1 | -1; color: string; ref?: ArrowRef; width?: number; dash?: number[] }
-  | { kind: 'parallelogram'; points: [[number, number], [number, number], [number, number], [number, number]]; color: string }
+  | { kind: 'parallelogram'; points: [[number, number], [number, number], [number, number], [number, number]]; color: string; borderColor?: string }
   | { kind: 'zigzag'; segments: LineSegment[]; color: string }
   | { kind: 'label'; x: number; y: number; text: string; color: string; align?: 'left' | 'center' | 'right'; rotateDeg?: number }
   | { kind: 'timeDifferenceLabel'; x: number; y: number; text: string; color: string }
@@ -739,10 +739,15 @@ function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx:
     showArrowHeads: flags.showArrowHeads,
     isFiltered,
     transmissionDurationFraction: flags.showTransmissionDurations ? dep.transmissionDurationFraction : null,
+    isReceptionStart: flags.showTransmissionDurations ? dep.isReceptionStart : undefined,
+    transmissionDurationX1: flags.showTransmissionDurations && dep.transmissionDurationTc1 !== undefined && dep.transmissionDurationTc1 !== null ? contentX(dep.transmissionDurationTc1, viewport) : null,
+    transmissionDurationX2: flags.showTransmissionDurations && dep.transmissionDurationTc2 !== undefined && dep.transmissionDurationTc2 !== null ? contentX(dep.transmissionDurationTc2, viewport) : null,
+    transmissionDurationX3: flags.showTransmissionDurations && dep.transmissionDurationTc3 !== undefined && dep.transmissionDurationTc3 !== null ? contentX(dep.transmissionDurationTc3, viewport) : null,
+    transmissionDurationX4: flags.showTransmissionDurations && dep.transmissionDurationTc4 !== undefined && dep.transmissionDurationTc4 !== null ? contentX(dep.transmissionDurationTc4, viewport) : null,
   });
   if (!geom) return;
 
-  if (geom.parallelogram) primitives.push({ kind: 'parallelogram', points: geom.parallelogram.points, color: theme.isDark ? '#888888' : '#333333' });
+  if (geom.parallelogram) primitives.push({ kind: 'parallelogram', points: geom.parallelogram.points, color, borderColor: theme.isDark ? '#ffffff' : '#000000' });
   for (const seg of geom.segments) {
     if (Math.abs(seg.x2 - seg.x1) < 1 && !vlineBuffer.addAndCheck((seg.x1 + seg.x2) / 2, seg.y1, seg.y2)) continue;
     primitives.push({ kind: 'arrow', arrowKind, x1: seg.x1, y1: seg.y1, x2: seg.x2, y2: seg.y2, color, dash: seg.dashed ? OFFSCREEN_DASH : dash, ref: depRef, width: arrowWidth });

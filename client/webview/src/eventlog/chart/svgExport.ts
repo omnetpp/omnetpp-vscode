@@ -274,7 +274,8 @@ function emitPrimitive(b: SvgBuilder, p: DrawPrimitive, fontFamily: string): voi
     }
     case 'parallelogram': {
       const points = p.points.map(([x, y]) => `${fmt(x)},${fmt(y)}`).join(' ');
-      b.el('polygon', { points, fill: p.color, 'fill-opacity': 0.25 });
+      const strokeAttrs = p.borderColor ? { stroke: p.borderColor, 'stroke-opacity': 0.25, 'stroke-width': 1 } : {};
+      b.el('polygon', { points, fill: p.color, 'fill-opacity': 0.25, ...strokeAttrs });
       return;
     }
     case 'zigzag':

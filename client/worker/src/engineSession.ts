@@ -697,7 +697,7 @@ export class EngineSession {
           break;
       }
     } else if (kind === 'send') {
-      this.fillTransmissionDuration(result, dep, causeEvent, beginMessage);
+      this.fillTransmissionDuration(result, dep, causeEvent, beginMessage, facade);
     }
     return result;
   }
@@ -711,7 +711,7 @@ export class EngineSession {
    * a narrow duck-typed check so a hypothetical future `IEvent` implementor lacking them
    * just yields "no transmission-duration decoration" instead of a crash.
    */
-  private fillTransmissionDuration(result: RenderDependency, dep: IMessageDependency, causeEvent: IEvent | null, beginMessage: ReturnType<IMessageDependency['getBeginMessageDescriptionEntry']>): void {
+  private fillTransmissionDuration(result: RenderDependency, dep: IMessageDependency, causeEvent: IEvent | null, beginMessage: ReturnType<IMessageDependency['getBeginMessageDescriptionEntry']>, facade: SequenceChartFacade): void {
     if (causeEvent === null || !(beginMessage instanceof BeginSendEntry)) return;
     // NOTE: the generated entry classes (entries.ts) expose plain FIELDS, not Java-style
     // getters -- `isDeliveredImmediately`, not `getIsDeliveredImmediately()`. Calling the
@@ -728,8 +728,45 @@ export class EngineSession {
     if (span.lessOrEqual(BigDecimal.ZERO)) return;
     const fraction = Number(transmissionDelay.toString()) / Number(span.toString());
     if (!Number.isFinite(fraction)) return;
-    result.transmissionDurationFraction = Math.min(1, Math.max(0, fraction));
+    result.transmissionDurationFraction = Math.max(0, fraction);
     result.isReceptionStart = endSendEntry.isDeliveredImmediately;
+
+    if (result.causeTc === null || result.consequenceTc === null) return;
+    const consequenceEvent = dep.getConsequenceEvent();
+    if (consequenceEvent === null) return;
+
+    const causeSimulationTime = causeEvent.getSimulationTime();
+    const consequenceSimulationTime = dep.getConsequenceSimulationTime();
+
+    let causeModuleId = causeEvent.getModuleId();
+    if (beginMessage.contextModuleId >= 0 && beginMessage.getEvent()?.getEventNumber() === causeEvent.getEventNumber()) {
+      causeModuleId = beginMessage.contextModuleId;
+    }
+    const consequenceModuleId = consequenceEvent.getModuleId();
+
+    const t3 = causeSimulationTime.add(remainingDuration);
+    const isReceptionStart = endSendEntry.isDeliveredImmediately;
+    const t4 = isReceptionStart ? consequenceSimulationTime.add(remainingDuration) : consequenceSimulationTime;
+
+    const tc1 = result.causeTc;
+    const tc2 = isReceptionStart ? result.consequenceTc : Math.max(tc1, facade.getTimelineCoordinateForSimulationTimeAndEventInModule(consequenceSimulationTime.subtract(transmissionDelay), consequenceModuleId));
+    const tc3 = this.getTimelineCoordinateEndForSimulationTimeAndEventInModule(facade, t3, causeModuleId);
+    const tc4 = !isReceptionStart ? facade.getTimelineCoordinateEnd(consequenceEvent) : Math.max(tc3, this.getTimelineCoordinateEndForSimulationTimeAndEventInModule(facade, t4, consequenceModuleId));
+
+    result.transmissionDurationTc1 = tc1;
+    result.transmissionDurationTc2 = tc2;
+    result.transmissionDurationTc3 = tc3;
+    result.transmissionDurationTc4 = tc4;
+  }
+
+  private getTimelineCoordinateEndForSimulationTimeAndEventInModule(facade: SequenceChartFacade, simulationTime: BigDecimal, moduleId: number): number {
+    const eventLog = this.eventLog!;
+    let event = eventLog.getLastEventNotAfterSimulationTime(simulationTime);
+    while (event !== null && event.getSimulationTime().equals(simulationTime)) {
+      if (event.getModuleId() === moduleId) return facade.getTimelineCoordinateEnd(event);
+      event = event.getNextEvent();
+    }
+    return facade.getTimelineCoordinateForSimulationTime(simulationTime);
   }
 
   /**

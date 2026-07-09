@@ -379,6 +379,11 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       for (let i = 1; i < p.points.length; i++) ctx.lineTo(p.points[i][0], p.points[i][1]);
       ctx.closePath();
       ctx.fill();
+      if (p.borderColor) {
+        ctx.strokeStyle = p.borderColor;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
       ctx.restore();
       break;
     }

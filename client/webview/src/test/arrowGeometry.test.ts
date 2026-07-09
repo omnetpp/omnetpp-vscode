@@ -144,6 +144,36 @@ test('computeTransmissionParallelogram: 50% fraction produces a quad half as wid
   assert.deepEqual(p4, [100, 100]);
 });
 
+test('computeTransmissionParallelogram: isReceptionStart = true shifts bottom horizontal segment to the right', () => {
+  const geom = computeLineArrowGeometry({ cause: { axisY: 0, x: 0 }, consequence: { axisY: 100, x: 200 }, showArrowHeads: false, isFiltered: false, transmissionDurationFraction: 0.5, isReceptionStart: true });
+  assert.ok(geom!.parallelogram);
+  const [p1, p2, p3, p4] = geom!.parallelogram!.points;
+  assert.deepEqual(p1, [0, 0]);
+  assert.deepEqual(p2, [100, 0]);
+  assert.deepEqual(p3, [300, 100]);
+  assert.deepEqual(p4, [200, 100]);
+});
+
+test('computeTransmissionParallelogram: right-to-left (x2 < x1) with isReceptionStart = false works correctly with positive width', () => {
+  const geom = computeLineArrowGeometry({ cause: { axisY: 0, x: 200 }, consequence: { axisY: 100, x: 0 }, showArrowHeads: false, isFiltered: false, transmissionDurationFraction: 0.5, isReceptionStart: false });
+  assert.ok(geom!.parallelogram);
+  const [p1, p2, p3, p4] = geom!.parallelogram!.points;
+  assert.deepEqual(p1, [200, 0]);
+  assert.deepEqual(p2, [300, 0]);
+  assert.deepEqual(p3, [0, 100]);
+  assert.deepEqual(p4, [-100, 100]);
+});
+
+test('computeTransmissionParallelogram: right-to-left (x2 < x1) with isReceptionStart = true works correctly with positive width', () => {
+  const geom = computeLineArrowGeometry({ cause: { axisY: 0, x: 200 }, consequence: { axisY: 100, x: 0 }, showArrowHeads: false, isFiltered: false, transmissionDurationFraction: 0.5, isReceptionStart: true });
+  assert.ok(geom!.parallelogram);
+  const [p1, p2, p3, p4] = geom!.parallelogram!.points;
+  assert.deepEqual(p1, [200, 0]);
+  assert.deepEqual(p2, [300, 0]);
+  assert.deepEqual(p3, [100, 100]);
+  assert.deepEqual(p4, [0, 100]);
+});
+
 test('computeTransmissionParallelogram: fraction <= 0 -> no parallelogram', () => {
   assert.strictEqual(computeTransmissionParallelogram(0, 0, 100, 0, 0), null);
   const geom = computeLineArrowGeometry({ cause: { axisY: 0, x: 0 }, consequence: { axisY: 0, x: 100 }, showArrowHeads: false, isFiltered: false, transmissionDurationFraction: 0 });

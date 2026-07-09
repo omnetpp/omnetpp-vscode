@@ -424,6 +424,10 @@ export interface RenderDependency {
    * `transmissionDurationFraction`.
    */
   isReceptionStart?: boolean;
+  transmissionDurationTc1?: number | null;
+  transmissionDurationTc2?: number | null;
+  transmissionDurationTc3?: number | null;
+  transmissionDurationTc4?: number | null;
 }
 
 /** A `ComponentMethodBeginEntry`-derived method-call arrow. */

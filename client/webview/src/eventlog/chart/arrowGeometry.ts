@@ -202,11 +202,16 @@ export interface LineArrowParams {
   arrowheadWidth?: number;
   /** `RenderDependency.transmissionDurationFraction` — see `elogProtocol.ts`'s doc. `null`/`undefined`/`<=0` = no parallelogram. Only applied when BOTH endpoints are in range (see this file's header's transmission-duration fidelity note). */
   transmissionDurationFraction?: number | null;
+  isReceptionStart?: boolean | null;
+  transmissionDurationX1?: number | null;
+  transmissionDurationX2?: number | null;
+  transmissionDurationX3?: number | null;
+  transmissionDurationX4?: number | null;
 }
 
 /** `null` when both endpoints are offscreen (nothing to draw at all — matches Java's `if (x1 == invalid && x2 == invalid) return false;`). */
 export function computeLineArrowGeometry(params: LineArrowParams): LineArrowGeometry | null {
-  const { cause, consequence, showArrowHeads, isFiltered, fontHeight = DEFAULT_FONT_HEIGHT, longArrowWidth = LONG_MESSAGE_ARROW_WIDTH, arrowheadLength = ARROWHEAD_LENGTH, arrowheadWidth = ARROWHEAD_WIDTH, transmissionDurationFraction } = params;
+  const { cause, consequence, showArrowHeads, isFiltered, fontHeight = DEFAULT_FONT_HEIGHT, longArrowWidth = LONG_MESSAGE_ARROW_WIDTH, arrowheadLength = ARROWHEAD_LENGTH, arrowheadWidth = ARROWHEAD_WIDTH, transmissionDurationFraction, isReceptionStart, transmissionDurationX1, transmissionDurationX2, transmissionDurationX3, transmissionDurationX4 } = params;
   if (cause.x === null && consequence.x === null) return null;
 
   let x1: number;
@@ -245,7 +250,7 @@ export function computeLineArrowGeometry(params: LineArrowParams): LineArrowGeom
   const arrowhead = showArrowHeads ? computeArrowhead(x2, y2, x2 - x1, y2 - y1, arrowheadLong, arrowheadLength, arrowheadWidth) : null;
   const labelAnchor = { x: xm + 3, y: ym - (y1 < y2 ? fontHeight : 0) };
   const signAnchor: SignAnchor | null = isFiltered ? { x: xm, y: ym, angle: Math.atan2(y2 - y1, x2 - x1) } : null;
-  const parallelogram = !causeOffscreen && !consequenceOffscreen && transmissionDurationFraction && transmissionDurationFraction > 0 ? computeTransmissionParallelogram(x1, y1, x2, y2, transmissionDurationFraction) : null;
+  const parallelogram = !causeOffscreen && !consequenceOffscreen && ((transmissionDurationFraction && transmissionDurationFraction > 0) || (transmissionDurationX1 !== undefined && transmissionDurationX1 !== null)) ? computeTransmissionParallelogram(x1, y1, x2, y2, transmissionDurationFraction ?? 0, isReceptionStart, transmissionDurationX1, transmissionDurationX2, transmissionDurationX3, transmissionDurationX4) : null;
 
   return { segments, arrowhead, labelAnchor, signAnchor, parallelogram };
 }
@@ -353,10 +358,28 @@ export function selfArrowGeometryContainsPoint(geom: SelfArrowGeometry, px: numb
 // ---------------------------------------------------------------------------------
 
 /** `null` when `fraction <= 0` (no decoration). */
-export function computeTransmissionParallelogram(x1: number, y1: number, x2: number, y2: number, fraction: number): ParallelogramGeom | null {
+export function computeTransmissionParallelogram(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  fraction: number,
+  isReceptionStart?: boolean | null,
+  px1?: number | null,
+  px2?: number | null,
+  px3?: number | null,
+  px4?: number | null
+): ParallelogramGeom | null {
+  if (px1 !== undefined && px1 !== null && px2 !== undefined && px2 !== null && px3 !== undefined && px3 !== null && px4 !== undefined && px4 !== null) {
+    return { points: [[px1, y1], [px3, y1], [px4, y2], [px2, y2]] };
+  }
   if (fraction <= 0) return null;
-  const widthPx = fraction * (x2 - x1);
-  return { points: [[x1, y1], [x1 + widthPx, y1], [x2, y2], [x2 - widthPx, y2]] };
+  const widthPx = fraction * Math.abs(x2 - x1);
+  if (isReceptionStart) {
+    return { points: [[x1, y1], [x1 + widthPx, y1], [x2 + widthPx, y2], [x2, y2]] };
+  } else {
+    return { points: [[x1, y1], [x1 + widthPx, y1], [x2, y2], [x2 - widthPx, y2]] };
+  }
 }
 
 // ---------------------------------------------------------------------------------
