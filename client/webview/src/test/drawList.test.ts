@@ -234,7 +234,7 @@ test('selectedDependencyKeys: a selected dependency is redrawn as a thicker arro
   assert.ok(emphasized.length >= 1, 'the selected send dependency should produce a thicker selection-colored arrow');
 });
 
-test('selectedAxisModuleIds: a selected axis gets an axisSelectionMark spanning the content width', () => {
+test('selectedAxisModuleIds: a selected axis gets an axisSelectionMark spanning the full canvas width (under the left module hierarchy band)', () => {
   const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport: baseViewport(), events: events3, dependencies: [], methodCalls: [], axesLayout: deriveAxes(new Set([1, 2, 3]), null, 600 - GUTTER_TOP_HEIGHT), ticks: [], theme, selectedAxisModuleIds: new Set([2]) });
   const marks = primitives.filter((p) => p.kind === 'axisSelectionMark');
   assert.strictEqual(marks.length, 1);

@@ -83,7 +83,7 @@ export type DrawPrimitive =
   /** Axis vector-data strip (Eclipse `AxisVectorBarRenderer`): a horizontal multi-color step bar centered on the axis line, one colored segment per held value, with top/bottom borders. Replaces the plain axis line for that module while shown. */
   | { kind: 'axisVectorStrip'; moduleId: number; y: number; height: number; borderColor: string; labelColor: string; clipLeft: number; clipRight: number; segments: { x1: number; x2: number; color: string; value: number; valueText: string }[] }
   | { kind: 'axisLabel'; moduleId: number; x: number; y: number; text: string; color: string; bold?: boolean }
-  /** Phase U11 — a selected/hovered axis's Eclipse selection mark: two thin colored lines just above and below the axis line, spanning the content width (`drawAxisMark()`, SequenceChart.java:3668-3680). */
+  /** Phase U11 — a selected/hovered axis's Eclipse selection mark: two thin colored lines just above and below the axis line, spanning the full canvas width (and thus visible under the transparent left module hierarchy band) (`drawAxisMark()`, SequenceChart.java:3668-3680). */
   | { kind: 'axisSelectionMark'; x1: number; x2: number; y: number; lineHeight: number; color: string }
   | { kind: 'axisHeaderBox'; x: number; y0: number; y1: number; label: string; color: string; textColor: string }
   | { kind: 'tick'; x: number; y0: number; y1: number; color: string }
@@ -411,8 +411,9 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       const labelX = glyphX + glyphSlot;
       // Hover only makes the label BOLD (same color); selection turns it red.
       if (flags.showAxisLabels) primitives.push({ kind: 'axisLabel', moduleId: axis.moduleId, x: labelX, y, text: axis.label, color: axisSelected ? emphasisColor : theme.foreground, bold: axisHovered });
-      // Phase U11 -- selected axis: two thin red lines just above/below the axis line.
-      if (axisSelected) emphasis.push({ kind: 'axisSelectionMark', x1: GUTTER_LEFT_WIDTH, x2: viewport.canvasWidth, y, lineHeight: axis.lineHeight, color: emphasisColor });
+      // Phase U11 -- selected axis: two thin red lines just above/below the axis line,
+      // running the full canvas width so they're visible under the left module hierarchy band.
+      if (axisSelected) emphasis.push({ kind: 'axisSelectionMark', x1: 0, x2: viewport.canvasWidth, y, lineHeight: axis.lineHeight, color: emphasisColor });
       if (bookmarkedModuleIds?.has(axis.moduleId)) primitives.push({ kind: 'bookmarkMark', x: GUTTER_LEFT_WIDTH - 6, y, color: bookmarkMarkColor(theme) });
       // Expand/collapse glyph in the reserved slot before the name (the "close"/remove-X is
       // intentionally omitted -- filtering / Select Modules removes axes). A module offers
