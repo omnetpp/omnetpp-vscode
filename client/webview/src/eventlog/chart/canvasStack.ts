@@ -281,18 +281,27 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       ctx.font = p.bold ? `bold ${mainFont}` : mainFont;
       ctx.fillText(p.text, p.x, p.y - 2);
       break;
-    case 'axisSelectionMark':
-      // Two thin colored lines hugging the axis line (above and below) -- Java `drawAxisMark()`.
+    case 'axisSelectionMark': {
+      // Two thin colored lines bracketing whatever is drawn on this row (above and below) --
+      // Java `drawAxisMark()`. What's drawn is always CENTERED on `p.y` and `p.lineHeight`
+      // tall (a plain 1/3px axis line, or the 12px vector-strip row) -- see `axisLine`/
+      // `axisVectorStrip` above -- so the bracket lines are symmetric around that center
+      // with a small fixed margin, instead of a fixed 1px-above offset that would sit INSIDE
+      // a tall strip (the offset used to assume a thin line; see this file's change history
+      // for the bug that motivated this fix).
+      const halfHeight = p.lineHeight / 2;
+      const margin = 1.5;
       ctx.strokeStyle = p.color;
       ctx.lineWidth = 1.5;
       ctx.setLineDash([]);
       ctx.beginPath();
-      ctx.moveTo(p.x1, p.y - 1);
-      ctx.lineTo(p.x2, p.y - 1);
-      ctx.moveTo(p.x1, p.y + p.lineHeight);
-      ctx.lineTo(p.x2, p.y + p.lineHeight);
+      ctx.moveTo(p.x1, p.y - halfHeight - margin);
+      ctx.lineTo(p.x2, p.y - halfHeight - margin);
+      ctx.moveTo(p.x1, p.y + halfHeight + margin);
+      ctx.lineTo(p.x2, p.y + halfHeight + margin);
       ctx.stroke();
       break;
+    }
     case 'label':
       ctx.fillStyle = p.color;
       ctx.font = mainFont;

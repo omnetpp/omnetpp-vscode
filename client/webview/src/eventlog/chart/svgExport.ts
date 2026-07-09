@@ -205,10 +205,15 @@ function emitPrimitive(b: SvgBuilder, p: DrawPrimitive, fontFamily: string): voi
       }
       return;
     }
-    case 'axisSelectionMark':
-      b.el('line', { x1: p.x1, y1: p.y - 1, x2: p.x2, y2: p.y - 1, stroke: p.color, 'stroke-width': 1.5 });
-      b.el('line', { x1: p.x1, y1: p.y + p.lineHeight, x2: p.x2, y2: p.y + p.lineHeight, stroke: p.color, 'stroke-width': 1.5 });
+    case 'axisSelectionMark': {
+      // Symmetric bracket around whatever is centered on p.y (a plain line or a vector
+      // strip) -- see canvasStack.ts's matching case for why this isn't a fixed offset.
+      const halfHeight = p.lineHeight / 2;
+      const margin = 1.5;
+      b.el('line', { x1: p.x1, y1: p.y - halfHeight - margin, x2: p.x2, y2: p.y - halfHeight - margin, stroke: p.color, 'stroke-width': 1.5 });
+      b.el('line', { x1: p.x1, y1: p.y + halfHeight + margin, x2: p.x2, y2: p.y + halfHeight + margin, stroke: p.color, 'stroke-width': 1.5 });
       return;
+    }
     case 'axisLabel':
       // Above the line (baseline 2px above), matching the canvas -- see canvasStack.ts.
       b.el('text', { x: p.x, y: p.y - 2, fill: p.color, 'font-size': 12, 'font-weight': p.bold ? 'bold' : 'normal', 'font-family': fontFamily, 'text-anchor': 'start', 'dominant-baseline': 'text-after-edge' }, p.text);
