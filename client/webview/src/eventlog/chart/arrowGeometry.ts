@@ -29,15 +29,17 @@
  *    quarter-ellipse+dotted-tail / consequence-too-far quarter-ellipse+dotted-tail) are
  *    ported per `SequenceChart.java:4624-4718`, including the exact quarter/bbox
  *    parameterization `halfEllipseContainsPoint()` already expects (`hitTest.ts`).
- *  - Arrowhead ORIENTATION at an ellipse endpoint: Java solves an ellipse/circle
- *    intersection (`SequenceChart.java:4694-4712`) so the arrowhead's rear corners sit
- *    exactly ON the curve rather than only matching the endpoint's local tangent.
- *    DOCUMENTED SIMPLIFICATION: this port uses the endpoint's exact tangent instead
- *    (provably `(0, ±1)` — vertical — at BOTH ends of any half-ellipse regardless of
- *    its radii, since `d/dt(cx + rx·cos t, cy + ry·sin t) = (-rx·sin t, ry·cos t)` is
- *    `(0, ±ry)` at `t ∈ {0, π}`), which is visually correct (the arrowhead still
- *    points squarely into the endpoint) but does not replicate Java's tiny "hug the
- *    curve" corner adjustment.
+ *  - Arrowhead ORIENTATION at a self-arrow's REAL endpoint: Java solves an ellipse/circle
+ *    intersection (`SequenceChart.java:4691-4712`, `computeSelfEllipseArrowhead()` below)
+ *    so the arrowhead's rear corners sit exactly ON the curve ("hug the curve") instead of
+ *    just the endpoint's local tangent -- ported faithfully, not simplified. Java shares
+ *    this SAME computation between the both-in-range (full half-ellipse) case AND the
+ *    cause-too-far (quarter-ellipse) case, since in the latter the real endpoint (the
+ *    consequence side) still sits exactly on the drawn arc, just with a synthetic `x1`
+ *    substituted for the unresolvable cause. Only the consequence-too-far case is
+ *    different: there the arrowhead marks a purely SYNTHETIC point that is NOT on the
+ *    drawn arc at all (past its visible top-center end), so Java (and this port) uses a
+ *    fixed `(1, 0)` direction for it instead — see that branch below.
  *  - `computeLineArrowGeometry()` (and, for self-messages, `computeSelfArrowGeometry()`)
  *    ports the non-self, both-in-range and single-side-offscreen ("split arrow") cases
  *    (`SequenceChart.java:4719-4805`) — dashed continuation toward the offscreen side,
@@ -310,14 +312,20 @@ export function computeSelfArrowGeometry(params: SelfArrowParams): SelfArrowGeom
 
   const ym = y - halfEllipseHeight;
   if (cause.x === null) {
-    // cause too far -- quarter ellipse near the (real) consequence side, dotted tail to the left.
+    // cause too far -- quarter ellipse near the (real) consequence side, dotted tail to the
+    // left. Unlike the "consequence too far" case below, x2 here IS a real point ON the
+    // drawn arc (the quarter spans from the top-center down to exactly (x2, y)), so Java
+    // (SequenceChart.java:4691-4712) runs the SAME ellipse/circle-intersection tangent
+    // solve it uses for the full (both-known) half-ellipse -- not a fixed direction --
+    // reusing `computeSelfEllipseArrowhead` gives that "hug the curve" tangent instead of
+    // a hardcoded straight-down arrowhead.
     const x2 = consequence.x!;
     const x1 = x2 - longArrowWidth;
     const xm = x1 + longArrowWidth / 2;
     return {
       segments: [{ x1, y1: ym, x2: xm, y2: ym, dashed: true }],
       ellipse: { x1, x2, y, height: halfEllipseHeight, quarter: 1 },
-      arrowhead: showArrowHeads ? computeArrowhead(x2, y, 0, 1, false, arrowheadLength, arrowheadWidth) : null,
+      arrowhead: showArrowHeads ? computeSelfEllipseArrowhead(x1, x2, y, halfEllipseHeight, arrowheadLength, arrowheadWidth) : null,
       labelAnchor: { x: (x1 + x2) / 2, y: ym - fontHeight },
       signAnchor: isFiltered ? { x: (x1 + x2) / 2, y: ym, angle: 0 } : null,
     };

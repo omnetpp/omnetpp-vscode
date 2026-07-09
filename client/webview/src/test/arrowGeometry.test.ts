@@ -238,6 +238,22 @@ test('computeSelfArrowGeometry: cause offscreen -> quarter=1 (right quarter, nea
   assert.strictEqual(geom.segments[0].dashed, true);
 });
 
+test('computeSelfArrowGeometry: cause offscreen -> the arrowhead follows the ellipse tangent ("hugs the curve"), NOT a hardcoded straight-down direction, and keeps the real (non-"long") color', () => {
+  // Java shares the SAME ellipse/circle-intersection tangent solve between the both-known
+  // (full half-ellipse) case and this cause-too-far (quarter-ellipse) case, since the real
+  // endpoint (consequence, x2) still sits exactly on the drawn arc either way -- a synthetic
+  // straight-down (0,1) arrowhead here was the reported bug this test locks in the fix for.
+  const geom = computeSelfArrowGeometry({ cause: { x: null }, consequence: { x: 300 }, y: 200, eventNumberDelta: 5, axisSpacing: 100, showArrowHeads: true, isFiltered: false, longArrowWidth: 80, minHalfEllipseHeight: 40 })!;
+  assert.ok(geom.arrowhead);
+  assert.ok(Math.abs(geom.arrowhead!.angle - Math.PI / 2) > 0.05, `expected a tangent angle noticeably off straight-down (PI/2), got ${geom.arrowhead!.angle}`);
+  assert.strictEqual(geom.arrowhead!.long, false, 'a real (on-curve) endpoint keeps the normal color, unlike the consequence-too-far synthetic marker');
+  // Sanity: matches computeSelfArrowGeometry's OWN full-ellipse tangent for the equivalent
+  // [x1,x2] span (x1 here is synthetic, x2-x1 = longArrowWidth = 80, matching the ellipse's
+  // actual drawn width) -- same shape, same math, regardless of which side is synthetic.
+  const equivalentFull = computeSelfArrowGeometry({ cause: { x: 220 }, consequence: { x: 300 }, y: 200, eventNumberDelta: 5, axisSpacing: 100, showArrowHeads: true, isFiltered: false, minHalfEllipseHeight: 40 })!;
+  assert.ok(Math.abs(geom.arrowhead!.angle - equivalentFull.arrowhead!.angle) < 1e-9, 'same [x1,x2,height] ellipse shape -> identical tangent angle at x2');
+});
+
 test('computeSelfArrowGeometry: consequence offscreen -> quarter=0 (left quarter, near the real cause) + a dashed tail + a LONG arrowhead', () => {
   const geom = computeSelfArrowGeometry({ cause: { x: 100 }, consequence: { x: null }, y: 200, eventNumberDelta: 0, axisSpacing: 100, showArrowHeads: true, isFiltered: false, longArrowWidth: 80 })!;
   assert.ok(geom.ellipse);
