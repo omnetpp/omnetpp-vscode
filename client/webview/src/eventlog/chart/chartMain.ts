@@ -53,6 +53,7 @@ import {
   buildParentMap,
   collapseOpenAxisModule,
   collapseOpenAxisModuleSubmodules,
+  collectActiveModuleIds,
   computeVisibleAxisModuleIds,
   defaultOpenAxisModules,
   expandOpenAxisModule,
@@ -377,7 +378,13 @@ function strippedModuleIds(): ReadonlySet<number> | undefined {
 function currentAxesLayout(): AxesLayout {
   const spacing: AxisSpacingSpec = axisSpacingMode === 'manual' ? { mode: 'manual', manualSpacing: axisSpacingManual } : AUTO_AXIS_SPACING;
   const strips = strippedModuleIds();
-  const activeIds = lastModel && lastModel.moduleIds.length > 0 ? new Set(lastModel.moduleIds) : knownModuleIds;
+  // "Active" modules, for the Empty-Axes-off axis-visibility decision: re-derived from the
+  // CURRENT viewport's actual events/dependencies/methodCalls, filtered by the SAME display
+  // flags that decide what actually draws (collectActiveModuleIds() shares its dependency
+  // rule with pushDependency() so a module hidden only behind e.g. showMessageReuses/
+  // showInitializationEvent never gets a spuriously "empty" axis). Falls back to the
+  // accumulated knownModuleIds only before any viewport has loaded.
+  const activeIds = lastModel ? collectActiveModuleIds(lastModel, displayFlags) : knownModuleIds;
   if (moduleTree === null || openAxisModuleIds === null) {
     if (spacing.mode === 'manual') return layoutAxes([...activeIds].sort((a, b) => a - b), moduleTree, contentHeight(viewport), spacing, strips);
     return deriveAxes(activeIds, moduleTree, contentHeight(viewport), displayFlags.showEmptyAxes);

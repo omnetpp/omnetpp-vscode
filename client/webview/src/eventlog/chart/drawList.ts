@@ -677,15 +677,43 @@ interface DependencyDrawContext {
   override?: { emphasisColor: string; selected: boolean; hovered: boolean };
 }
 
+/**
+ * Whether `dep` would be drawn at all under the current display flags -- Java's per-kind/
+ * self `showMessage*`/`showMixed*` checks (`drawOrFitMessageDependency()`'s early exits)
+ * plus the `showInitializationEvent` cause-is-init-event exclusion
+ * (`drawMessageDependencies()`). Independent of axis/module resolution (a dependency can
+ * pass this and still not draw if its module has no axis -- that's a separate concern).
+ * Exported so `collectActiveModuleIds()` (openAxisModules.ts) can use the EXACT same rule
+ * to decide whether a dependency counts as "activity" justifying an axis for its endpoint
+ * modules when Empty Axes is off -- a single source of truth prevents the two from drifting
+ * apart (which is exactly what let empty-looking axes appear: a module whose only
+ * connection was a currently-hidden dependency still counted as "active").
+ */
+export function dependencyPassesDisplayFlags(dep: Pick<RenderDependency, 'kind' | 'filteredKind' | 'causeModuleId' | 'consequenceModuleId' | 'causeEventNumber'>, flags: ChartDisplayFlags): boolean {
+  if (!flags.showInitializationEvent && dep.causeEventNumber === 0) return false;
+  const isSelf = dep.causeModuleId !== null && dep.causeModuleId === dep.consequenceModuleId;
+  const isFiltered = dep.kind === 'filtered';
+  const isReuse = dep.kind === 'reuse';
+  if (isFiltered) {
+    return isSelf
+      ? dep.filteredKind === 'reuses'
+        ? flags.showSelfMessageReuses
+        : dep.filteredKind === 'sends'
+          ? flags.showSelfMessageSends
+          : flags.showMixedSelfMessageDependencies
+      : dep.filteredKind === 'reuses'
+        ? flags.showMessageReuses
+        : dep.filteredKind === 'sends'
+          ? flags.showMessageSends
+          : flags.showMixedMessageDependencies;
+  }
+  if (isReuse) return isSelf ? flags.showSelfMessageReuses : flags.showMessageReuses;
+  return isSelf ? flags.showSelfMessageSends : flags.showMessageSends;
+}
+
 function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx: DependencyDrawContext): void {
   const { axisByModuleId, viewport, theme, arrowColors, flags, axisSpacing, vlineBuffer, showLabels, bookmarkedDependencyKeys, override } = ctx;
-  // Java `drawMessageDependencies()`: a dependency whose CAUSE is the initialization event
-  // (any message sent from within an `initialize()` call, e.g. a self-scheduled event) is
-  // skipped entirely when `showInitializationEvent` is off -- matching the events/method-
-  // calls loops just below, which already hide event #0 and its method calls the same way.
-  // Without this, hiding the init event/calls still left their outgoing message arrows
-  // dangling with no visible source.
-  if (!flags.showInitializationEvent && dep.causeEventNumber === 0) return;
+  if (!dependencyPassesDisplayFlags(dep, flags)) return;
   const isBookmarked = bookmarkedDependencyKeys?.has(bookmarkDependencyKey(dep.causeEventNumber, dep.consequenceEventNumber, dep.messageId)) ?? false;
   if (dep.causeModuleId === null && dep.consequenceModuleId === null) return;
   // Both sides need a resolvable axis to be placed at all -- an event whose module was
@@ -698,14 +726,6 @@ function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx:
   const isSelf = dep.causeModuleId === dep.consequenceModuleId;
   const isFiltered = dep.kind === 'filtered';
   const isReuse = dep.kind === 'reuse';
-  if (isFiltered) {
-    const showIt = isSelf ? (dep.filteredKind === 'reuses' ? flags.showSelfMessageReuses : dep.filteredKind === 'sends' ? flags.showSelfMessageSends : flags.showMixedSelfMessageDependencies) : dep.filteredKind === 'reuses' ? flags.showMessageReuses : dep.filteredKind === 'sends' ? flags.showMessageSends : flags.showMixedMessageDependencies;
-    if (!showIt) return;
-  } else if (isReuse) {
-    if (isSelf ? !flags.showSelfMessageReuses : !flags.showMessageReuses) return;
-  } else {
-    if (isSelf ? !flags.showSelfMessageSends : !flags.showMessageSends) return;
-  }
 
   const arrowKind: ArrowKind = dep.kind === 'send' ? 'send' : dep.kind === 'reuse' ? 'reuse' : 'filtered';
   let { color, dash } = isFiltered ? filteredColorAndDash(arrowColors, dep.filteredKind) : { color: arrowColors[arrowKind], dash: arrowKind === 'reuse' ? [2, 2] : undefined };

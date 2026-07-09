@@ -4,6 +4,7 @@ import type { ElogModule } from '@omnetpp/shared/elog-protocol';
 import {
   collapseOpenAxisModule,
   collapseOpenAxisModuleSubmodules,
+  collectActiveModuleIds,
   computeVisibleAxisModuleIds,
   defaultOpenAxisModules,
   expandOpenAxisModule,
@@ -17,7 +18,7 @@ import {
   removeOpenAxisModule,
   removeOpenAxisModuleSubtree,
 } from '../eventlog/chart/openAxisModules';
-import { presetDefaultFlags, presetNetworkCommunicationFlags, showAllFlags } from '../eventlog/chart/displayFlags';
+import { DEFAULT_DISPLAY_FLAGS, presetDefaultFlags, presetNetworkCommunicationFlags, showAllFlags } from '../eventlog/chart/displayFlags';
 import { AUTO_AXIS_SPACING, layoutAxes } from '../eventlog/chart/axes';
 
 /**
@@ -214,4 +215,72 @@ test('layoutAxes: manual spacing uses the fixed value (clamped to >= 1), auto sp
 
   const auto = layoutAxes([3, 7], tree, 600, AUTO_AXIS_SPACING);
   assert.ok(auto.spacing > 20, 'auto spacing spreads two axes across 600px');
+});
+
+// ---------------------------------------------------------------------------------
+// collectActiveModuleIds (Empty-Axes-off "which modules are active" -- shares
+// dependencyPassesDisplayFlags with drawList.ts's pushDependency)
+// ---------------------------------------------------------------------------------
+
+test('collectActiveModuleIds: an event credits its module, EXCEPT the initialization event (#0) while showInitializationEvent is off', () => {
+  const events = [
+    { eventNumber: 0, moduleId: 10, simulationTime: '0', tcBegin: 0, tcEnd: 0, causeEventNumber: -1, isSelfMessageProcessingEvent: false },
+    { eventNumber: 1, moduleId: 20, simulationTime: '1', tcBegin: 1, tcEnd: 1, causeEventNumber: -1, isSelfMessageProcessingEvent: false },
+  ];
+  const hidden = collectActiveModuleIds({ events, dependencies: [], methodCalls: [] }, { ...DEFAULT_DISPLAY_FLAGS, showInitializationEvent: false });
+  assert.deepStrictEqual([...hidden].sort(), [20], 'module 10 (init event only) is NOT credited while hidden');
+
+  const shown = collectActiveModuleIds({ events, dependencies: [], methodCalls: [] }, { ...DEFAULT_DISPLAY_FLAGS, showInitializationEvent: true });
+  assert.deepStrictEqual([...shown].sort((a, b) => a - b), [10, 20]);
+});
+
+test('collectActiveModuleIds: a dependency only credits its endpoint modules when it would actually be DRAWN -- a reuse dependency (hidden by default) does not count as activity', () => {
+  const dep = (overrides: Record<string, unknown>) => ({
+    kind: 'send',
+    causeEventNumber: 5,
+    consequenceEventNumber: 6,
+    causeModuleId: 30,
+    causeTc: 0,
+    causeSimulationTime: '0',
+    consequenceModuleId: 40,
+    consequenceTc: 1,
+    consequenceSimulationTime: '1',
+    messageName: 'm',
+    messageClassName: 'cMessage',
+    ...overrides,
+  });
+
+  // showMessageReuses defaults to false -- a reuse dependency must NOT justify an axis for
+  // its endpoint modules, or they appear as spuriously "empty" axes (the reported bug).
+  const reuseOnly = collectActiveModuleIds({ events: [], dependencies: [dep({ kind: 'reuse' })], methodCalls: [] }, DEFAULT_DISPLAY_FLAGS);
+  assert.deepStrictEqual([...reuseOnly], [], 'a hidden reuse dependency credits nothing');
+
+  const reuseShown = collectActiveModuleIds({ events: [], dependencies: [dep({ kind: 'reuse' })], methodCalls: [] }, { ...DEFAULT_DISPLAY_FLAGS, showMessageReuses: true });
+  assert.deepStrictEqual([...reuseShown].sort((a, b) => a - b), [30, 40], 'once shown, both endpoints are credited');
+
+  // a plain send (showMessageSends defaults true) always credits both endpoints.
+  const sendOnly = collectActiveModuleIds({ events: [], dependencies: [dep({ kind: 'send' })], methodCalls: [] }, DEFAULT_DISPLAY_FLAGS);
+  assert.deepStrictEqual([...sendOnly].sort((a, b) => a - b), [30, 40]);
+});
+
+test('collectActiveModuleIds: a dependency caused by the initialization event (#0) credits nothing while showInitializationEvent is off, even though its send kind is otherwise shown', () => {
+  const dep = { kind: 'send' as const, causeEventNumber: 0, consequenceEventNumber: 1, causeModuleId: 50, causeTc: 0, causeSimulationTime: '0', consequenceModuleId: 60, consequenceTc: 1, consequenceSimulationTime: '1', messageName: 'm', messageClassName: 'cMessage' };
+  const hidden = collectActiveModuleIds({ events: [], dependencies: [dep], methodCalls: [] }, { ...DEFAULT_DISPLAY_FLAGS, showInitializationEvent: false });
+  assert.deepStrictEqual([...hidden], [], 'neither endpoint is credited while the init-caused dependency is hidden');
+
+  const shown = collectActiveModuleIds({ events: [], dependencies: [dep], methodCalls: [] }, { ...DEFAULT_DISPLAY_FLAGS, showInitializationEvent: true });
+  assert.deepStrictEqual([...shown].sort((a, b) => a - b), [50, 60]);
+});
+
+test('collectActiveModuleIds: method calls credit source+target only when showComponentMethodCalls is on, and never the init event\'s own call while showInitializationEvent is off', () => {
+  const calls = [{ eventNumber: 1, tc: 0, sourceModuleId: 70, targetModuleId: 80, methodName: 'm()' }];
+  const off = collectActiveModuleIds({ events: [], dependencies: [], methodCalls: calls }, { ...DEFAULT_DISPLAY_FLAGS, showComponentMethodCalls: false });
+  assert.deepStrictEqual([...off], []);
+
+  const on = collectActiveModuleIds({ events: [], dependencies: [], methodCalls: calls }, { ...DEFAULT_DISPLAY_FLAGS, showComponentMethodCalls: true });
+  assert.deepStrictEqual([...on].sort((a, b) => a - b), [70, 80]);
+
+  const initCall = [{ eventNumber: 0, tc: 0, sourceModuleId: 90, targetModuleId: 91, methodName: 'initialize()' }];
+  const initHidden = collectActiveModuleIds({ events: [], dependencies: [], methodCalls: initCall }, { ...DEFAULT_DISPLAY_FLAGS, showComponentMethodCalls: true, showInitializationEvent: false });
+  assert.deepStrictEqual([...initHidden], []);
 });

@@ -31,7 +31,9 @@
  * same reasoning as Axis bookmarks' `modulePath`, see `uiProtocol.ts`).
  */
 
-import type { ElogModule } from '@omnetpp/shared/elog-protocol';
+import type { ElogModule, RenderDependency, RenderMethodCall, TimelineEvent } from '@omnetpp/shared/elog-protocol';
+import { dependencyPassesDisplayFlags } from './drawList';
+import type { ChartDisplayFlags } from './displayFlags';
 
 /** `moduleId -> parent moduleId` for every module in `tree` (root maps to `null`). One O(n) walk; callers cache per tree instance. */
 export function buildParentMap(tree: ElogModule | null): Map<number, number | null> {
@@ -192,14 +194,50 @@ export function removeOpenAxisModuleSubtree(open: readonly number[], moduleId: n
 // ---------------------------------------------------------------------------------
 
 /**
+ * Port of `collectPotentiallyVisibleModuleIds()` (`SequenceChart.java:2168-2231`): which
+ * modules currently have real, VISIBLE activity in `model` -- the set that justifies an
+ * axis when `showEmptyAxes` is off. Deliberately re-derived from the raw
+ * events/dependencies/methodCalls (not `ViewportModel.moduleIds`, which the engine builds
+ * from ALL of them unconditionally): a module credited only by something the CURRENT
+ * display flags are hiding -- an `initialize()`-caused message while
+ * `showInitializationEvent` is off, a reuse dependency while `showMessageReuses` is off,
+ * etc. -- must NOT count as "active," or its axis appears with nothing drawn on it (the
+ * "empty modules sometimes get added" bug this fixes). Shares
+ * `dependencyPassesDisplayFlags()` (drawList.ts) with the actual dependency-drawing code so
+ * the two can never drift apart. Like Java, this is a snapshot of the CURRENTLY FETCHED
+ * viewport window, not an accumulation across the whole session -- the visible-axis set is
+ * meant to track "what's relevant to look at right now," matching Java's own
+ * `getFirstLastEventForViewportRange`-scoped collection, not "everything ever seen."
+ */
+export function collectActiveModuleIds(model: { events: readonly TimelineEvent[]; dependencies: readonly RenderDependency[]; methodCalls: readonly RenderMethodCall[] }, flags: ChartDisplayFlags): Set<number> {
+  const ids = new Set<number>();
+  for (const event of model.events) {
+    if (!flags.showInitializationEvent && event.eventNumber === 0) continue;
+    ids.add(event.moduleId);
+  }
+  for (const dep of model.dependencies) {
+    if (!dependencyPassesDisplayFlags(dep, flags)) continue;
+    if (dep.causeModuleId !== null) ids.add(dep.causeModuleId);
+    if (dep.consequenceModuleId !== null) ids.add(dep.consequenceModuleId);
+  }
+  if (flags.showComponentMethodCalls) {
+    for (const call of model.methodCalls) {
+      if (!flags.showInitializationEvent && call.eventNumber === 0) continue;
+      ids.add(call.sourceModuleId);
+      ids.add(call.targetModuleId);
+    }
+  }
+  return ids;
+}
+
+/**
  * Port of `calculateVisibleAxisModules()` — see this file's header for the exact
  * semantics. `activeModuleIds` plays the role of Java's
- * `collectPotentiallyVisibleModuleIds()` (this port's accumulated
- * `ViewportModel.moduleIds`, which the engine already restricts to modules with
- * events/dependencies/method calls in fetched ranges); iterated in ascending order for
- * determinism (Java iterates a HashSet — unspecified order; the ordering strategies
- * applied afterwards make the base order irrelevant for MODULE_ID/MODULE_FULL_PATH
- * and both MANUAL and MINIMIZE_CROSSINGS re-base on the manual total order anyway).
+ * `collectPotentiallyVisibleModuleIds()` (`collectActiveModuleIds()` above); iterated in
+ * ascending order for determinism (Java iterates a HashSet — unspecified order; the
+ * ordering strategies applied afterwards make the base order irrelevant for MODULE_ID/
+ * MODULE_FULL_PATH and both MANUAL and MINIMIZE_CROSSINGS re-base on the manual total order
+ * anyway).
  */
 export function computeVisibleAxisModuleIds(open: readonly number[], activeModuleIds: ReadonlySet<number>, tree: ElogModule | null, showEmptyAxes: boolean): number[] {
   if (showEmptyAxes) return [...open];
