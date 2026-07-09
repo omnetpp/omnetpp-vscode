@@ -56,7 +56,7 @@ import { clipCoordinate, tcToPixel } from './coords';
 import { DEFAULT_DISPLAY_FLAGS, type ChartDisplayFlags } from './displayFlags';
 import type { Tick } from './ticks';
 import { computeZeroSimTimeRegions } from './zeroSimTimeRegions';
-import { GUTTER_LEFT_WIDTH, GUTTER_TOP_HEIGHT, type ViewportState } from './viewportState';
+import { contentWidth, GUTTER_LEFT_WIDTH, GUTTER_TOP_HEIGHT, type ViewportState } from './viewportState';
 
 export { EVENT_RADIUS };
 export const HEADER_LEVEL_WIDTH = 10;
@@ -169,6 +169,23 @@ function filteredColorAndDash(arrowColors: Record<ArrowKind, string>, filteredKi
 const LONG_ARROWHEAD_COLOR = '#ffffff';
 /** Java's `SWT.LINE_DOT` override for a split arrow's offscreen-continuation segment (`SequenceChart.java`'s several `graphics.setLineStyle(SWT.LINE_DOT)` calls) — distinct from any message-kind dash so a split arrow always reads as "continues off-window" regardless of send/reuse/filtered styling. */
 const OFFSCREEN_DASH = [1, 2];
+
+/**
+ * Java `getMaximumMessageDependencyDisplayWidth()`: a dependency whose two endpoints would
+ * be more than this many pixels apart is drawn as a SPLIT arrow (a short stub near each
+ * visible-ish endpoint + a dashed continuation, exactly like the already-offscreen/
+ * unresolvable-endpoint case below) instead of one long line -- avoids a giant diagonal
+ * cluttering the view for cause/consequence pairs that are simply far apart in time, even
+ * when BOTH endpoints happen to be individually resolvable.
+ */
+const MAX_DEPENDENCY_ARROW_WIDTH_FACTOR = 3;
+
+/** Distance (px) of `x` outside `[GUTTER_LEFT_WIDTH, viewport.canvasWidth]` -- 0 when already within the visible content area. Used to decide which endpoint of an over-long dependency arrow to keep real (the one nearer the view) vs. stub (the farther one), matching Java's "elide whichever side is out of the drawn range" choice. */
+function distanceFromContentArea(x: number, viewport: ViewportState): number {
+  if (x < GUTTER_LEFT_WIDTH) return GUTTER_LEFT_WIDTH - x;
+  if (x > viewport.canvasWidth) return x - viewport.canvasWidth;
+  return 0;
+}
 
 function axisRowY(axisY: number, viewport: ViewportState): number {
   return axisY - viewport.vscroll + GUTTER_TOP_HEIGHT;
@@ -698,8 +715,16 @@ function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx:
 
   const causeAxis = axisByModuleId.get(dep.causeModuleId)!;
   const consequenceAxis = axisByModuleId.get(dep.consequenceModuleId)!;
-  const causeX = dep.causeTc === null ? null : contentX(dep.causeTc, viewport);
-  const consequenceX = dep.consequenceTc === null ? null : contentX(dep.consequenceTc, viewport);
+  let causeX = dep.causeTc === null ? null : contentX(dep.causeTc, viewport);
+  let consequenceX = dep.consequenceTc === null ? null : contentX(dep.consequenceTc, viewport);
+  // Both endpoints resolved, but too far apart to draw as one line without cluttering the
+  // view -- elide whichever side is farther from the visible content area (matches Java's
+  // eventNumber-out-of-drawn-range choice closely enough: the near side stays real, the far
+  // side is treated exactly like an unresolvable/offscreen endpoint below).
+  if (causeX !== null && consequenceX !== null && Math.abs(consequenceX - causeX) > MAX_DEPENDENCY_ARROW_WIDTH_FACTOR * contentWidth(viewport)) {
+    if (distanceFromContentArea(causeX, viewport) <= distanceFromContentArea(consequenceX, viewport)) consequenceX = null;
+    else causeX = null;
+  }
 
   if (isSelf) {
     let y = axisRowY(causeAxis.y, viewport);

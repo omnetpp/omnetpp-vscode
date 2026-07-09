@@ -38,16 +38,18 @@
  *    `(0, ±ry)` at `t ∈ {0, π}`), which is visually correct (the arrowhead still
  *    points squarely into the endpoint) but does not replicate Java's tiny "hug the
  *    curve" corner adjustment.
- *  - `computeLineArrowGeometry()` ports the non-self, both-in-range and single-side-
- *    offscreen ("split arrow") cases (`SequenceChart.java:4719-4805`) — dashed
- *    continuation toward the offscreen side, `EVENT_RADIUS`-aware endpoint shrink
- *    (`adjustEndpointsForEventRadius()`, port of `SequenceChart.java:4498-4511`).
- *    NOT ported: the "both events resolvable but the timeline-coordinate distance
- *    between them exceeds a display-width cap, so one side is elided based on which
- *    is farther from the viewport center" micro-case (`SequenceChart.java:4553-4560`)
- *    — a perf-motivated Java-side rendering cap, not a shape this port's viewport
- *    fetch (already `maxEvents`-bounded server-side) needs; every dependency this
- *    port is handed gets its full extent drawn.
+ *  - `computeLineArrowGeometry()` (and, for self-messages, `computeSelfArrowGeometry()`)
+ *    ports the non-self, both-in-range and single-side-offscreen ("split arrow") cases
+ *    (`SequenceChart.java:4719-4805`) — dashed continuation toward the offscreen side,
+ *    `EVENT_RADIUS`-aware endpoint shrink (`adjustEndpointsForEventRadius()`, port of
+ *    `SequenceChart.java:4498-4511`). The "both events resolvable but the pixel distance
+ *    between them exceeds a display-width cap, so one side is elided based on which is
+ *    farther from the viewport" case (`SequenceChart.java:4553-4560`,
+ *    `getMaximumMessageDependencyDisplayWidth() = 3 * viewport width`) IS ported, but one
+ *    layer up in `drawList.ts`'s `pushDependency()` (not here): it nulls out the farther
+ *    endpoint's already-computed pixel x BEFORE calling into this file, so the resulting
+ *    split-arrow rendering is 100% the same code path as a genuinely-offscreen endpoint —
+ *    no separate "too long" geometry needed in this module.
  *  - Transmission-duration parallelogram (`computeTransmissionParallelogram()`):
  *    DOCUMENTED SIMPLIFICATION of `drawTransmissionDuration()` (4861-4957). Java
  *    remaps the absolute transmission/remaining-duration `BigDecimal`s through a

@@ -125,6 +125,44 @@ test('a dependency with a null tc on one side is drawn as a SPLIT arrow (dashed 
   assert.strictEqual(heads.length, 4, 'one arrowhead per non-hairpin dependency (3 cross-module + 1 self-ellipse)');
 });
 
+test('a dependency whose BOTH endpoints are known but far apart (> 3x content width) is also drawn as a SPLIT arrow, not one long line (Eclipse getMaximumMessageDependencyDisplayWidth)', () => {
+  const viewport = baseViewport(); // pixelsPerTc=10, contentWidth=690 -> split threshold at 207 tc units apart
+  const axesLayout = deriveAxes(new Set([1, 2]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+
+  const near = [dep_({ causeEventNumber: 1, consequenceEventNumber: 2, causeModuleId: 1, causeTc: 0, consequenceModuleId: 2, consequenceTc: 10 })];
+  const nearPrims = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: near, methodCalls: [], axesLayout, ticks: [], theme, displayFlags: BASE_TEST_FLAGS });
+  const nearArrows = nearPrims.filter((p) => p.kind === 'arrow') as { dash?: number[] }[];
+  assert.strictEqual(nearArrows.length, 1, 'a short arrow stays a single undashed segment');
+  assert.ok(!nearArrows[0].dash);
+
+  // 300 tc units apart (3000px at 10px/tc) vastly exceeds the 207-tc/2070px threshold.
+  const far = [dep_({ causeEventNumber: 1, consequenceEventNumber: 2, causeModuleId: 1, causeTc: 0, consequenceModuleId: 2, consequenceTc: 300 })];
+  const farPrims = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: far, methodCalls: [], axesLayout, ticks: [], theme, displayFlags: BASE_TEST_FLAGS });
+  const farArrows = farPrims.filter((p) => p.kind === 'arrow') as { dash?: number[] }[];
+  assert.strictEqual(farArrows.length, 2, 'a too-long arrow splits into a solid stub + a dashed offscreen continuation, like a genuinely unresolvable endpoint');
+  assert.ok(farArrows.some((a) => !a.dash) && farArrows.some((a) => a.dash?.length === 2 && a.dash[0] === 1 && a.dash[1] === 2));
+});
+
+test('the split-arrow threshold keeps the endpoint NEARER the viewport real and stubs the farther one, regardless of which side (cause or consequence) that is', () => {
+  const viewport = baseViewport(); // leftTc=0, visible content = [0tc, 69tc] at 10px/tc
+  const axesLayout = deriveAxes(new Set([1, 2]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+
+  // consequence far in the FUTURE (off to the right) -> cause (near the view) stays real.
+  const consequenceFar = [dep_({ causeEventNumber: 1, consequenceEventNumber: 2, causeModuleId: 1, causeTc: 5, consequenceModuleId: 2, consequenceTc: 5000 })];
+  const cfPrims = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: consequenceFar, methodCalls: [], axesLayout, ticks: [], theme, displayFlags: BASE_TEST_FLAGS });
+  const cfHeads = cfPrims.filter((p) => p.kind === 'arrowHead') as { color: string }[];
+  assert.strictEqual(cfHeads.length, 1);
+  assert.strictEqual(cfHeads[0].color, '#ffffff', 'consequence stubbed -> the "long/synthetic endpoint" white arrowhead marks it (matches the null-consequenceTc case)');
+
+  // cause far in the PAST (off to the left) -> consequence (near the view) stays real, so the
+  // arrowhead is the dependency's own real color, not the synthetic-endpoint marker.
+  const causeFar = [dep_({ causeEventNumber: 1, consequenceEventNumber: 2, causeModuleId: 1, causeTc: -5000, consequenceModuleId: 2, consequenceTc: 20 })];
+  const cauPrims = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: causeFar, methodCalls: [], axesLayout, ticks: [], theme, displayFlags: BASE_TEST_FLAGS });
+  const cauHeads = cauPrims.filter((p) => p.kind === 'arrowHead') as { color: string }[];
+  assert.strictEqual(cauHeads.length, 1);
+  assert.notStrictEqual(cauHeads[0].color, '#ffffff', 'cause stubbed -> the real (consequence-side) arrowhead color is used, not the synthetic marker');
+});
+
 test('a same-module dependency (both endpoints known, distinct tc) is drawn as a real ellipseArc, not a straight arrow (phase U5)', () => {
   const primitives = draw();
   const ellipses = primitives.filter((p) => p.kind === 'ellipseArc') as { quarter: number }[];
