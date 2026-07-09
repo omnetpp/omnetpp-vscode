@@ -330,6 +330,26 @@ test('initialization event (#0) draws a pill on its OWN (compound) axis, only wh
   assert.ok(marks[0].xEnd > marks[0].x, 'pill-shaped (has the event width)');
 });
 
+test('a message dependency CAUSED by the initialization event (#0) is hidden along with it, not left dangling with no visible source', () => {
+  // Java `drawMessageDependencies()`: a dependency is drawn only if its cause event is NOT
+  // the init event, or showInitializationEvent is on -- otherwise its arrow would appear to
+  // originate from nothing once #0 (and its initialize() method calls) are hidden.
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([1, 2]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const fromInit = [dep_({ causeEventNumber: 0, consequenceEventNumber: 1, causeModuleId: 1, causeTc: 0, consequenceModuleId: 2, consequenceTc: 10 })];
+
+  const hidden = buildDrawList({ timelineMode: TimelineMode.STEP, viewport, events: [], dependencies: fromInit, methodCalls: [], axesLayout, ticks: [], theme, displayFlags: { ...DEFAULT_DISPLAY_FLAGS, showInitializationEvent: false } });
+  assert.strictEqual(hidden.filter((p) => p.kind === 'arrow').length, 0, 'the init-caused dependency draws nothing while showInitializationEvent is off');
+
+  const shown = buildDrawList({ timelineMode: TimelineMode.STEP, viewport, events: [], dependencies: fromInit, methodCalls: [], axesLayout, ticks: [], theme, displayFlags: { ...DEFAULT_DISPLAY_FLAGS, showInitializationEvent: true } });
+  assert.ok(shown.some((p) => p.kind === 'arrow'), 'shown once showInitializationEvent is on');
+
+  // A dependency caused by a LATER event (not #0) is unaffected either way.
+  const normal = [dep_({ causeEventNumber: 1, consequenceEventNumber: 2, causeModuleId: 1, causeTc: 0, consequenceModuleId: 2, consequenceTc: 10 })];
+  const normalHidden = buildDrawList({ timelineMode: TimelineMode.STEP, viewport, events: [], dependencies: normal, methodCalls: [], axesLayout, ticks: [], theme, displayFlags: { ...DEFAULT_DISPLAY_FLAGS, showInitializationEvent: false } });
+  assert.ok(normalHidden.some((p) => p.kind === 'arrow'), 'a non-init-caused dependency is unaffected by the flag');
+});
+
 test('no selection/hover params: no emphasis primitives (axisSelectionMark, bold label, thick arrow)', () => {
   const primitives = draw();
   assert.strictEqual(primitives.filter((p) => p.kind === 'axisSelectionMark').length, 0);

@@ -679,6 +679,13 @@ interface DependencyDrawContext {
 
 function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx: DependencyDrawContext): void {
   const { axisByModuleId, viewport, theme, arrowColors, flags, axisSpacing, vlineBuffer, showLabels, bookmarkedDependencyKeys, override } = ctx;
+  // Java `drawMessageDependencies()`: a dependency whose CAUSE is the initialization event
+  // (any message sent from within an `initialize()` call, e.g. a self-scheduled event) is
+  // skipped entirely when `showInitializationEvent` is off -- matching the events/method-
+  // calls loops just below, which already hide event #0 and its method calls the same way.
+  // Without this, hiding the init event/calls still left their outgoing message arrows
+  // dangling with no visible source.
+  if (!flags.showInitializationEvent && dep.causeEventNumber === 0) return;
   const isBookmarked = bookmarkedDependencyKeys?.has(bookmarkDependencyKey(dep.causeEventNumber, dep.consequenceEventNumber, dep.messageId)) ?? false;
   if (dep.causeModuleId === null && dep.consequenceModuleId === null) return;
   // Both sides need a resolvable axis to be placed at all -- an event whose module was
