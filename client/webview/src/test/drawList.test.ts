@@ -557,6 +557,43 @@ test('axis vector strip: shown as an OVERLAY on top of the (always-drawn) axis l
   assert.ok(off.some((p) => p.kind === 'axisLine' && p.moduleId === 1));
 });
 
+test('a vector strip does not re-reserve the hidden initialization event\'s "0s area" -- its segments are clamped to start at the first VISIBLE event, not tc=0', () => {
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([1]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  // A sample recorded during initialize() (tcBegin=0, straddling into the visible range),
+  // then a sample recorded entirely within the hidden gap (tcEnd=3, superseded), then a
+  // normal segment (tcBegin=8) already past the first visible event (#1 at tc=5).
+  const strips = [
+    {
+      moduleId: 1,
+      segments: [
+        { tcBegin: 0, tcEnd: 3, colorIndex: 0, value: 0, valueText: 'IDLE' },
+        { tcBegin: 3, tcEnd: 8, colorIndex: 1, value: 1, valueText: 'BUSY' },
+        { tcBegin: 8, tcEnd: 20, colorIndex: 0, value: 0, valueText: 'IDLE' },
+      ],
+    },
+  ];
+  const events = [event_(0, 1, 0, { tcEnd: 5 }), event_(1, 1, 5)]; // #0 (init) spans [0,5]; #1 (first VISIBLE) at tc=5
+  const base = { timelineMode: TimelineMode.NONLINEAR, viewport, events, dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, axisVectorStrips: strips, displayFlags: { ...DEFAULT_DISPLAY_FLAGS, showAxisVectorData: true } };
+
+  const hidden = buildDrawList({ ...base, displayFlags: { ...base.displayFlags, showInitializationEvent: false } });
+  const stripHidden = hidden.find((p): p is Extract<typeof p, { kind: 'axisVectorStrip' }> => p.kind === 'axisVectorStrip')!;
+  assert.ok(stripHidden, 'strip still drawn');
+  // the [0,3] segment is entirely within the hidden gap (tcEnd=3 <= clamp=5) -> dropped;
+  // the [3,8] segment straddles the boundary -> clamped to start at tc=5 (event #1's tc).
+  assert.strictEqual(stripHidden.segments.length, 2, 'the fully-hidden [0,3] segment is dropped, not clamped to zero width');
+  // baseViewport() uses pixelsPerTc=10, leftTc=0 -> tc=5 maps to GUTTER_LEFT_WIDTH + 50px.
+  assert.strictEqual(stripHidden.segments[0].x1, GUTTER_LEFT_WIDTH + 50, 'the straddling segment starts exactly at the first visible event\'s tc, not tc=0');
+  assert.strictEqual(stripHidden.segments[0].valueText, 'BUSY', 'still shows the LAST value that was in effect entering the visible timeline');
+  assert.strictEqual(stripHidden.segments[1].valueText, 'IDLE', 'the later, already-visible segment is unaffected');
+
+  // shown -> no clamping at all, all three segments present, first one starts at tc=0.
+  const shown = buildDrawList({ ...base, displayFlags: { ...base.displayFlags, showInitializationEvent: true } });
+  const stripShown = shown.find((p): p is Extract<typeof p, { kind: 'axisVectorStrip' }> => p.kind === 'axisVectorStrip')!;
+  assert.strictEqual(stripShown.segments.length, 3);
+  assert.strictEqual(stripShown.segments[0].x1, GUTTER_LEFT_WIDTH);
+});
+
 test('a vector-strip axis keeps a THIN underlying axisLine (compound/simple thickness), even though its row reserves the taller strip height for layout', () => {
   const viewport = baseViewport();
   // simple (non-compound) module -> axes.ts would normally give lineHeight=1; layoutAxes'

@@ -398,6 +398,22 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
   const stripByModuleId = new Map<number, AxisVectorStrip>();
   if (flags.showAxisVectorData && params.axisVectorStrips) for (const s of params.axisVectorStrips) stripByModuleId.set(s.moduleId, s);
 
+  // A vector strip's sample timestamps come straight from the engine's coordinate mapping,
+  // which (in NONLINEAR/STEP mode) still allocates the initialization event its own tc
+  // range even when showInitializationEvent is off -- so a strip whose earliest sample(s)
+  // were recorded during initialize() would otherwise still anchor its first segment(s) to
+  // that now-invisible range, re-reserving exactly the "0s area" the zero-simtime-region and
+  // Home-navigation fixes already stopped reserving elsewhere. Clamp every strip segment to
+  // start no earlier than the first VISIBLE event's own tc, so a strip starts exactly where
+  // that area now ends, not where the hidden #0 would have.
+  let stripClampTc: number | null = null;
+  if (!flags.showInitializationEvent) {
+    for (const event of events) {
+      if (event.eventNumber === 0) continue;
+      if (stripClampTc === null || event.tcBegin < stripClampTc) stripClampTc = event.tcBegin;
+    }
+  }
+
   if (flags.showAxes) {
     for (const axis of axesLayout.axes) {
       const y = axisRowY(axis.y, viewport);
@@ -417,8 +433,14 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
         // to the canvas; contentX maps each held-value span's tc edges to pixels.
         const segments: { x1: number; x2: number; color: string; value: number; valueText: string }[] = [];
         for (const seg of strip.segments) {
-          const x1 = contentX(seg.tcBegin, viewport);
-          const x2 = seg.tcEnd > seg.tcBegin ? contentX(seg.tcEnd, viewport) : x1;
+          // Segment entirely within the hidden init-event gap -- superseded by whichever
+          // segment straddles (or follows) the clamp boundary; its own history isn't
+          // independently visible anyway, since the timeline that would show WHEN it
+          // changed is itself hidden.
+          if (stripClampTc !== null && seg.tcEnd <= stripClampTc) continue;
+          const tcBegin = stripClampTc !== null && seg.tcBegin < stripClampTc ? stripClampTc : seg.tcBegin;
+          const x1 = contentX(tcBegin, viewport);
+          const x2 = seg.tcEnd > tcBegin ? contentX(seg.tcEnd, viewport) : x1;
           if (x2 < 0 || x1 > viewport.canvasWidth) continue;
           segments.push({ x1, x2, color: getGoodLightColor(seg.colorIndex), value: seg.value, valueText: seg.valueText });
         }
