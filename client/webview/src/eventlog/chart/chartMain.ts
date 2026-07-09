@@ -220,6 +220,8 @@ let lastModel: ViewportModel | null = null;
 let sampleTable: TcSimSample[] = [];
 let beginTc: number | null = null;
 let endTc: number | null = null;
+/** `beginTc`, adjusted for `firstNavigableEventNumber()` -- see that function's doc. Used by "go to start" navigation only (the Home key/button, "Go to Begin"); everything else (scrollbar position, "whole chart" export, zoom-to-fit) intentionally keeps using the TRUE `beginTc`. */
+let navigableBeginTc: number | null = null;
 let hasInitializedViewport = false;
 /** The engine's current timeline-coordinate-system origin event (last value reported by `relocateOrigin`/`setTimelineMode`). Anchors the data-driven default zoom (`computeDefaultPixelsPerTc()`), matching Java's `setDefaultPixelPerTimelineUnit()`, which measures the tc span starting at the origin event. */
 let coordinateSystemOriginEventNumber = 0;
@@ -520,10 +522,14 @@ function setDisplayFlags(next: ChartDisplayFlags): void {
   // ties them in `setShowComponentMethodCalls()`), which changes every event's timeline
   // WIDTH -- so it needs an engine round trip, not just a client repaint.
   const separateChanged = next.showComponentMethodCalls !== displayFlags.showComponentMethodCalls;
+  // `navigableBeginTc` (the Home key/button's target) depends on showInitializationEvent --
+  // keep it fresh so a Home press right after toggling doesn't use a stale target.
+  const initToggled = next.showInitializationEvent !== displayFlags.showInitializationEvent;
   displayFlags = next;
   state = { ...state, displayFlags };
   persistState();
   if (separateChanged) void resyncSeparateEntries();
+  if (initToggled) void refreshEndpointsTc();
   scheduleRender();
 }
 
@@ -905,20 +911,43 @@ window.addEventListener('mouseup', () => {
 // engine round trips
 // ---------------------------------------------------------------------------------
 
+/**
+ * The event number "Go to Begin"/the toolbar's Home button/the Home key should navigate
+ * to: the log's first event, EXCEPT when that's the initialization event (#0, essentially
+ * always the case for a real simulation log) AND it's currently hidden
+ * (`showInitializationEvent` off, the default). Panning/centering on a hidden event's
+ * position leaves a long stretch of empty, all-"0s" viewport before the first VISIBLE
+ * event -- which then lands crammed near the far edge instead of at the start, matching
+ * the report ("initial position [has] quite a long [stretch] of empty space on the
+ * left... first event is almost at the right side edge"). OMNeT++ event numbers are
+ * contiguous, so "the event right after #0" is always exactly 1 -- no round trip needed to
+ * find it. Falls back to the true first event when the log has only that one event
+ * (nothing else to navigate to).
+ */
+function firstNavigableEventNumber(): number {
+  if (!summary) return 0;
+  const first = summary.firstEventNumber;
+  if (first === 0 && !displayFlags.showInitializationEvent && summary.lastEventNumber > 0) return 1;
+  return first;
+}
+
 async function refreshEndpointsTc(): Promise<void> {
   if (!summary || summary.isEmpty) {
-    beginTc = endTc = null;
+    beginTc = endTc = navigableBeginTc = null;
     return;
   }
+  const navEventNumber = firstNavigableEventNumber();
   try {
-    const [b, e] = await Promise.all([
+    const [b, e, nb] = await Promise.all([
       rpc.request<MapCoordsResult>(ElogMethods.scMapCoords, { kind: 'eventToTc', eventNumber: summary.firstEventNumber }),
       rpc.request<MapCoordsResult>(ElogMethods.scMapCoords, { kind: 'eventToTc', eventNumber: summary.lastEventNumber }),
+      navEventNumber === summary.firstEventNumber ? Promise.resolve(null) : rpc.request<MapCoordsResult>(ElogMethods.scMapCoords, { kind: 'eventToTc', eventNumber: navEventNumber }),
     ]);
     beginTc = b.tc;
     endTc = e.tc;
+    navigableBeginTc = nb ? nb.tc : beginTc;
   } catch {
-    beginTc = endTc = null;
+    beginTc = endTc = navigableBeginTc = null;
   }
 }
 
@@ -933,8 +962,8 @@ async function goToEnd(): Promise<void> {
 async function goToBegin(): Promise<void> {
   if (!summary || summary.isEmpty) return;
   await refreshEndpointsTc();
-  if (beginTc === null) return;
-  viewport = gotoBeginAt(viewport, beginTc);
+  if (navigableBeginTc === null) return;
+  viewport = gotoBeginAt(viewport, navigableBeginTc);
   scheduleRender();
 }
 
@@ -1985,7 +2014,7 @@ function onSameModuleNeighbor(direction: -1 | 1): void {
 // ---------------------------------------------------------------------------------
 
 toolbar = buildToolbar(document.getElementById('toolbar')!, [
-  { kind: 'button', button: { id: 'home', icon: 'home', title: 'Go to start', onClick: () => vscode.postMessage({ type: 'revealRequest', target: { kind: 'event', eventNumber: summary?.firstEventNumber ?? 0, ref: null } }) } },
+  { kind: 'button', button: { id: 'home', icon: 'home', title: 'Go to start', onClick: () => vscode.postMessage({ type: 'revealRequest', target: { kind: 'event', eventNumber: firstNavigableEventNumber(), ref: null } }) } },
   { kind: 'button', button: { id: 'gotoEnd', icon: 'arrow-right', title: 'Go to end', onClick: () => vscode.postMessage({ type: 'revealRequest', target: { kind: 'event', eventNumber: summary?.lastEventNumber ?? 0, ref: null } }) } },
   { kind: 'separator' },
   { kind: 'button', button: { id: 'zoomOut', icon: 'zoom-out', title: 'Zoom out', onClick: () => { viewport = zoomAtCenter(viewport, 1 / 1.5); scheduleRender(); } } },
@@ -2092,7 +2121,7 @@ attachInteractions(canvasContainer, {
     toolbar.setButtonState('followEnd', { toggled: v.followEnd });
   },
   getAxesLayout: () => currentAxesLayout(),
-  getBeginTc: () => beginTc,
+  getBeginTc: () => navigableBeginTc,
   getEndTc: () => endTc,
   onChanged: () => scheduleRender(),
 
