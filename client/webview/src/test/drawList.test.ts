@@ -330,6 +330,23 @@ test('initialization event (#0) draws a pill on its OWN (compound) axis, only wh
   assert.ok(marks[0].xEnd > marks[0].x, 'pill-shaped (has the event width)');
 });
 
+test('a hidden initialization event does not leave behind a zero-simulation-time region for its own (now invisible) span', () => {
+  // #0 has a wide own span [0,5] (its initialize() calls spread out on the timeline) --
+  // this alone would normally trigger a zero-sim-time region over that span
+  // (computeZeroSimTimeRegions' rule (a): tcBegin !== tcEnd). #1 starts well after #0 ends,
+  // with no width of its own, so nothing else in this fixture could justify a region.
+  const initEvent = event_(0, 1, 0, { tcEnd: 5 });
+  const realEvent = event_(1, 2, 10);
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([1, 2]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+
+  const hidden = buildDrawList({ timelineMode: TimelineMode.STEP, viewport, events: [initEvent, realEvent], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, displayFlags: { ...DEFAULT_DISPLAY_FLAGS, showInitializationEvent: false } });
+  assert.strictEqual(hidden.filter((p) => p.kind === 'regionBand').length, 0, 'no region left over from the hidden init event\'s own span');
+
+  const shown = buildDrawList({ timelineMode: TimelineMode.STEP, viewport, events: [initEvent, realEvent], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, displayFlags: { ...DEFAULT_DISPLAY_FLAGS, showInitializationEvent: true } });
+  assert.ok(shown.some((p) => p.kind === 'regionBand'), 'the region reappears once the init event itself is shown again');
+});
+
 test('a message dependency CAUSED by the initialization event (#0) is hidden along with it, not left dangling with no visible source', () => {
   // Java `drawMessageDependencies()`: a dependency is drawn only if its cause event is NOT
   // the init event, or showInitializationEvent is on -- otherwise its arrow would appear to

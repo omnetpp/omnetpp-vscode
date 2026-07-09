@@ -351,7 +351,14 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
 
   // ---- zero-simulation-time regions (background bands, drawn first so everything else layers on top) ----
   if (flags.showZeroSimulationTimeRegions) {
-    for (const region of computeZeroSimTimeRegions(events)) {
+    // The initialization event's own [tcBegin,tcEnd] span (all its initialize() calls,
+    // spread out on the timeline in NONLINEAR/STEP mode) is a zero-simulation-time region by
+    // definition -- but when showInitializationEvent is off, event #0's pill/axis itself is
+    // hidden (see the events loop below), so counting its span here would leave a wide gray
+    // band with nothing visibly causing it: exactly the same "hidden thing leaves a visible
+    // trace" bug already fixed for its outgoing dependencies (see pushDependency above).
+    const zeroTimeEvents = flags.showInitializationEvent ? events : events.filter((e) => e.eventNumber !== 0);
+    for (const region of computeZeroSimTimeRegions(zeroTimeEvents)) {
       const x0 = contentX(region.tcBegin, viewport);
       const x1 = contentX(region.tcEnd, viewport);
       // Extend into the (transparent) left label column, down to x=0 -- the module names /
