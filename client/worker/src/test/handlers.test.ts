@@ -17,7 +17,7 @@ import { join, resolve } from 'node:path';
 import { EngineSession } from '../engineSession';
 import { handleElogRequest } from '../handlers';
 import { ElogMethods } from '@omnetpp/shared/elog-protocol';
-import type { EventDetail, FilterHints, GotoResult, LogSummary, MapCoordsResult, ReleaseMemoryResult, RowWindow, ViewportModel } from '@omnetpp/shared/elog-protocol';
+import type { EventDetail, FilterHints, GotoResult, LogSummary, MapCoordsResult, ReleaseMemoryResult, RowWindow, ScListVectorsResult, ViewportModel } from '@omnetpp/shared/elog-protocol';
 import { synthesizeEventLog } from '../../../../shared/src/test/eventlog/synthesizeEventLog';
 
 const repoRoot = resolve(__dirname, '..', '..', '..', '..');
@@ -395,4 +395,46 @@ test('handlers: elog/releaseMemory drops the parsed-event cache after a full sca
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('handlers: elog/sc/getViewport keeps an attached vector\'s strip alive (and extends its held segment to the viewport edge) when a later sample\'s event number is out of the currently resolvable range', () => {
+  // Regression test for a real bug: a vector strip's segment holds its value from one
+  // sample's event to the next sample's event. When that next event is far outside the
+  // fixture's event range (e.g. because the source `.vec` was recorded against a run
+  // with vastly more events than we've loaded here), the engine's event-number lookup
+  // throws rather than returning null -- and, uncaught, that used to abort the whole
+  // strip build (silently dropping every segment, not just the unresolvable one). It
+  // must instead fall back gracefully and paint the held segment out to the edge of the
+  // visible viewport instead of collapsing it to zero width.
+  const session = new EngineSession();
+  const summary = openFixture(session); // Fifo1-#0.elog: module id 3 = "SingleQueue.fifo", last event #32
+  call(session, ElogMethods.scSetTimelineMode, { timelineMode: 'NONLINEAR' });
+  call(session, ElogMethods.scRelocateOrigin, { eventNumber: summary.firstEventNumber });
+
+  const vec = [
+    'version 3',
+    'run Fifo1-0-run',
+    'vector 0 SingleQueue.fifo queueLength:vector ETV',
+    'attr enum "EMPTY=0,BUSY=1"',
+    '0\t2\t0.1\t1',
+    // the next sample's event number (999) is far beyond this fixture's last event (32)
+    // -- unresolvable via getEventForEventNumber, forcing the simtime/edge fallback path
+    '0\t999\t50.0\t0',
+  ].join('\n');
+
+  const list = call<ScListVectorsResult>(session, ElogMethods.scListVectors, { content: vec });
+  assert.strictEqual(list.vectors.length, 1);
+  call(session, ElogMethods.scAttachVector, { moduleId: 3, content: vec, vector: { run: list.runs[0], vectorModule: 'SingleQueue.fifo', vectorName: 'queueLength:vector' } });
+
+  const viewport = call<ViewportModel>(session, ElogMethods.scGetViewport, {
+    range: { kind: 'event', startEventNumber: summary.firstEventNumber, endEventNumber: summary.lastEventNumber },
+  });
+  const strip = viewport.axisVectorStrips?.find((s) => s.moduleId === 3);
+  assert.ok(strip, 'strip must survive an out-of-range sample instead of being dropped entirely');
+  // the second sample's own segment starts at event #999, outside the viewport, so it's
+  // culled -- only the first sample's held-value segment (event #2 .. event #999) is visible.
+  assert.strictEqual(strip!.segments.length, 1);
+  const [held] = strip!.segments;
+  assert.strictEqual(held.value, 1);
+  assert.ok(held.tcEnd > held.tcBegin, `held segment must extend past its start instead of collapsing to zero width, got tcBegin=${held.tcBegin} tcEnd=${held.tcEnd}`);
 });

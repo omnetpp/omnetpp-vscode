@@ -608,11 +608,16 @@ export class EngineSession {
         const segStartNo = s[i].eventNumber ?? 0;
         if (segEndNo < startNo || segStartNo > endNo) continue;
         const tcBegin = this.vectorSampleTc(facade, s[i]);
-        const tcEnd = next ? this.vectorSampleTc(facade, next) : tcBegin;
         if (tcBegin === null) continue;
+        // A held value that outlasts the resolvable window -- either this is the
+        // vector's last recorded sample (holds until simulation end) or the next
+        // sample's event isn't currently resolvable (e.g. far outside the viewport) --
+        // must extend to the edge of the visible viewport rather than collapse to zero
+        // width, so the strip keeps rendering instead of silently vanishing.
+        const tcEnd = (next ? this.vectorSampleTc(facade, next) : null) ?? (endEvent !== null ? facade.getTimelineCoordinateEnd(endEvent) : tcBegin);
         segments.push({
           tcBegin,
-          tcEnd: tcEnd ?? tcBegin,
+          tcEnd,
           colorIndex: vectorValueIndex(s[i].value, data.info, i),
           value: s[i].value,
           valueText: vectorValueText(s[i].value, data.info),
@@ -626,8 +631,16 @@ export class EngineSession {
   /** Maps a vector sample to a timeline coordinate: by its event number when present/known, else by its simulation time (Eclipse's filtered-event fallback). */
   private vectorSampleTc(facade: SequenceChartFacade, sample: VecSample): number | null {
     if (sample.eventNumber !== null) {
-      const event = this.log.getEventForEventNumber(sample.eventNumber);
-      if (event !== null) return facade.getTimelineCoordinateBegin(event);
+      try {
+        // Out-of-range event numbers (e.g. a sample far beyond the currently loaded/
+        // cached window) make the index throw rather than return null -- fall through
+        // to the simulation-time lookup below instead of letting that abort the whole
+        // strip (Eclipse's own filtered-event fallback).
+        const event = this.log.getEventForEventNumber(sample.eventNumber);
+        if (event !== null) return facade.getTimelineCoordinateBegin(event);
+      } catch {
+        // fall through to the simulation-time based lookup
+      }
     }
     try {
       return facade.getTimelineCoordinateForSimulationTime(BigDecimal.parse(String(sample.simtime)));
