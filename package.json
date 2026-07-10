@@ -726,6 +726,12 @@
         "key": "ctrl+alt+k",
         "mac": "cmd+alt+k",
         "when": "activeCustomEditorId == 'omnetpp.sequenceChart' || view == 'omnetppEventLogTable'"
+      },
+      {
+        "command": "omnetpp.eventlog.showBookmarks",
+        "key": "ctrl+shift+b",
+        "mac": "cmd+shift+b",
+        "when": "activeCustomEditorId == 'omnetpp.sequenceChart' || view == 'omnetppEventLogTable'"
       }
     ],
     "configuration": {
