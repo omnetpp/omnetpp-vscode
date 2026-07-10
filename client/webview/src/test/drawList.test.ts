@@ -5,7 +5,7 @@ import type { EventLogPalette } from '../eventlog/common/theme';
 import { AUTO_AXIS_SPACING, AXIS_VECTOR_STRIP_HEIGHT, deriveAxes, layoutAxes } from '../eventlog/chart/axes';
 import { calculateAxisHeaders } from '../eventlog/chart/axisHeaders';
 import { DEFAULT_DISPLAY_FLAGS } from '../eventlog/chart/displayFlags';
-import { BOOKMARK_MARK_COLOR, bookmarkDependencyKey, bookmarkMethodCallKey, buildDrawList, MAX_EVENT_MARKS_PER_COLUMN, SELECTION_MARK_COLOR } from '../eventlog/chart/drawList';
+import { bookmarkDependencyKey, bookmarkMethodCallKey, buildDrawList, MAX_EVENT_MARKS_PER_COLUMN, SELECTION_MARK_COLOR } from '../eventlog/chart/drawList';
 import { GUTTER_LEFT_WIDTH, GUTTER_TOP_HEIGHT, createViewportState, resize } from '../eventlog/chart/viewportState';
 
 const theme: EventLogPalette = {
@@ -19,6 +19,7 @@ const theme: EventLogPalette = {
   eventColor: '#e06666',
   arrowColor: '#6ea8fe',
   methodCallColor: '#f0a35e',
+  bookmarkColor: '#e0c341',
   focusBorder: '#007fd4',
   regionBandColor: '#2a2a2a',
 };
@@ -385,7 +386,7 @@ test('bookmarkedEventNumbers: a bookmarked event gets a bookmarkMark near its ev
   const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: events3, dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, bookmarkedEventNumbers: new Set([2]) });
   const marks = primitives.filter((p) => p.kind === 'bookmarkMark') as { x: number; y: number; color: string }[];
   assert.strictEqual(marks.length, 1);
-  assert.strictEqual(marks[0].color, BOOKMARK_MARK_COLOR);
+  assert.strictEqual(marks[0].color, theme.bookmarkColor);
 });
 
 test('bookmarkedEventNumbers omitted/empty: no bookmarkMark primitives at all', () => {
@@ -442,7 +443,7 @@ test('positionBookmarkTcs: a Position bookmark gets a bookmarkMark near the top 
   assert.strictEqual(marks.length, 1);
   assert.strictEqual(marks[0].x, GUTTER_LEFT_WIDTH + 50);
   assert.strictEqual(marks[0].y, GUTTER_TOP_HEIGHT + 8);
-  assert.strictEqual(marks[0].color, BOOKMARK_MARK_COLOR);
+  assert.strictEqual(marks[0].color, theme.bookmarkColor);
 });
 
 test('positionBookmarkTcs omitted/empty: no bookmarkMark primitives at all', () => {

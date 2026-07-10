@@ -33,6 +33,8 @@ export interface EventLogPalette {
   arrowColor: string;
   /** Eclipse "method call arrow" data color. */
   methodCallColor: string;
+  /** Bookmark flag glyph color -- a deliberately eye-catching amber/gold so a bookmark stands out from every other chart color, tuned separately for dark/light so it stays readable against both editor backgrounds (see `drawList.ts`'s `bookmarkMarkColor()`). */
+  bookmarkColor: string;
   /** Phase U9 -- `--vscode-focusBorder` (a color VS Code guarantees stays visible under every theme, including every high-contrast theme) -- used as the canvas-drawn selection ring / bookmark flag color under `isHighContrast` (see this interface's own doc on `isHighContrast`). */
   focusBorder: string;
   /**
@@ -72,6 +74,7 @@ export function readPalette(): EventLogPalette {
     eventColor: isDark ? '#e06666' : '#cc0000',
     arrowColor: isDark ? '#6ea8fe' : '#0000cc',
     methodCallColor: isDark ? '#f0a35e' : '#cc6600',
+    bookmarkColor: isDark ? '#e0c341' : '#b8860b',
     focusBorder: cssVar('--vscode-focusBorder', '#007fd4'),
     regionBandColor: isHighContrast ? (isDark ? '#3a3a3a' : '#dcdcdc') : isDark ? '#2a2a2a' : '#f0f0f0',
   };

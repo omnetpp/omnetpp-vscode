@@ -27,6 +27,7 @@ const theme: EventLogPalette = {
   eventColor: '#e06666',
   arrowColor: '#6ea8fe',
   methodCallColor: '#f0a35e',
+  bookmarkColor: '#e0c341',
   focusBorder: '#007fd4',
   regionBandColor: '#2a2a2a',
 };

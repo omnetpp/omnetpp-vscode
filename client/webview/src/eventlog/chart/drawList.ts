@@ -223,8 +223,6 @@ class VLineBuffer {
 }
 
 export const SELECTION_MARK_COLOR = '#ff3b30';
-/** Eclipse's default `IMarker.BOOKMARK` ruler-annotation color (a muted blue) -- kept as a literal like the other Eclipse semantic data colors (see this port's Theming section). */
-export const BOOKMARK_MARK_COLOR = '#4a90d9';
 
 /**
  * Phase U9 (high-contrast pass): under `theme.isHighContrast`, canvas-drawn selection
@@ -239,9 +237,16 @@ export function selectionMarkColor(theme: EventLogPalette): string {
   return theme.isHighContrast ? theme.focusBorder : SELECTION_MARK_COLOR;
 }
 
-/** Phase U9 (high-contrast pass) -- same rationale as `selectionMarkColor()` above, for the bookmark flag glyph. */
+/**
+ * The bookmark flag glyph's color -- a deliberately eye-catching, theme-aware amber/gold
+ * (`theme.bookmarkColor`, dark/light-tuned in `theme.ts`) so a bookmark stands out from
+ * every other chart color at a glance. Under `theme.isHighContrast` this still defers to
+ * `theme.focusBorder`, same rationale as `selectionMarkColor()` above (a color VS Code
+ * itself guarantees stays visible against every HC theme's own chrome, unlike a fixed
+ * literal).
+ */
 export function bookmarkMarkColor(theme: EventLogPalette): string {
-  return theme.isHighContrast ? theme.focusBorder : BOOKMARK_MARK_COLOR;
+  return theme.isHighContrast ? theme.focusBorder : theme.bookmarkColor;
 }
 
 /**
