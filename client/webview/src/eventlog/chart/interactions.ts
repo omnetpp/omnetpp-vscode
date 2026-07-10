@@ -33,12 +33,21 @@ import type { AxesLayout } from './axes';
 import { maxVerticalScroll } from './axes';
 import type { DrawPrimitive } from './drawList';
 import type { HitObject } from './hitTest';
-import { contentHeight, gotoBeginAt, gotoEndAt, panBy, scrollVerticalTo, zoomAt, zoomAtCenter, type ViewportState } from './viewportState';
+import { gotoBeginAt, gotoEndAt, panBy, scrollVerticalTo, zoomAt, zoomAtCenter, type ViewportState } from './viewportState';
 
 export interface InteractionCallbacks {
   getViewport(): ViewportState;
   setViewport(v: ViewportState): void;
   getAxesLayout(): AxesLayout;
+  /**
+   * The content-area height to scroll/clamp against -- `chartMain.ts`'s
+   * `notesAwareContentHeight()`, NOT the raw `contentHeight(viewport)`: this module has no
+   * access to `displayFlags`/the "Bookmark Info" notes band, so without this callback its
+   * own vertical-scroll clamp (`clampScroll()`) and PageUp/PageDown page size would ignore
+   * that reserved band entirely, capping the max scroll short of where the notes actually
+   * are.
+   */
+  getContentHeight(): number;
   /** Timeline coordinate of the first/last event currently known -- used by Home/End. `null` if not yet known (no-op). */
   getBeginTc(): number | null;
   getEndTc(): number | null;
@@ -113,7 +122,7 @@ export function attachInteractions(canvas: HTMLElement, cb: InteractionCallbacks
   }
 
   function clampScroll(v: ViewportState, vscroll: number, axesLayout: AxesLayout): ViewportState {
-    return scrollVerticalTo(v, vscroll, maxVerticalScroll(axesLayout, contentHeight(v)));
+    return scrollVerticalTo(v, vscroll, maxVerticalScroll(axesLayout, cb.getContentHeight()));
   }
 
   function contentPoint(e: MouseEvent): { px: number; py: number } {
@@ -235,11 +244,11 @@ export function attachInteractions(canvas: HTMLElement, cb: InteractionCallbacks
         break;
       }
       case 'PageUp':
-        mutate((v, axesLayout) => clampScroll(v, v.vscroll - contentHeight(v), axesLayout));
+        mutate((v, axesLayout) => clampScroll(v, v.vscroll - cb.getContentHeight(), axesLayout));
         e.preventDefault();
         break;
       case 'PageDown':
-        mutate((v, axesLayout) => clampScroll(v, v.vscroll + contentHeight(v), axesLayout));
+        mutate((v, axesLayout) => clampScroll(v, v.vscroll + cb.getContentHeight(), axesLayout));
         e.preventDefault();
         break;
       case 'ArrowUp':

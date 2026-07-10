@@ -31,7 +31,21 @@ export const GUTTER_LEFT_WIDTH = 110;
 export const GUTTER_TOP_HEIGHT = 24;
 /** Java `SequenceChartStyleProvider.axisOffset` — px gap before the first axis and reserved below the last. */
 export const AXIS_OFFSET = 20;
-/** CSS px reserved below the axis stack for "Bookmark Info" note boxes, ADDITIVE (not a Java gutter) -- a third gutter alongside `GUTTER_LEFT_WIDTH`/`GUTTER_TOP_HEIGHT`, but only carved out of the content area when `displayFlags.showBookmarkInfo` is on (see `chartMain.ts`'s `notesAwareContentHeight()`). A fixed size rather than dynamically measured (which would need a chicken-and-egg two-pass layout: axis positions determine where "below the last axis" is, but note heights are only known once the DOM has laid them out) -- a note whose real content is taller is simply allowed to visually extend past this reserved band rather than being clipped. */
+/**
+ * CSS px reserved below the axis stack for "Bookmark Info" note boxes, ADDITIVE (not a
+ * Java gutter) -- a third gutter alongside `GUTTER_LEFT_WIDTH`/`GUTTER_TOP_HEIGHT`, but
+ * only carved out of the content area when `displayFlags.showBookmarkInfo` is on (see
+ * `chartMain.ts`'s `notesAwareContentHeight()`). This is only the FLOOR of that
+ * reservation, not its final size -- laying out axes needs SOME band height before any
+ * note's real DOM size is known (a chicken-and-egg two-pass problem: axis positions
+ * determine where "below the last axis" is, but note heights are only known once the DOM
+ * has laid them out), so this covers a typical single-line note for that first pass.
+ * `chartMain.ts`'s `lastMeasuredNotesBandHeight` (one-frame-lag, like every other
+ * DOM-measurement feedback in that file) tops this up to fit an actually-taller note
+ * (e.g. multi-line markdown) from the NEXT frame on, so the reserved band -- and the
+ * scroll range that depends on it -- always ends up tall enough to bring the whole note
+ * into view, not just this floor.
+ */
 export const BOOKMARK_NOTES_BAND_HEIGHT = 130;
 /** Approximation of the label font's line height (Java uses the actual font metrics; we don't have those synchronously in a worker-free pure module). */
 export const FONT_HEIGHT_PX = 14;

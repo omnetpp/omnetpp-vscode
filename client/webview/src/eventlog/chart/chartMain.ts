@@ -285,6 +285,16 @@ let positionBookmarkTcs = new Map<string, { tc: number; simulationTime: string }
  * `packNotes()`'s own placement math being correct for whatever width it was handed).
  */
 const noteEls = new Map<string, HTMLElement>();
+/**
+ * The tallest currently-visible bookmark note's real measured height, as of the last
+ * `repositionBookmarkNotes()` call -- `0` when no notes are visible (incl. the flag being
+ * off). Read by `notesAwareContentHeight()` (one-frame lag, same tradeoff as
+ * `lastPrimitives`-based anchor resolution elsewhere in this file) so the reserved notes
+ * band grows to fit an actually-tall (e.g. multi-line markdown) note instead of silently
+ * capping at the `BOOKMARK_NOTES_BAND_HEIGHT` floor and leaving the note's overflow
+ * permanently unreachable by scrolling.
+ */
+let lastMeasuredNotesBandHeight = 0;
 /** Phase U7 -- the session's currently-applied filter (`null` = unfiltered), seeded from `init`'s `filterParams` and kept in sync by every successful `elog/setFilter` call THIS webview makes (the chart is always the sole initiator of filter changes -- see `applyFilterParamsAndReanchor()`'s own doc comment for why: `sequenceChartEditor.ts`'s `supportsMultipleEditorsPerDocument: false` guarantees at most one chart webview per session). Read by the Del-exclude merge (`mergeExcludedEventNumbers()`) so it can build on top of whatever is ALREADY active, even a filter this webview never itself applied (rehydrated from a previous session). */
 let currentFilterParams: FilterParams | null = null;
 let filterPanel: FilterPanelHandle;
@@ -399,11 +409,13 @@ function strippedModuleIds(): ReadonlySet<number> | undefined {
  * every axis-layout/scroll computation in this file uses THIS instead of the raw
  * `contentHeight()`, so the axis stack (and AUTO/"Balanced Axes" spacing's fill-the-content-
  * area math) leaves room for the band, treating it like a third gutter alongside
- * `GUTTER_LEFT_WIDTH`/`GUTTER_TOP_HEIGHT`. See `BOOKMARK_NOTES_BAND_HEIGHT`'s own doc comment
- * for why the reservation is a fixed size, not dynamically measured.
+ * `GUTTER_LEFT_WIDTH`/`GUTTER_TOP_HEIGHT`. The reservation is
+ * `max(BOOKMARK_NOTES_BAND_HEIGHT, lastMeasuredNotesBandHeight)`, not a bare constant --
+ * see that variable's own doc comment for why (a fixed floor alone left a tall note's
+ * overflow unreachable even at max scroll).
  */
 function notesAwareContentHeight(): number {
-  return contentHeight(viewport) - (displayFlags.showBookmarkInfo ? BOOKMARK_NOTES_BAND_HEIGHT : 0);
+  return contentHeight(viewport) - (displayFlags.showBookmarkInfo ? Math.max(BOOKMARK_NOTES_BAND_HEIGHT, lastMeasuredNotesBandHeight) : 0);
 }
 
 function currentAxesLayout(): AxesLayout {
@@ -673,7 +685,10 @@ function syncBookmarkNoteContent(): void {
  * (interleaved DOM reads/writes forcing a synchronous reflow on every iteration).
  */
 function repositionBookmarkNotes(axesLayout: AxesLayout): { x1: number; y1: number; x2: number; y2: number }[] {
-  if (!displayFlags.showBookmarkInfo || bookmarks.length === 0) return [];
+  if (!displayFlags.showBookmarkInfo || bookmarks.length === 0) {
+    lastMeasuredNotesBandHeight = 0;
+    return [];
+  }
   const bandTop = GUTTER_TOP_HEIGHT + axesLayout.totalHeight - viewport.vscroll;
   const anchors = new Map<string, { x: number; y: number }>();
   for (const p of lastPrimitives) {
@@ -699,6 +714,11 @@ function repositionBookmarkNotes(axesLayout: AxesLayout): { x1: number; y1: numb
   const axisRightEdge = axisPacked.reduce((max, p) => Math.max(max, p.x + sizes.get(p.id)!.width), 0);
   const contentMinX = axisPacked.length > 0 ? axisRightEdge + 16 : GUTTER_LEFT_WIDTH;
   const contentPacked = packNotes(contentCandidates, contentMinX, viewport.canvasWidth, 8);
+
+  // All notes share one row (`bandTop`), so the band only needs to be as tall as the
+  // TALLEST visible note this frame, not their sum -- +16 for breathing room below it,
+  // matching this function's other spacing constants.
+  lastMeasuredNotesBandHeight = sizes.size > 0 ? Math.max(...[...sizes.values()].map((s) => s.height)) + 16 : 0;
 
   const connectors: { x1: number; y1: number; x2: number; y2: number }[] = [];
   for (const p of [...axisPacked, ...contentPacked]) {
@@ -2418,6 +2438,7 @@ attachInteractions(canvasContainer, {
     toolbar.setButtonState('followEnd', { toggled: v.followEnd });
   },
   getAxesLayout: () => currentAxesLayout(),
+  getContentHeight: () => notesAwareContentHeight(),
   getBeginTc: () => navigableBeginTc,
   getEndTc: () => endTc,
   onChanged: () => scheduleRender(),
