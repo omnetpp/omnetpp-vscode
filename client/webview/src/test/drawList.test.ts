@@ -548,6 +548,10 @@ test('axis vector strip: shown as an OVERLAY on top of the (always-drawn) axis l
   const strip = on.find((p): p is Extract<typeof p, { kind: 'axisVectorStrip' }> => p.kind === 'axisVectorStrip');
   assert.ok(strip && strip.moduleId === 1 && strip.segments.length === 2, 'strip with two segments');
   assert.ok(strip!.segments[0].color !== strip!.segments[1].color, 'distinct values get distinct colors');
+  // The strip carries the FULL canvas width (for the renderer's label-repeat interval), not
+  // some GUTTER_LEFT_WIDTH-clamped bound -- the left gutter is a transparent overlay that
+  // must not shrink the strip's own drawing/labeling extent (see canvasStack.ts).
+  assert.strictEqual(strip!.canvasWidth, viewport.canvasWidth);
   assert.ok(on.some((p) => p.kind === 'axisLine' && p.moduleId === 1), 'the axis line is still drawn UNDER the strip for module 1');
   assert.ok(on.some((p) => p.kind === 'axisLine' && p.moduleId === 2), 'module 2 keeps its line');
 

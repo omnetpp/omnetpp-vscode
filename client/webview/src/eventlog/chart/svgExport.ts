@@ -195,12 +195,14 @@ function emitPrimitive(b: SvgBuilder, p: DrawPrimitive, fontFamily: string): voi
         b.el('line', { x1: first.x1, y1: top, x2: last.x2, y2: top, stroke: p.borderColor, 'stroke-width': 1 });
         b.el('line', { x1: first.x1, y1: bot, x2: last.x2, y2: bot, stroke: p.borderColor, 'stroke-width': 1 });
       }
-      // value/enum labels (see canvasStack.ts); ~5.4px/char at 9px Courier for the fit test.
+      // value/enum labels (see canvasStack.ts): fixed position + repeated every canvasWidth,
+      // NOT clamped/centered to the visible portion. ~5.4px/char at 9px Courier for the fit test.
       for (const seg of p.segments) {
-        const vx1 = Math.max(p.clipLeft, seg.x1);
-        const vx2 = Math.min(p.clipRight, seg.x2);
-        if (vx2 - vx1 > seg.valueText.length * 5.4 + 6) {
-          b.el('text', { x: (vx1 + vx2) / 2, y: p.y, fill: p.labelColor, 'font-size': 9, 'font-family': 'monospace', 'text-anchor': 'middle', 'dominant-baseline': 'middle' }, seg.valueText);
+        const tw = seg.valueText.length * 5.4;
+        if (seg.x2 - seg.x1 > tw + 6) {
+          for (let x = seg.x1 + 5; x < p.canvasWidth && x < seg.x2 - tw; x += p.canvasWidth) {
+            b.el('text', { x, y: p.y, fill: p.labelColor, 'font-size': 9, 'font-family': 'monospace', 'text-anchor': 'start', 'dominant-baseline': 'middle' }, seg.valueText);
+          }
         }
       }
       return;

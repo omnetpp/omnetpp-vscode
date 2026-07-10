@@ -256,18 +256,23 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
         ctx.lineTo(last.x2, bot - 0.5);
         ctx.stroke();
       }
-      // value/enum labels (Eclipse getValueText): drawn per segment when the VISIBLE part is
-      // wide enough, centered in that visible part so a segment scrolled partly off still
-      // shows its label. Clipped to the content area (never over the left label column).
+      // value/enum labels (Eclipse `AxisVectorBarRenderer.drawAxis()`, phase 1): drawn at a
+      // FIXED position from the segment's own start, then repeated every `canvasWidth` px so
+      // a segment wider than the screen still shows a copy wherever you've scrolled to. This
+      // is deliberately NOT "keep centered in the visible portion" -- the segment's true,
+      // unclamped bounds are used, exactly like every other content primitive (events,
+      // dependency labels, ...); the opaque gutter/compound-band overlay (drawn in a later
+      // pass) naturally covers whichever copies land underneath it instead of this code
+      // reserving space to avoid it.
       ctx.font = '9px "Courier New", monospace';
       ctx.fillStyle = p.labelColor;
-      ctx.textAlign = 'center';
+      ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       for (const seg of p.segments) {
-        const vx1 = Math.max(p.clipLeft, seg.x1);
-        const vx2 = Math.min(p.clipRight, seg.x2);
         const tw = ctx.measureText(seg.valueText).width;
-        if (vx2 - vx1 > tw + 6) ctx.fillText(seg.valueText, (vx1 + vx2) / 2, p.y);
+        if (seg.x2 - seg.x1 > tw + 6) {
+          for (let x = seg.x1 + 5; x < p.canvasWidth && x < seg.x2 - tw; x += p.canvasWidth) ctx.fillText(seg.valueText, x, p.y);
+        }
       }
       break;
     }

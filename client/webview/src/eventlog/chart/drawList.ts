@@ -81,7 +81,7 @@ export type DrawPrimitive =
   | { kind: 'regionBand'; x: number; y: number; w: number; h: number; color: string }
   | { kind: 'axisLine'; moduleId: number; x1: number; x2: number; y: number; lineHeight: number; color: string }
   /** Axis vector-data strip (Eclipse `AxisVectorBarRenderer`): a horizontal multi-color step bar centered on the axis line, one colored segment per held value, with top/bottom borders. Replaces the plain axis line for that module while shown. */
-  | { kind: 'axisVectorStrip'; moduleId: number; y: number; height: number; borderColor: string; labelColor: string; clipLeft: number; clipRight: number; segments: { x1: number; x2: number; color: string; value: number; valueText: string }[] }
+  | { kind: 'axisVectorStrip'; moduleId: number; y: number; height: number; borderColor: string; labelColor: string; canvasWidth: number; segments: { x1: number; x2: number; color: string; value: number; valueText: string }[] }
   | { kind: 'axisLabel'; moduleId: number; x: number; y: number; text: string; color: string; bold?: boolean }
   /** Phase U11 — a selected/hovered axis's Eclipse selection mark: two thin colored lines just above and below the axis line, spanning the full canvas width (and thus visible under the transparent left module hierarchy band) (`drawAxisMark()`, SequenceChart.java:3668-3680). */
   | { kind: 'axisSelectionMark'; x1: number; x2: number; y: number; lineHeight: number; color: string }
@@ -444,7 +444,7 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
           if (x2 < 0 || x1 > viewport.canvasWidth) continue;
           segments.push({ x1, x2, color: getGoodLightColor(seg.colorIndex), value: seg.value, valueText: seg.valueText });
         }
-        if (segments.length > 0) primitives.push({ kind: 'axisVectorStrip', moduleId: axis.moduleId, y, height: AXIS_VECTOR_STRIP_HEIGHT, borderColor: theme.foreground, labelColor: '#000000', clipLeft: GUTTER_LEFT_WIDTH, clipRight: viewport.canvasWidth, segments });
+        if (segments.length > 0) primitives.push({ kind: 'axisVectorStrip', moduleId: axis.moduleId, y, height: AXIS_VECTOR_STRIP_HEIGHT, borderColor: theme.foreground, labelColor: '#000000', canvasWidth: viewport.canvasWidth, segments });
       }
       const axisHovered = hovered?.axisModuleIds?.has(axis.moduleId) ?? false;
       const axisSelected = selectedAxisModuleIds?.has(axis.moduleId) ?? false;
