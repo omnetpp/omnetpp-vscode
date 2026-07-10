@@ -127,6 +127,23 @@ export class EventLogController {
     this.log(`cleared persisted view state for ${uriString}`);
   }
 
+  /**
+   * The Sequence Chart's currently-persisted "Time Accuracy" setting for `uriString`
+   * (`PersistedChartState.timeAccuracy` in `chartMain.ts` -- max fractional-seconds
+   * digits, or `null`/absent = full precision), read directly from the same
+   * `CHART_STATE_KEY` `workspaceState` blob `sequenceChartEditor.ts` populates via its
+   * `stateChanged` handler. `null` if no chart has ever persisted state for this file
+   * (never opened, or opened before this setting existed) -- callers should treat that
+   * the same as "full precision", matching the chart's own default. Lets host-side code
+   * outside the chart webview (e.g. `bookmarks.ts`'s "Show Bookmarks" QuickPick) format a
+   * simulation time the same way the chart currently displays it.
+   */
+  getChartTimeAccuracy(uriString: string): number | null {
+    const all = this.context.workspaceState.get<Record<string, unknown>>(CHART_STATE_KEY, {});
+    const chartState = all[uriString] as { timeAccuracy?: number | null } | undefined;
+    return chartState?.timeAccuracy ?? null;
+  }
+
   private async openNewSession(uri: vscode.Uri, key: string): Promise<EventLogSession> {
     const bundlePath = eventlogWorkerBundlePath(this.context.extensionUri.fsPath);
     this.log(`opening ${uri.fsPath} (worker: ${bundlePath}, electron=${process.versions.electron ?? 'no'})`);

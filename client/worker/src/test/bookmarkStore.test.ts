@@ -109,6 +109,18 @@ test('bookmarkTitle: Position bookmarks below 1s use the appropriate smaller SI 
   assert.strictEqual(bookmarkTitle(b), 'Position: t = 123us');
 });
 
+test('bookmarkTitle: Position bookmarks respect a given Time Accuracy (max fractional-seconds digits), rounding', () => {
+  const b: Bookmark = { id: '1', kind: 'Position', label: 'x', simulationTime: '0.000123456' };
+  assert.strictEqual(bookmarkTitle(b, 9), 'Position: t = 123us 456ns'); // 9 frac digits = ns accuracy, no rounding needed
+  assert.strictEqual(bookmarkTitle(b, 6), 'Position: t = 123us'); // 6 frac digits = us accuracy, rounds away the ns part
+  assert.strictEqual(bookmarkTitle(b, 0), 'Position: t = 0s'); // rounds to whole seconds
+});
+
+test('bookmarkTitle: Position bookmarks default to full precision when no Time Accuracy is given', () => {
+  const b: Bookmark = { id: '1', kind: 'Position', label: 'x', simulationTime: '0.000123456789' };
+  assert.strictEqual(bookmarkTitle(b), 'Position: t = 123us 456ns 789ps');
+});
+
 // ---------------------------------------------------------------------------------
 // toggleBookmarkInList -- add/remove
 // ---------------------------------------------------------------------------------

@@ -94,21 +94,14 @@ export function migrateBookmarksBlob(raw: unknown): Bookmark[] {
   return [];
 }
 
-/**
- * Port of `TimeUtils.secondsToTimeString(BigDecimal)`, operating on the protocol's raw
- * decimal-seconds string directly (exact, no `BigDecimal` class needed). Duplicated here
- * rather than imported from `@omnetpp/shared/eventlog` (which already has this exact
- * algorithm, as `secondsToTimeString`) because that subpath pulls in the WHOLE eventlog
- * parsing/indexing/facade engine into the extension-host bundle for one small formatting
- * helper -- the same bundle-size concern that already motivated the webview's own
- * `formatSimulationTime()` (`client/webview/src/eventlog/common/decimalTime.ts`) to
- * duplicate this algorithm instead of importing `@omnetpp/shared`'s `BigDecimal`. This is
- * a further-trimmed variant of that webview version (no display-accuracy rounding --
- * there's no such per-user setting on the host side, and no other decimal-string
- * arithmetic is needed here, only this one direction of formatting).
- */
-function formatSimulationTimeSeconds(decimalString: string): string {
-  let str = decimalString.trim();
+interface ParsedDecimal {
+  negative: boolean;
+  intDigits: string;
+  fracDigits: string;
+}
+
+function parseDecimalString(s: string): ParsedDecimal {
+  let str = s.trim();
   let negative = false;
   if (str.startsWith('-')) {
     negative = true;
@@ -117,21 +110,76 @@ function formatSimulationTimeSeconds(decimalString: string): string {
     str = str.slice(1);
   }
   const dot = str.indexOf('.');
-  let intPart = ((dot < 0 ? str : str.slice(0, dot)) || '0').replace(/^0+(?=\d)/, '');
-  let frac = dot < 0 ? '' : str.slice(dot + 1);
+  const intDigits = (dot < 0 ? str : str.slice(0, dot)) || '0';
+  const fracDigits = dot < 0 ? '' : str.slice(dot + 1);
+  return { negative, intDigits, fracDigits };
+}
+
+function stripLeadingZeros(digits: string): string {
+  return digits.replace(/^0+(?=\d)/, '') || '0';
+}
+
+function formatFromUnscaled(unscaled: bigint, scale: number): string {
+  const negative = unscaled < 0n;
+  const abs = negative ? -unscaled : unscaled;
+  const digits = abs.toString().padStart(scale + 1, '0');
+  const intLen = digits.length - scale;
+  const intPart = stripLeadingZeros(digits.slice(0, intLen)) || '0';
+  const fracPartRaw = scale > 0 ? digits.slice(intLen) : '';
+  const fracPart = fracPartRaw.replace(/0+$/, '');
+  const result = fracPart ? `${intPart}.${fracPart}` : intPart;
+  return (negative && result !== '0' ? '-' : '') + result;
+}
+
+/** Rounds a decimal string to at most `maxFractionDigits` fractional digits (round-half-away-from-zero), exactly, via BigInt. Returns the input unchanged when it already has few enough fractional digits. */
+function roundDecimalString(decimalString: string, maxFractionDigits: number): string {
+  const v = parseDecimalString(decimalString);
+  if (v.fracDigits.length <= maxFractionDigits) return decimalString;
+  const drop = v.fracDigits.length - maxFractionDigits;
+  const divisor = 10n ** BigInt(drop);
+  const magnitude = BigInt(v.intDigits + v.fracDigits);
+  const rounded = (magnitude + divisor / 2n) / divisor; // round half up on the magnitude
+  return formatFromUnscaled(v.negative ? -rounded : rounded, maxFractionDigits);
+}
+
+/**
+ * Port of `TimeUtils.secondsToTimeString(BigDecimal)`, operating on the protocol's raw
+ * decimal-seconds string directly (exact, no `BigDecimal` class needed) and rounding
+ * first to `maxFractionDigits` (of a value in SECONDS, matching `decimalTime.ts`'s
+ * "Time Accuracy" setting; `null`/omitted = full precision, no rounding).
+ *
+ * Duplicated here rather than imported from `@omnetpp/shared/eventlog` (which already
+ * has this exact algorithm, as `secondsToTimeString`/`roundDecimalString`) because that
+ * subpath pulls in the WHOLE eventlog parsing/indexing/facade engine into the
+ * extension-host bundle for a handful of small formatting helpers -- the same
+ * bundle-size concern that already motivated the webview's own `decimalTime.ts` to
+ * duplicate this algorithm instead of importing `@omnetpp/shared`'s `BigDecimal`.
+ */
+function formatSimulationTimeSeconds(decimalString: string, maxFractionDigits: number | null): string {
+  if (maxFractionDigits != null) decimalString = roundDecimalString(decimalString, maxFractionDigits);
+  const parsed = parseDecimalString(decimalString);
+  let intPart = stripLeadingZeros(parsed.intDigits);
+  let frac = parsed.fracDigits;
   let out = '';
   for (const unit of ['s ', 'ms ', 'us ', 'ns ', 'ps ', 'fs ', 'as ']) {
     if (intPart !== '0') out += `${BigInt(intPart)}${unit}`;
     const chunk = (frac + '000').slice(0, 3);
     frac = frac.length > 3 ? frac.slice(3) : '';
-    intPart = chunk.replace(/^0+(?=\d)/, '') || '0';
+    intPart = stripLeadingZeros(chunk);
   }
   if (out.length === 0) out = '0s';
-  return (negative ? '-' : '') + out.trim();
+  return (parsed.negative ? '-' : '') + out.trim();
 }
 
-/** Human-readable title for a QuickPick entry / chart marker tooltip. */
-export function bookmarkTitle(b: Bookmark): string {
+/**
+ * Human-readable title for a QuickPick entry / chart marker tooltip. `maxFractionDigits`
+ * is the chart's currently-persisted "Time Accuracy" setting (see
+ * `EventLogController.getChartTimeAccuracy()`) -- a `Position` bookmark's `t = ...` label
+ * rounds to it, matching every other simulation-time display in this port (ruler,
+ * hairline, tooltips), instead of always showing full precision regardless of what the
+ * user picked in the chart.
+ */
+export function bookmarkTitle(b: Bookmark, maxFractionDigits: number | null = null): string {
   switch (b.kind) {
     case 'Event':
       return `Event #${b.eventNumber}`;
@@ -145,7 +193,7 @@ export function bookmarkTitle(b: Bookmark): string {
       // SI-unit formatted (e.g. "130ms", "1s 500ms"), not the raw decimal-seconds string --
       // matches how every other simulation-time display in this port (ruler, hairline,
       // tooltips) formats a `Bookmark.simulationTime`-shaped decimal string.
-      return `Position: t = ${formatSimulationTimeSeconds(b.simulationTime ?? '0')}`;
+      return `Position: t = ${formatSimulationTimeSeconds(b.simulationTime ?? '0', maxFractionDigits)}`;
   }
 }
 

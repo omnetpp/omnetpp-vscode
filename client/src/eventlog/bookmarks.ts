@@ -129,6 +129,7 @@ export async function showBookmarksCommand(controller: EventLogController, fallb
     return;
   }
   const lastEventNumber = session.summary?.lastEventNumber ?? null;
+  const timeAccuracy = controller.getChartTimeAccuracy(session.uriString);
   interface Item extends vscode.QuickPickItem {
     bookmark: Bookmark;
     stale: boolean;
@@ -136,7 +137,7 @@ export async function showBookmarksCommand(controller: EventLogController, fallb
   const items: Item[] = bookmarks.map((b) => {
     const stale = lastEventNumber !== null && isStaleBookmark(b, lastEventNumber);
     return {
-      label: `${stale ? '$(warning) ' : ''}${bookmarkTitle(b)}`,
+      label: `${stale ? '$(warning) ' : ''}${bookmarkTitle(b, timeAccuracy)}`,
       description: b.label,
       detail: stale ? 'Stale -- this event no longer exists in the current log' : undefined,
       bookmark: b,
