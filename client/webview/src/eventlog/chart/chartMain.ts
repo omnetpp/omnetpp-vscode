@@ -951,18 +951,31 @@ async function refreshEndpointsTc(): Promise<void> {
   }
 }
 
+/**
+ * "Go to End" -- both the toolbar's End button and the context menu's "Go to End" item
+ * call this (a single shared implementation, so the two can never drift the way they
+ * used to: the toolbar round-tripped through the host's `revealRequest`/`reveal`
+ * relocate-and-center flow while the context menu only panned the viewport, and only
+ * the former actually selected anything). Matches Java's `SequenceChart.gotoEnd()`:
+ * select the last event AND scroll to it.
+ */
 async function goToEnd(): Promise<void> {
   if (!summary || summary.isEmpty) return;
   await refreshEndpointsTc();
   if (endTc === null) return;
-  viewport = gotoEndAt(viewport, endTc);
+  selection = focusEvent(summary.lastEventNumber);
+  broadcastSelection();
+  viewport = { ...gotoEndAt(viewport, endTc), followEnd: true };
   scheduleRender();
 }
 
+/** "Go to Begin" -- see `goToEnd()`'s doc comment; selects `firstNavigableEventNumber()` (the log's first event, or the one right after a hidden #0) and scrolls to it. */
 async function goToBegin(): Promise<void> {
   if (!summary || summary.isEmpty) return;
   await refreshEndpointsTc();
   if (navigableBeginTc === null) return;
+  selection = focusEvent(firstNavigableEventNumber());
+  broadcastSelection();
   viewport = gotoBeginAt(viewport, navigableBeginTc);
   scheduleRender();
 }
@@ -1112,9 +1125,10 @@ async function handleRevealTarget(target: RevealTarget): Promise<void> {
   const eventNumber = target.kind === 'event' ? target.eventNumber : (target.ref?.eventNumber ?? null);
   if (eventNumber === null) return;
   try {
-    // Any reveal (goto/find dialogs, cause/consequence/same-module keyboard nav, the
-    // toolbar's Home/End buttons) also selects+focuses the resolved event -- matches
-    // Java's goto* methods, which select the destination event too, not just scroll to it.
+    // Any reveal (goto/find dialogs, cause/consequence/same-module keyboard nav) also
+    // selects+focuses the resolved event -- matches Java's goto* methods, which select
+    // the destination event too, not just scroll to it. (The toolbar's Home/End buttons
+    // no longer go through this path -- see goToBegin()/goToEnd()'s own doc comment.)
     selection = focusEvent(eventNumber);
     broadcastSelection();
     await relocateAndCenter(eventNumber, true);
@@ -2014,8 +2028,8 @@ function onSameModuleNeighbor(direction: -1 | 1): void {
 // ---------------------------------------------------------------------------------
 
 toolbar = buildToolbar(document.getElementById('toolbar')!, [
-  { kind: 'button', button: { id: 'home', icon: 'home', title: 'Go to start', onClick: () => vscode.postMessage({ type: 'revealRequest', target: { kind: 'event', eventNumber: firstNavigableEventNumber(), ref: null } }) } },
-  { kind: 'button', button: { id: 'gotoEnd', icon: 'arrow-right', title: 'Go to end', onClick: () => vscode.postMessage({ type: 'revealRequest', target: { kind: 'event', eventNumber: summary?.lastEventNumber ?? 0, ref: null } }) } },
+  { kind: 'button', button: { id: 'home', icon: 'home', title: 'Go to start', onClick: () => void goToBegin() } },
+  { kind: 'button', button: { id: 'gotoEnd', icon: 'arrow-right', title: 'Go to end', onClick: () => void goToEnd() } },
   { kind: 'separator' },
   { kind: 'button', button: { id: 'zoomOut', icon: 'zoom-out', title: 'Zoom out', onClick: () => { viewport = zoomAtCenter(viewport, 1 / 1.5); scheduleRender(); } } },
   { kind: 'button', button: { id: 'zoomIn', icon: 'zoom-in', title: 'Zoom in', onClick: () => { viewport = zoomAtCenter(viewport, 1.5); scheduleRender(); } } },

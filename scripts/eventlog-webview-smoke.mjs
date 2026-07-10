@@ -180,6 +180,22 @@ assert(errors.length === 0, `no runtime errors${errors.length ? `:\n${errors.joi
 assert(nonFiniteArgs === 0, `no non-finite canvas coordinates (got ${nonFiniteArgs})`);
 assert(styleAttrViolations.length === 0, `no CSP-blocked style attributes${styleAttrViolations.length ? `:\n${styleAttrViolations.join('\n')}` : ''}`);
 
+// Toolbar Home/End must SELECT the first/last navigable event, not just scroll to it
+// (they used to diverge from the context menu's "Go to Begin"/"Go to End", which always
+// selected -- see chartMain.ts's goToBegin()/goToEnd() doc comments).
+toHost.length = 0;
+document.getElementById('home').click();
+await new Promise((r) => setTimeout(r, 200));
+const expectedBegin = summary.firstEventNumber === 0 && summary.lastEventNumber > 0 ? 1 : summary.firstEventNumber;
+const homeSelection = toHost.filter((m) => m.type === 'selectionChanged').pop();
+assert(homeSelection && homeSelection.selection.eventNumbers.length === 1 && homeSelection.selection.eventNumbers[0] === expectedBegin, `Home button selects the first navigable event (#${expectedBegin}), got ${JSON.stringify(homeSelection?.selection.eventNumbers)}`);
+
+toHost.length = 0;
+document.getElementById('gotoEnd').click();
+await new Promise((r) => setTimeout(r, 200));
+const endSelection = toHost.filter((m) => m.type === 'selectionChanged').pop();
+assert(endSelection && endSelection.selection.eventNumbers.length === 1 && endSelection.selection.eventNumbers[0] === summary.lastEventNumber, `End button selects the last event (#${summary.lastEventNumber}), got ${JSON.stringify(endSelection?.selection.eventNumbers)}`);
+
 await session.detach('chart', {});
 console.log(failures === 0 ? '\neventlog-webview-smoke PASSED' : `\neventlog-webview-smoke FAILED (${failures})`);
 process.exit(failures === 0 ? 0 : 1);
