@@ -61,6 +61,17 @@ export async function handleUpdateBookmarkMessage(store: BookmarkStore, session:
   session.postToAll({ type: 'bookmarksChanged', bookmarks: store.list() });
 }
 
+/**
+ * Handles a webview's `removeBookmark` message ("Bookmark Info" note editing's "Remove"
+ * button): deletes the bookmark by `id`, then broadcasts the fresh list -- mirrors
+ * `handleUpdateBookmarkMessage()`'s tail exactly (no confirmation, always re-broadcast; the
+ * confirmation, if any, already happened webview-side before this message was sent).
+ */
+export async function handleRemoveBookmarkMessage(store: BookmarkStore, session: EventLogSession, id: string): Promise<void> {
+  await store.remove(id);
+  session.postToAll({ type: 'bookmarksChanged', bookmarks: store.list() });
+}
+
 function bookmarkKindDefaultPrompt(kind: BookmarkKind): string {
   switch (kind) {
     case 'Event':

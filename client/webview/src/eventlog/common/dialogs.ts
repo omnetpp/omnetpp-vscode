@@ -163,8 +163,8 @@ interface PromptField {
   rows?: number;
 }
 
-/** Builds a small labeled-input dialog with a title, one or more fields, a validation/error line, and OK/Cancel (Enter/Esc). `validate` runs on every input change; `onSubmit` only fires when it returns `null`. Returns the mounted input elements in field order (text/textarea fields as `(HTMLInputElement|HTMLTextAreaElement)[]`, checkboxes as `HTMLInputElement[type=checkbox]`) so a caller with multiple fields (find-text) can read them all in `validate`/`onSubmit`. `Enter` submits from a `'text'` field; `'textarea'` fields need multi-line input, so only Ctrl/Cmd+Enter submits from those (plain Enter inserts a newline). */
-function openPrompt(title: string, fields: PromptField[], validate: (values: string[], checked: boolean[]) => string | null, onSubmit: (values: string[], checked: boolean[]) => void): void {
+/** Builds a small labeled-input dialog with a title, one or more fields, a validation/error line, and OK/Cancel (Enter/Esc). `validate` runs on every input change; `onSubmit` only fires when it returns `null`. Returns the mounted input elements in field order (text/textarea fields as `(HTMLInputElement|HTMLTextAreaElement)[]`, checkboxes as `HTMLInputElement[type=checkbox]`) so a caller with multiple fields (find-text) can read them all in `validate`/`onSubmit`. `Enter` submits from a `'text'` field; `'textarea'` fields need multi-line input, so only Ctrl/Cmd+Enter submits from those (plain Enter inserts a newline). `removeButton`, if given, adds a destructive-styled button pinned to the FAR left of the row (`.elog-dialog-button-remove`'s own `margin-right: auto` pushes Cancel/OK to the right edge, unchanged from today) that calls `onClick()` then closes -- unlike OK, it bypasses `validate()` entirely (removing doesn't need the fields to be in a valid state). */
+function openPrompt(title: string, fields: PromptField[], validate: (values: string[], checked: boolean[]) => string | null, onSubmit: (values: string[], checked: boolean[]) => void, removeButton?: { label: string; onClick: () => void }): void {
   const { panel, close } = buildOverlay();
   const titleEl = document.createElement('div');
   titleEl.className = 'elog-dialog-title';
@@ -215,6 +215,16 @@ function openPrompt(title: string, fields: PromptField[], validate: (values: str
 
   const buttonsRow = document.createElement('div');
   buttonsRow.className = 'elog-dialog-buttons';
+  if (removeButton) {
+    const removeButtonEl = document.createElement('button');
+    removeButtonEl.className = 'elog-dialog-button-remove';
+    removeButtonEl.textContent = removeButton.label;
+    removeButtonEl.addEventListener('click', () => {
+      removeButton.onClick();
+      close();
+    });
+    buttonsRow.appendChild(removeButtonEl);
+  }
   const okButton = document.createElement('button');
   okButton.textContent = 'OK';
   const cancelButton = document.createElement('button');
@@ -295,9 +305,11 @@ export function openFindTextDialog(initial: FindTextState, onSubmit: (state: Fin
  * "Bookmark Info" note editing -- opened by a note box's double-click or its context
  * menu's "Edit Bookmark...". Renames the bookmark and/or replaces its markdown notes;
  * Ctrl/Cmd+Enter submits from the notes textarea (plain Enter inserts a newline, per
- * `openPrompt()`'s textarea handling above).
+ * `openPrompt()`'s textarea handling above). `onRemove` deletes the bookmark entirely --
+ * unlike OK, no confirmation prompt here (this dialog IS the confirmation step, same as
+ * every other destructive action in this port that's reached via an explicit menu item).
  */
-export function openEditBookmarkDialog(label: string, note: string, onSubmit: (label: string, note: string) => void): void {
+export function openEditBookmarkDialog(label: string, note: string, onSubmit: (label: string, note: string) => void, onRemove: () => void): void {
   openPrompt(
     'Edit Bookmark',
     [
@@ -306,5 +318,6 @@ export function openEditBookmarkDialog(label: string, note: string, onSubmit: (l
     ],
     ([name]) => (name.trim().length === 0 ? 'Enter a bookmark name' : null),
     ([name, notes]) => onSubmit(name.trim(), notes),
+    { label: 'Remove', onClick: onRemove },
   );
 }

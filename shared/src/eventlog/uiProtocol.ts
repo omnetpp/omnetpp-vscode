@@ -211,6 +211,14 @@ export type WebviewToHostMessage =
    */
   | { type: 'updateBookmark'; id: string; label: string; note: string }
   /**
+   * "Bookmark Info" note editing: deletes a bookmark by `id`, sent by the note box's edit
+   * dialog's "Remove" button. Unlike `toggleBookmark` (identity-match delete, for the
+   * Ctrl+D "toggle" gesture), this always targets an EXISTING bookmark by `id`, mirroring
+   * `updateBookmark`'s targeting exactly. The host replies the same way `updateBookmark`
+   * does: re-broadcasts `bookmarksChanged` to every attachment.
+   */
+  | { type: 'removeBookmark'; id: string }
+  /**
    * ADDITIVE (phase U8, axis-management presets): asks the host to resolve which NED
    * type-level properties (`@networkNode`, `@networkInterface`, `@wireJunction`, ...)
    * each named NED type carries -- the "Network Node"/"Network Interface" preset

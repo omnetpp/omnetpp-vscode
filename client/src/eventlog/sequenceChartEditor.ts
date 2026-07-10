@@ -4,7 +4,7 @@ import type { LanguageClient } from 'vscode-languageclient/node';
 import type { EventLogUiSettings, HostToWebviewMessage, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
 import { ElogMethods, type ScListVectorsResult, type VectorIdentity } from '@omnetpp/shared/elog-protocol';
 import { OmnetppMethods } from '@omnetpp/shared/protocol';
-import { handleToggleBookmarkMessage, handleUpdateBookmarkMessage } from './bookmarks';
+import { handleRemoveBookmarkMessage, handleToggleBookmarkMessage, handleUpdateBookmarkMessage } from './bookmarks';
 import type { EventLogController } from './eventLogController';
 import type { EventLogSession } from './eventLogSession';
 import { gotoNedDeclaration } from './nedNavigation';
@@ -169,6 +169,10 @@ export class SequenceChartEditorProvider implements vscode.CustomReadonlyEditorP
       }
       if (message.type === 'updateBookmark') {
         void handleUpdateBookmarkMessage(this.controller.getBookmarkStore(document.uri), session, message.id, message.label, message.note);
+        return;
+      }
+      if (message.type === 'removeBookmark') {
+        void handleRemoveBookmarkMessage(this.controller.getBookmarkStore(document.uri), session, message.id);
         return;
       }
       // Phase U8: NED type-property lookup for the chart's preset configurations --
@@ -430,6 +434,7 @@ export async function handleWebviewMessage(
       break;
     case 'toggleBookmark':
     case 'updateBookmark':
+    case 'removeBookmark':
       // Always intercepted before reaching here (needs the controller's per-uri
       // BookmarkStore -- see both callers' own handling above) -- present only so this
       // switch stays a complete, self-documenting map of every message type, matching

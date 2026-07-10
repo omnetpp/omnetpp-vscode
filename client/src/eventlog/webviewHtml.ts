@@ -161,6 +161,7 @@ export function buildEventLogWebviewHtml(webview: vscode.Webview, extensionUri: 
     background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); cursor: pointer; }
   .elog-dialog-buttons button:last-child { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
   .elog-dialog-buttons button:disabled { opacity: 0.5; cursor: default; }
+  .elog-dialog-buttons button.elog-dialog-button-remove { margin-right: auto; color: var(--vscode-errorForeground, #f14c4c); }
 
   /* Filter panel (phase U7, chart/filterPanel.ts) -- a collapsible right-side overlay
      over the Sequence Chart canvas ("in-webview collapsible filter panel" decision

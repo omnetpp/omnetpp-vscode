@@ -571,9 +571,16 @@ function refreshPositionBookmarkTcs(): void {
 function openNoteEditDialog(bookmarkId: string): void {
   const bookmark = bookmarks.find((b) => b.id === bookmarkId);
   if (!bookmark) return;
-  openEditBookmarkDialog(bookmark.label, bookmark.note ?? '', (label, note) => {
-    vscode.postMessage({ type: 'updateBookmark', id: bookmarkId, label, note });
-  });
+  openEditBookmarkDialog(
+    bookmark.label,
+    bookmark.note ?? '',
+    (label, note) => {
+      vscode.postMessage({ type: 'updateBookmark', id: bookmarkId, label, note });
+    },
+    () => {
+      vscode.postMessage({ type: 'removeBookmark', id: bookmarkId });
+    },
+  );
 }
 
 /**
