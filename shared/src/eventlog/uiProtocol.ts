@@ -126,6 +126,8 @@ export interface Bookmark {
   methodName?: string;
   /** `'Position'` kind only: exact decimal string from the engine's `tcToSimTime` (not the client's approximate `simTimeAt()`). */
   simulationTime?: string;
+  /** User-authored markdown notes (the "Bookmark Info" note box's body) -- independent of `kind`, edited via the note's double-click/context-menu dialog, never set at creation time (only the label is). Empty/absent = no note box shown for this bookmark even when "Bookmark Info" is on. */
+  note?: string;
 }
 
 /** A not-yet-labeled/identified bookmark candidate -- `id` is assigned by the store on add; `label` is filled in by the host's "Add Bookmark" input box (native UI, so the webview never carries it). */
@@ -200,6 +202,14 @@ export type WebviewToHostMessage =
    * since toggling is a one-shot action, not a continuously-driven state).
    */
   | { type: 'toggleBookmark'; candidate: BookmarkCandidate }
+  /**
+   * "Bookmark Info" note editing: renames a bookmark and/or replaces its markdown notes
+   * (`Bookmark.label`/`note`), sent by the note box's edit dialog (double-click or its
+   * context menu's "Edit Bookmark..."). Unlike `toggleBookmark`, this always targets an
+   * EXISTING bookmark by `id` -- never creates/deletes one. The host replies the same way
+   * `toggleBookmark` does: re-broadcasts `bookmarksChanged` to every attachment.
+   */
+  | { type: 'updateBookmark'; id: string; label: string; note: string }
   /**
    * ADDITIVE (phase U8, axis-management presets): asks the host to resolve which NED
    * type-level properties (`@networkNode`, `@networkInterface`, `@wireJunction`, ...)

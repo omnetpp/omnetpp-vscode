@@ -150,6 +150,11 @@ export function buildEventLogWebviewHtml(webview: vscode.Webview, extensionUri: 
     color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent);
     border-radius: 3px; padding: 3px 6px; font: inherit; }
   .elog-dialog-row input[type="checkbox"] { flex: 0 0 auto; }
+  .elog-dialog-row-textarea { display: block; }
+  .elog-dialog-row-textarea label { display: block; margin-bottom: 4px; }
+  .elog-dialog-row-textarea textarea { width: 100%; box-sizing: border-box; resize: vertical;
+    background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, transparent); border-radius: 3px; padding: 3px 6px; font: inherit; }
   .elog-dialog-error { min-height: 16px; color: var(--vscode-errorForeground, #f14c4c); font-size: 12px; margin-bottom: 6px; }
   .elog-dialog-buttons { display: flex; justify-content: flex-end; gap: 6px; }
   .elog-dialog-buttons button { padding: 4px 12px; border-radius: 3px; border: 1px solid var(--vscode-button-border, transparent);

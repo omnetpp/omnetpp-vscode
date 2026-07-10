@@ -156,12 +156,14 @@ function buildOverlay(): { overlay: HTMLElement; panel: HTMLElement; close: () =
 
 interface PromptField {
   label: string;
-  type?: 'text' | 'checkbox';
+  type?: 'text' | 'checkbox' | 'textarea';
   initialValue?: string;
   initialChecked?: boolean;
+  /** `'textarea'` only -- visible row count (`<textarea rows>`, a DOM property, not a CSS style -- CSP-exempt). Defaults to 6. */
+  rows?: number;
 }
 
-/** Builds a small labeled-input dialog with a title, one or more fields, a validation/error line, and OK/Cancel (Enter/Esc). `validate` runs on every input change; `onSubmit` only fires when it returns `null`. Returns the mounted input elements in field order (text fields as `HTMLInputElement[type=text]`, checkboxes as `HTMLInputElement[type=checkbox]`) so a caller with multiple fields (find-text) can read them all in `validate`/`onSubmit`. */
+/** Builds a small labeled-input dialog with a title, one or more fields, a validation/error line, and OK/Cancel (Enter/Esc). `validate` runs on every input change; `onSubmit` only fires when it returns `null`. Returns the mounted input elements in field order (text/textarea fields as `(HTMLInputElement|HTMLTextAreaElement)[]`, checkboxes as `HTMLInputElement[type=checkbox]`) so a caller with multiple fields (find-text) can read them all in `validate`/`onSubmit`. `Enter` submits from a `'text'` field; `'textarea'` fields need multi-line input, so only Ctrl/Cmd+Enter submits from those (plain Enter inserts a newline). */
 function openPrompt(title: string, fields: PromptField[], validate: (values: string[], checked: boolean[]) => string | null, onSubmit: (values: string[], checked: boolean[]) => void): void {
   const { panel, close } = buildOverlay();
   const titleEl = document.createElement('div');
@@ -169,15 +171,27 @@ function openPrompt(title: string, fields: PromptField[], validate: (values: str
   titleEl.textContent = title;
   panel.appendChild(titleEl);
 
-  const textInputs: HTMLInputElement[] = [];
+  const textInputs: (HTMLInputElement | HTMLTextAreaElement)[] = [];
   const checkInputs: HTMLInputElement[] = [];
-  const rowsByField: HTMLInputElement[] = [];
+  const rowsByField: (HTMLInputElement | HTMLTextAreaElement)[] = [];
 
   for (const field of fields) {
     const row = document.createElement('div');
     row.className = 'elog-dialog-row';
     const labelEl = document.createElement('label');
     labelEl.textContent = field.label;
+    if (field.type === 'textarea') {
+      const textarea = document.createElement('textarea');
+      textarea.rows = field.rows ?? 6;
+      textarea.value = field.initialValue ?? '';
+      textInputs.push(textarea);
+      rowsByField.push(textarea);
+      row.classList.add('elog-dialog-row-textarea');
+      row.appendChild(labelEl);
+      row.appendChild(textarea);
+      panel.appendChild(row);
+      continue;
+    }
     const input = document.createElement('input');
     input.type = field.type ?? 'text';
     if (input.type === 'checkbox') {
@@ -227,8 +241,12 @@ function openPrompt(title: string, fields: PromptField[], validate: (values: str
 
   for (const input of rowsByField) {
     input.addEventListener('input', revalidate);
+    const isTextarea = input instanceof HTMLTextAreaElement;
     input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') submit();
+      // A textarea needs plain Enter to insert a newline -- only Ctrl/Cmd+Enter submits
+      // from one; every other field type submits on plain Enter, unchanged.
+      const ke = e as KeyboardEvent;
+      if (ke.key === 'Enter' && (!isTextarea || ke.ctrlKey || ke.metaKey)) submit();
     });
   }
   okButton.addEventListener('click', submit);
@@ -270,5 +288,23 @@ export function openFindTextDialog(initial: FindTextState, onSubmit: (state: Fin
     ],
     ([search]) => (search.trim().length === 0 ? 'Enter text to search for' : null),
     ([search], [caseSensitive, backward]) => onSubmit({ search, caseSensitive, backward }),
+  );
+}
+
+/**
+ * "Bookmark Info" note editing -- opened by a note box's double-click or its context
+ * menu's "Edit Bookmark...". Renames the bookmark and/or replaces its markdown notes;
+ * Ctrl/Cmd+Enter submits from the notes textarea (plain Enter inserts a newline, per
+ * `openPrompt()`'s textarea handling above).
+ */
+export function openEditBookmarkDialog(label: string, note: string, onSubmit: (label: string, note: string) => void): void {
+  openPrompt(
+    'Edit Bookmark',
+    [
+      { label: 'Name:', initialValue: label },
+      { label: 'Notes (Markdown):', type: 'textarea', initialValue: note },
+    ],
+    ([name]) => (name.trim().length === 0 ? 'Enter a bookmark name' : null),
+    ([name, notes]) => onSubmit(name.trim(), notes),
   );
 }

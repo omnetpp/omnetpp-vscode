@@ -51,6 +51,16 @@ export async function handleToggleBookmarkMessage(store: BookmarkStore, session:
   session.postToAll({ type: 'bookmarksChanged', bookmarks: store.list() });
 }
 
+/**
+ * Handles a webview's `updateBookmark` message ("Bookmark Info" note editing): renames the
+ * bookmark and/or replaces its notes, then broadcasts the fresh list -- mirrors
+ * `handleToggleBookmarkMessage()`'s tail exactly (no confirmation, always re-broadcast).
+ */
+export async function handleUpdateBookmarkMessage(store: BookmarkStore, session: EventLogSession, id: string, label: string, note: string): Promise<void> {
+  await store.update(id, label, note);
+  session.postToAll({ type: 'bookmarksChanged', bookmarks: store.list() });
+}
+
 function bookmarkKindDefaultPrompt(kind: BookmarkKind): string {
   switch (kind) {
     case 'Event':

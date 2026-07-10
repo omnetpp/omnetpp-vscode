@@ -149,4 +149,10 @@ export class BookmarkStore {
     this.bookmarks = this.bookmarks.filter((b) => b.id !== id);
     await this.persist();
   }
+
+  /** "Bookmark Info" note editing: renames the bookmark `id` and/or replaces its notes. No-op if `id` no longer exists (e.g. removed by another webview mid-edit). */
+  async update(id: string, label: string, note: string): Promise<void> {
+    this.bookmarks = this.bookmarks.map((b) => (b.id === id ? { ...b, label, note } : b));
+    await this.persist();
+  }
 }

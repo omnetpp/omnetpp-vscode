@@ -4,7 +4,7 @@ import type { LanguageClient } from 'vscode-languageclient/node';
 import type { EventLogUiSettings, HostToWebviewMessage, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
 import { ElogMethods, type ScListVectorsResult, type VectorIdentity } from '@omnetpp/shared/elog-protocol';
 import { OmnetppMethods } from '@omnetpp/shared/protocol';
-import { handleToggleBookmarkMessage } from './bookmarks';
+import { handleToggleBookmarkMessage, handleUpdateBookmarkMessage } from './bookmarks';
 import type { EventLogController } from './eventLogController';
 import type { EventLogSession } from './eventLogSession';
 import { gotoNedDeclaration } from './nedNavigation';
@@ -165,6 +165,10 @@ export class SequenceChartEditorProvider implements vscode.CustomReadonlyEditorP
       // same "intercept before the shared function" pattern as 'ready'/'stateChanged'.
       if (message.type === 'toggleBookmark') {
         void handleToggleBookmarkMessage(this.controller.getBookmarkStore(document.uri), session, message.candidate);
+        return;
+      }
+      if (message.type === 'updateBookmark') {
+        void handleUpdateBookmarkMessage(this.controller.getBookmarkStore(document.uri), session, message.id, message.label, message.note);
         return;
       }
       // Phase U8: NED type-property lookup for the chart's preset configurations --
@@ -425,10 +429,11 @@ export async function handleWebviewMessage(
       void vscode.commands.executeCommand('setContext', message.key, message.value);
       break;
     case 'toggleBookmark':
+    case 'updateBookmark':
       // Always intercepted before reaching here (needs the controller's per-uri
-      // BookmarkStore -- see both callers' own 'toggleBookmark' handling) -- present
-      // only so this switch stays a complete, self-documenting map of every message
-      // type, matching this function's own "shared message-pump body" header.
+      // BookmarkStore -- see both callers' own handling above) -- present only so this
+      // switch stays a complete, self-documenting map of every message type, matching
+      // this function's own "shared message-pump body" header.
       break;
     case 'requestFilterPanel':
       // Only ever sent by the Event Log table webview (the chart toggles its own panel

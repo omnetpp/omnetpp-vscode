@@ -201,3 +201,29 @@ test('BookmarkStore: remove() deletes by id', async () => {
   await store.remove(id);
   assert.deepEqual(store.list(), []);
 });
+
+test('BookmarkStore: update() renames a bookmark and sets its notes, persists, and leaves other bookmarks untouched', async () => {
+  const memento = fakeMemento();
+  const store = new BookmarkStore(memento, 'file:///a.elog');
+  await store.toggle(eventCandidate, 'original label');
+  await store.toggle(axisCandidate, 'unrelated');
+  const id = store.list().find((b) => b.kind === 'Event')!.id;
+
+  await store.update(id, 'renamed', '**bold** note');
+  assert.strictEqual(store.list().find((b) => b.id === id)!.label, 'renamed');
+  assert.strictEqual(store.list().find((b) => b.id === id)!.note, '**bold** note');
+  assert.strictEqual(store.list().find((b) => b.kind === 'Axis')!.label, 'unrelated', 'the other bookmark is untouched');
+
+  // survives "reload"
+  const reloaded = new BookmarkStore(memento, 'file:///a.elog');
+  assert.strictEqual(reloaded.list().find((b) => b.id === id)!.label, 'renamed');
+  assert.strictEqual(reloaded.list().find((b) => b.id === id)!.note, '**bold** note');
+});
+
+test('BookmarkStore: update() on a no-longer-existing id is a harmless no-op', async () => {
+  const memento = fakeMemento();
+  const store = new BookmarkStore(memento, 'file:///a.elog');
+  await store.toggle(eventCandidate, 'x');
+  await store.update('does-not-exist', 'renamed', 'note');
+  assert.strictEqual(store.list()[0].label, 'x');
+});
