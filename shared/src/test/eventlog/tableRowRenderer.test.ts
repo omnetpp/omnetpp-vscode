@@ -25,6 +25,8 @@ import {
   ComponentMethodBeginEntry,
   ComponentMethodEndEntry,
   ConnectionCreatedEntry,
+  EndSendEntry,
+  EventEntry,
   GateCreatedEntry,
   GateDisplayStringChangedEntry,
   ModuleCreatedEntry,
@@ -219,6 +221,68 @@ test('renderTableRow: BeginSendEntry for the "job" message (event #1: "BS id 2 .
     row.detailSpans.map((s) => s.style),
     ['const', 'const', 'type', 'name', 'const', 'const', 'data', 'const', 'data'],
   );
+});
+
+// ---------------------------------------------------------------------------------
+// 3b. Row icon id -- port of EventLogTableRowRenderer.getImage() (~lines 242-268 of the
+//     Java source). Fixture facts below were verified against the real Fifo1 log rather
+//     than assumed: event #1 contains BOTH a non-adjacent "job" BeginSendEntry/
+//     EndSendEntry pair (with a SendHopEntry in between -- generic "BeginSend"/"EndSend")
+//     AND an adjacent "sendMessageEvent" BeginSendEntry/EndSendEntry pair (a self-timer
+//     reschedule, no entry in between -- the "scheduleAt" pattern, "ScheduleAt"); event
+//     #1 itself is a self-message-processing event (it processes the self-timer message
+//     scheduled adjacently in event #0), while event #2 is not.
+// ---------------------------------------------------------------------------------
+
+test('renderTableRow: iconId -- generic mapping strips the trailing "Entry" off the class name', () => {
+  const { eventLog, ctx } = openFifo();
+  const mc = findEntryInEvent(eventLog, 0, ModuleCreatedEntry, (e) => e.moduleId === 2);
+  assert.equal(renderTableRow(mc, ctx, DESCRIPTIVE_SMART_CPP).iconId, 'ModuleCreated');
+
+  const gc = findEntryInEvent(eventLog, 0, GateCreatedEntry, (e) => e.moduleId === 2);
+  assert.equal(renderTableRow(gc, ctx, DESCRIPTIVE_SMART_CPP).iconId, 'GateCreated');
+
+  const cc = findEntryInEvent(eventLog, 0, ConnectionCreatedEntry, (e) => e.sourceModuleId === 2);
+  assert.equal(renderTableRow(cc, ctx, DESCRIPTIVE_SMART_CPP).iconId, 'ConnectionCreated');
+});
+
+test('renderTableRow: iconId is computed identically in RAW mode (not just DESCRIPTIVE)', () => {
+  const { eventLog, ctx } = openFifo();
+  const mc = findEntryInEvent(eventLog, 0, ModuleCreatedEntry, (e) => e.moduleId === 2);
+  assert.equal(renderTableRow(mc, ctx, RAW).iconId, 'ModuleCreated');
+});
+
+test('renderTableRow: iconId -- EventEntry special case: a self-message-processing event renders "SelfEvent" instead of "Event"', () => {
+  const { eventLog, ctx } = openFifo();
+  const event1 = eventLog.getEventForEventNumber(1)!;
+  assert.equal(event1.isSelfMessageProcessingEvent(), true, 'fixture sanity: event #1 processes the self-timer message scheduled adjacently in event #0');
+  assert.equal(renderTableRow(event1.getEventEntry(), ctx, DESCRIPTIVE_SMART_CPP).iconId, 'SelfEvent');
+
+  const event2 = eventLog.getEventForEventNumber(2)!;
+  assert.equal(event2.isSelfMessageProcessingEvent(), false, 'fixture sanity: event #2 ("end-service") is not a self-message-processing event');
+  assert.equal(renderTableRow(event2.getEventEntry(), ctx, DESCRIPTIVE_SMART_CPP).iconId, 'Event');
+});
+
+test('renderTableRow: iconId -- BeginSendEntry special case: immediately followed by an EndSendEntry in the same event renders "ScheduleAt"', () => {
+  const { eventLog, ctx } = openFifo();
+  const event1 = eventLog.getEventForEventNumber(1)!;
+  const scheduleAtEntry = findEntryInEvent(eventLog, 1, BeginSendEntry, (e) => e.messageName === 'sendMessageEvent');
+  assert.equal(event1.isSelfMessage(scheduleAtEntry), true, 'fixture sanity: the "sendMessageEvent" BeginSendEntry is immediately followed by its own EndSendEntry');
+  assert.equal(renderTableRow(scheduleAtEntry, ctx, DESCRIPTIVE_SMART_CPP).iconId, 'ScheduleAt');
+});
+
+test('renderTableRow: iconId -- a plain BeginSendEntry NOT immediately followed by an EndSendEntry (a SendHopEntry sits in between) still gets the generic "BeginSend" id', () => {
+  const { eventLog, ctx } = openFifo();
+  const event1 = eventLog.getEventForEventNumber(1)!;
+  const jobEntry = findEntryInEvent(eventLog, 1, BeginSendEntry, (e) => e.messageName === 'job');
+  assert.equal(event1.isSelfMessage(jobEntry), false, 'fixture sanity: the "job" BeginSendEntry has a SendHopEntry between it and its EndSendEntry');
+  assert.equal(renderTableRow(jobEntry, ctx, DESCRIPTIVE_SMART_CPP).iconId, 'BeginSend');
+});
+
+test('renderTableRow: iconId -- EndSendEntry is never itself special-cased, generic "EndSend"', () => {
+  const { eventLog, ctx } = openFifo();
+  const endSend = findEntryInEvent(eventLog, 1, EndSendEntry, (e) => e.messageName === 'job');
+  assert.equal(renderTableRow(endSend, ctx, DESCRIPTIVE_SMART_CPP).iconId, 'EndSend');
 });
 
 // ---------------------------------------------------------------------------------

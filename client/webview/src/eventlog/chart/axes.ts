@@ -152,8 +152,11 @@ export function layoutAxes(orderedModuleIds: readonly number[], moduleTree: Elog
   const resolved = orderedModuleIds.map((moduleId) => {
     const found = findModuleName(moduleId, moduleTree);
     const compound = found?.compound ?? false;
-    // A module showing a vector-data strip reserves the strip height (centered on its line);
-    // otherwise the plain 3px (compound) / 1px (simple) line thickness.
+    // A module showing a vector-data strip reserves the strip height BELOW its line (Eclipse
+    // AxisVectorBarRenderer hangs the bar from `axis.y` down to `axis.y + height`, not
+    // centered -- see `canvasStack.ts`'s `axisVectorStrip` case); this loop already reserves
+    // exactly that span, since `lineHeight` is added to `y` AFTER placing `axis.y`, not split
+    // around it. Otherwise the plain 3px (compound) / 1px (simple) line thickness.
     const lineHeight = stripModuleIds?.has(moduleId) ? AXIS_VECTOR_STRIP_HEIGHT : compound ? 3 : 1;
     return { moduleId, label: found?.label ?? `Module #${moduleId}`, compound, lineHeight };
   });

@@ -29,6 +29,10 @@
       "types": "./out/eventlog/elogProtocol.d.ts",
       "default": "./out/eventlog/elogProtocol.js"
     },
+    "./entry-proposals": {
+      "types": "./out/eventlog/entryProposals.d.ts",
+      "default": "./out/eventlog/entryProposals.js"
+    },
     "./ui-protocol": {
       "types": "./out/eventlog/uiProtocol.d.ts",
       "default": "./out/eventlog/uiProtocol.js"
@@ -40,6 +44,10 @@
     "./match": {
       "types": "./out/match/index.d.ts",
       "default": "./out/match/index.js"
+    },
+    "./style-rules": {
+      "types": "./out/eventlog/styleRules.d.ts",
+      "default": "./out/eventlog/styleRules.js"
     }
   },
   "dependencies": {

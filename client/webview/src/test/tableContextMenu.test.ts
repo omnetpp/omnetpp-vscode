@@ -31,12 +31,13 @@ function fakeActions(): TableMenuActions & { calls: Record<string, unknown[]> } 
     setTypeMode: record('setTypeMode'),
     setNameMode: record('setNameMode'),
     setDisplayMode: record('setDisplayMode'),
+    togglePin: record('togglePin'),
   };
 }
 
-/** Defaults for the fields every test doesn't care about, spread + overridden per test (phase U10 added `currentFilterMode`/`currentModes`, both required). */
+/** Defaults for the fields every test doesn't care about, spread + overridden per test (phase U10 added `currentFilterMode`/`currentModes`, both required; Table popup Pin entry gap-closure added `pinned`). */
 function baseParams(overrides: Partial<TableMenuBuildParams> & Pick<TableMenuBuildParams, 'hasFocus' | 'hasSelection' | 'focusedRowNedTypeName' | 'actions'>): TableMenuBuildParams {
-  return { currentFilterMode: EventLogTableFilterMode.ALL_ENTRIES, currentModes: DEFAULT_TABLE_RENDER_MODES, ...overrides };
+  return { currentFilterMode: EventLogTableFilterMode.ALL_ENTRIES, currentModes: DEFAULT_TABLE_RENDER_MODES, pinned: false, ...overrides };
 }
 
 function findEntry(entries: MenuEntry[], id: string): MenuEntry | undefined {
@@ -64,6 +65,7 @@ test('buildTableContextMenu: includes the full Go To family plus bookmark/copy/f
     'typeMode',
     'nameMode',
     'displayMode',
+    'pin',
     'refresh',
   ]) {
     assert.ok(findEntry(entries, id), `expected menu entry "${id}"`);
@@ -180,4 +182,33 @@ test('buildTableContextMenu: Type/Name/Display Mode submenus check the current m
   const descriptive = displayMode.submenu.find((e) => 'label' in e && e.label === 'Descriptive') as { onSelect: () => void };
   descriptive.onSelect();
   assert.deepEqual(actions.calls.setDisplayMode, ['DESCRIPTIVE']);
+});
+
+// ---------------------------------------------------------------------------------
+// "Pin"/"Unpin" (Table popup Pin entry gap-closure)
+// ---------------------------------------------------------------------------------
+
+test('buildTableContextMenu: "Pin" item shows unchecked "Pin" label when not pinned, and calls togglePin', () => {
+  const actions = fakeActions();
+  const entries = buildTableContextMenu(baseParams({ hasFocus: true, hasSelection: false, focusedRowNedTypeName: null, actions, pinned: false }));
+  const entry = findEntry(entries, 'pin')! as { label: string; checked?: boolean; onSelect: () => void };
+  assert.equal(entry.label, 'Pin');
+  assert.ok(!entry.checked);
+  entry.onSelect();
+  assert.ok(actions.calls.togglePin);
+});
+
+test('buildTableContextMenu: "Pin" item shows checked "Unpin" label when pinned', () => {
+  const actions = fakeActions();
+  const entries = buildTableContextMenu(baseParams({ hasFocus: true, hasSelection: false, focusedRowNedTypeName: null, actions, pinned: true }));
+  const entry = findEntry(entries, 'pin')! as { label: string; checked?: boolean };
+  assert.equal(entry.label, 'Unpin');
+  assert.ok(entry.checked);
+});
+
+test('buildTableContextMenu: "Pin" item is always available regardless of focus (an empty table can still be pinned)', () => {
+  const actions = fakeActions();
+  const entries = buildTableContextMenu(baseParams({ hasFocus: false, hasSelection: false, focusedRowNedTypeName: null, actions, pinned: false }));
+  const entry = findEntry(entries, 'pin')! as { disabled?: boolean };
+  assert.ok(!entry.disabled);
 });

@@ -98,6 +98,8 @@ export function buildEventLogWebviewHtml(webview: vscode.Webview, extensionUri: 
   .elog-span-bubble { color: var(--vscode-charts-red, #f14c4c); font-weight: bold; }
   .elog-span-faint { color: var(--vscode-descriptionForeground); }
   .elog-span-eventNo, .elog-span-simtime { color: var(--vscode-foreground); }
+  /* Per-entry-type row icon (EventLogTableRowRenderer.java's getImage()) -- inline, immediately before the Details text, vertically centered in the row. */
+  .elog-row-icon { vertical-align: middle; margin-right: 4px; }
   .elog-scrollbar { position: absolute; top: 0; right: 0; width: 14px; bottom: 0; }
   .elog-scrollbar-thumb { position: absolute; left: 2px; right: 2px; background: var(--vscode-scrollbarSlider-background); border-radius: 2px; cursor: default; min-height: 16px; }
   .elog-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground); }
@@ -107,6 +109,16 @@ export function buildEventLogWebviewHtml(webview: vscode.Webview, extensionUri: 
   .elog-findbar-status { flex: 0 0 auto; font-size: 11px; color: var(--vscode-errorForeground, #f14c4c); min-width: 60px; }
   .elog-findbar input { flex: 1 1 auto; background: var(--vscode-input-background); color: var(--vscode-input-foreground);
     border: 1px solid var(--vscode-input-border, transparent); border-radius: 3px; padding: 2px 4px; font: inherit; }
+  /* Table find parity gap-closure -- case-sensitivity toggle + backward/forward
+     buttons, styled like the toolbar's own icon buttons (.elog-toolbar button
+     above) for visual consistency even though the find bar isn't a .elog-toolbar. */
+  .elog-findbar button { flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
+    height: 20px; width: 20px; padding: 0; background: transparent; color: var(--vscode-foreground);
+    border: none; border-radius: 3px; cursor: pointer; }
+  .elog-findbar button:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2)); }
+  .elog-findbar button.active { background: var(--vscode-inputOption-activeBackground, rgba(128,128,128,0.3));
+    color: var(--vscode-inputOption-activeForeground, var(--vscode-foreground));
+    outline: 1px solid var(--vscode-inputOption-activeBorder, transparent); }
 
   /* Sequence Chart hover tooltip (phase U4, chart/tooltip.ts) */
   .elog-tooltip { position: fixed; z-index: 1000; max-width: 480px; padding: 6px 8px; font-size: 12px; line-height: 1.5;

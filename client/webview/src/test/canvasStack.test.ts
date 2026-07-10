@@ -1,6 +1,6 @@
 import { test } from 'bun:test';
 import assert from 'node:assert';
-import { TileCache, TILE_WIDTH_PX, viewportGeneration } from '../eventlog/chart/canvasStack';
+import { axisVectorStripBounds, TileCache, TILE_WIDTH_PX, viewportGeneration } from '../eventlog/chart/canvasStack';
 
 // Only `TileCache` (pure bookkeeping) is covered here -- the rest of canvasStack.ts
 // creates real <canvas> elements and draws to a 2D context, which is DOM-dependent
@@ -55,6 +55,16 @@ test('clear() empties the cache', () => {
   cache.clear();
   assert.strictEqual(cache.size(), 0);
   assert.strictEqual(cache.isResident(0, 1), false);
+});
+
+test('axisVectorStripBounds hangs the strip BELOW the axis line (Eclipse AxisVectorBarRenderer parity), not centered on it', () => {
+  assert.deepStrictEqual(axisVectorStripBounds({ y: 100, height: 12 }), { top: 100, bottom: 112 });
+  // regression guard for the old (wrong) centered formula, which would have produced {top: 94, bottom: 106}
+  assert.notDeepStrictEqual(axisVectorStripBounds({ y: 100, height: 12 }), { top: 94, bottom: 106 });
+});
+
+test('axisVectorStripBounds rounds a fractional y the same way the rest of the primitive geometry does', () => {
+  assert.deepStrictEqual(axisVectorStripBounds({ y: 100.6, height: 12 }), { top: 101, bottom: 113 });
 });
 
 test('viewportGeneration changes whenever any of its inputs changes', () => {

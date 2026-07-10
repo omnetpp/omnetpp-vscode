@@ -322,3 +322,30 @@ export function moduleGlyphInfo(moduleId: number, open: readonly number[], tree:
   }
   return { expand: !allSubmodulesOpen, collapse: !noSubmodulesOpen };
 }
+
+// ---------------------------------------------------------------------------------
+// "Axis Info" readout (displayFlags.ts's showAxisInfo)
+// ---------------------------------------------------------------------------------
+
+/**
+ * Port of `drawAxisInfo()`'s count math (`SequenceChart.java:4361-4390`, read in full).
+ * NOT a hover-tracked "which axis is under the mouse" readout, despite that being the
+ * plausible-sounding guess from the flag's name alone (and what an earlier doc comment
+ * on `displayFlags.ts` assumed before this was actually ported) -- the Java method body
+ * has no mouse/cursor reference at all. It's a small static box, redrawn every frame,
+ * reporting two counts:
+ *  - "Closed" -- modules that exist in the module tree but currently have no axis open
+ *    at all (`moduleCount - openAxisModules.size()`).
+ *  - "Invisible" -- axis modules that ARE open but have no axis actually laid out right
+ *    now, e.g. `showEmptyAxes` is off and the module has no activity in the loaded
+ *    range (`openAxisModules.size() - visibleAxisModules.size()`).
+ * Returns `undefined` when both counts are zero -- Java's own
+ * `if (closedAxisCount != 0 || invisibleAxisCount != 0)` gate (the box is simply absent
+ * when every module's axis state is "normal": open and visible).
+ */
+export function computeAxisInfoText(moduleCount: number, openAxisCount: number, visibleAxisCount: number): [string, string] | undefined {
+  const closedAxisCount = moduleCount - openAxisCount;
+  const invisibleAxisCount = openAxisCount - visibleAxisCount;
+  if (closedAxisCount === 0 && invisibleAxisCount === 0) return undefined;
+  return [`Closed: ${closedAxisCount} ${closedAxisCount === 1 ? 'axis' : 'axes'}`, `Invisible: ${invisibleAxisCount} ${invisibleAxisCount === 1 ? 'axis' : 'axes'}`];
+}

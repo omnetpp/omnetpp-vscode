@@ -1,12 +1,16 @@
 // Snapshots the OMNeT++ icon set into resources/icons/ (checked into the
-// repo, like the config-option snapshot) for the graphical NED preview:
+// repo, like the config-option snapshot) for the graphical NED preview and
+// the Event Log table's per-entry-type row icons:
 //
 //   bun scripts/gen-icons.mjs <omnetpp-src-dir>
 //
 // Copies <omnetpp-src>/images/**/*.png (skipping the legacy old/ GIF folder)
-// plus the IDE's _internal default/unknown placeholder icons, and writes an
-// index.json mapping icon id -> [width, height] (parsed from the PNG headers)
-// so the webview can lay out bundled-icon scenes before the images load.
+// plus the IDE's _internal default/unknown placeholder icons and the
+// eventlog entry-type icon set (ui/org.omnetpp.common/images/_internal/
+// eventlog/*.png, one per EventLogTableRowRenderer.java entry-type icon id --
+// see shared/src/eventlog/tableRowRenderer.ts), and writes an index.json
+// mapping icon id -> [width, height] (parsed from the PNG headers) so the
+// webview can lay out bundled-icon scenes before the images load.
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -74,6 +78,30 @@ for (const name of ['default.png', 'unknown.png']) {
   cpSync(src, dest);
   index[`_internal/${name.replace(/\.png$/, '')}`] = pngSize(src);
   count++;
+}
+
+// the Event Log table's per-entry-type row icons (EventLogTableRowRenderer.java's
+// getImage(), ~ImageFactory.EVENTLOG_IMAGE_DIR) -- kept under _internal/eventlog/ so
+// this small, static id set (e.g. "ModuleCreated", "SelfEvent") never collides with the
+// general images/ namespace above (see tableRowRenderer.ts's iconId computation).
+const eventlogDir = join(internalDir, 'eventlog');
+if (existsSync(eventlogDir)) {
+  for (const entry of readdirSync(eventlogDir)) {
+    if (!entry.endsWith('.png')) continue;
+    const src = join(eventlogDir, entry);
+    const size = pngSize(src);
+    if (!size) {
+      console.warn(`skipping non-PNG content: ${src}`);
+      continue;
+    }
+    const dest = join(outDir, '_internal', 'eventlog', entry);
+    mkdirSync(dirname(dest), { recursive: true });
+    cpSync(src, dest);
+    index[`_internal/eventlog/${entry.replace(/\.png$/, '')}`] = size;
+    count++;
+  }
+} else {
+  console.warn(`eventlog icon set not found: ${eventlogDir}`);
 }
 
 writeFileSync(join(outDir, 'index.json'), JSON.stringify({ version: 1, icons: index }));

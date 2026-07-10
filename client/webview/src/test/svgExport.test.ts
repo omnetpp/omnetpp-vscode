@@ -122,6 +122,39 @@ test('buildChartSvg: one <line>/<rect>/<text> per matching primitive, colors and
   assert.ok(!svg.includes('hello & <world>'));
 });
 
+test('buildChartSvg: axisVectorStrip hangs BELOW the axis line (Eclipse AxisVectorBarRenderer parity, item 6), matching canvasStack.ts\'s axisVectorStripBounds()', () => {
+  const primitives: DrawPrimitive[] = [
+    {
+      kind: 'axisVectorStrip',
+      moduleId: 1,
+      y: 100,
+      height: 12,
+      borderColor: '#000000',
+      labelColor: '#000000',
+      canvasWidth: 500,
+      segments: [{ x1: 0, x2: 50, color: '#ff0000', value: 1, valueText: 'BUSY' }],
+    },
+  ];
+  const svg = buildChartSvg({ primitives, widthPx: 500, heightPx: 200, backgroundColor: '#fff', fontFamily: 'sans-serif' });
+  assert.ok(svg.includes('<rect x="0" y="100" width="50" height="12" fill="#ff0000"/>'), svg);
+  // top/bottom border lines at y=100 (not 94) and y=112 (not 106) -- the old centered formula
+  assert.ok(svg.includes('y1="100" x2="50" y2="100"'), svg);
+  assert.ok(svg.includes('y1="112" x2="50" y2="112"'), svg);
+  assert.ok(!svg.includes('y="94"') && !svg.includes('y1="94"'), 'must not use the old centered top (y - height/2)');
+});
+
+test('buildChartSvg: axisSelectionMark brackets a vector strip asymmetrically (above p.y, below p.y+lineHeight), but a plain axis line symmetrically', () => {
+  const stripMark: DrawPrimitive[] = [{ kind: 'axisSelectionMark', x1: 0, x2: 100, y: 100, lineHeight: 12, color: '#ff0000' }];
+  const stripSvg = buildChartSvg({ primitives: stripMark, widthPx: 100, heightPx: 200, backgroundColor: '#fff', fontFamily: 'sans-serif' });
+  assert.ok(stripSvg.includes('y1="98.5"'), stripSvg); // 100 - 1.5 margin
+  assert.ok(stripSvg.includes('y1="113.5"'), stripSvg); // 100 + 12 + 1.5 margin
+
+  const plainMark: DrawPrimitive[] = [{ kind: 'axisSelectionMark', x1: 0, x2: 100, y: 100, lineHeight: 2, color: '#ff0000' }];
+  const plainSvg = buildChartSvg({ primitives: plainMark, widthPx: 100, heightPx: 200, backgroundColor: '#fff', fontFamily: 'sans-serif' });
+  assert.ok(plainSvg.includes('y1="97.5"'), plainSvg); // 100 - 2/2 - 1.5, symmetric around p.y
+  assert.ok(plainSvg.includes('y1="102.5"'), plainSvg); // 100 + 2/2 + 1.5
+});
+
 test('buildChartSvg: a solid (non-dashed) arrow omits stroke-dasharray entirely', () => {
   const primitives: DrawPrimitive[] = [{ kind: 'arrow', arrowKind: 'send', x1: 0, y1: 0, x2: 10, y2: 10, color: '#0000cc' }];
   const svg = buildChartSvg({ primitives, widthPx: 50, heightPx: 50, backgroundColor: '#fff', fontFamily: 'sans-serif' });

@@ -39,7 +39,11 @@ export interface ToolbarDropdownSpec {
  * pattern (`EventLogTableFacade.setCustomFilter()`, proxied via `RowWindowParams.
  * customFilterPattern`). Fires `onChange` on Enter or on blur (not per keystroke --
  * committing a pattern re-fetches the table's current window from the engine, so it is
- * deliberately not as chatty as a live-search box).
+ * deliberately not as chatty as a live-search box). A caller that needs richer,
+ * per-keystroke behavior than `onChange`/`setInputValue` cover (phase U10: the
+ * Custom-filter box's position-aware autocomplete dropdown) reaches the raw `<input>`
+ * via `ToolbarHandle.getInputElement()` and layers it on top, rather than growing this
+ * spec with autocomplete-specific fields.
  */
 export interface ToolbarInputSpec {
   id: string;
@@ -63,6 +67,8 @@ export interface ToolbarHandle {
   setInputValue(id: string, value: string): void;
   /** Shows/hides any toolbar item by id (e.g. the custom-filter input, only relevant when Line Filter is set to "Custom…"). */
   setItemVisible(id: string, visible: boolean): void;
+  /** The raw `<input>` element backing an `{kind: 'input'}` item, for a caller that needs to attach richer behavior than `onChange`/`setInputValue` cover (phase U10: the Event Log Table's Custom-filter box wires a position-aware autocomplete dropdown, `common/autocompleteDropdown.ts`, directly onto this element). `undefined` for an unknown id or a non-input item. */
+  getInputElement(id: string): HTMLInputElement | undefined;
 }
 
 /** (Re)builds `container` as a toolbar from `items`, wiring click/change handlers, and returns a handle for later imperative updates (e.g. disabling "Refresh" while a request is in flight). */
@@ -173,6 +179,9 @@ export function buildToolbar(container: HTMLElement, items: ToolbarItemSpec[]): 
     setItemVisible(id, visible) {
       const el = elements.get(id);
       if (el) el.style.display = visible ? '' : 'none';
+    },
+    getInputElement(id) {
+      return inputs.get(id);
     },
   };
 }

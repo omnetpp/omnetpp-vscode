@@ -26,9 +26,10 @@
  *    Submodules (expand items disabled when there is nothing left to expand,
  *    collapse items when nothing is open below -- Java greys via the same
  *    allSubmodulesOpen/noSubmodulesOpen booleans the glyphs use). Java's "Attach/
- *    Detach Vector to Axis" is out of scope for the whole port (.vec axis data
- *    strips, per the plan's decision record) and "Zoom to Value" with it (needs the
- *    vector data); both are omitted rather than shown disabled.
+ *    Detach Vector to Axis" (.vec axis data strips) and "Zoom to Value" are fully
+ *    ported (below: `attachVector`/`detachVector`/`zoomToVectorValue`, gated on
+ *    `hasVectorAttached`) -- the host side (`.vec` file/run/vector chooser, worker
+ *    load) lives in `client/src/eventlog/sequenceChartEditor.ts`.
  *  - Method calls: Java's own `contributeToPopupMenu()` has NO per-method-call
  *    section (verified — only Event/MessageDependency/ModuleTreeItem get dynamic
  *    submenus there), but Java's separate "Toggle bookmark" action DOES support
@@ -36,9 +37,13 @@
  *    (`SequenceChartContributor.java:2081-2090,2159-2166`) — this port's
  *    `methodCallSection()` below is scoped to exactly that one action (Toggle
  *    Bookmark), not a general method-call submenu.
- *  - Static tail: Timeline Mode (4 real radios + a disabled "Custom nonlinear..."),
- *    Zoom (Default Zoom/Zoom to Fit/Zoom In/Zoom Out — all wired), Find Text.../Find
- *    Next, Go to (Event.../Simulation Time.../Begin/End), Refresh.
+ *  - Static tail: Timeline Mode (4 real radios + "Custom nonlinear..." -- opens
+ *    `customNonlinearDialog.ts`'s 2-slider dialog, port of `CustomNonlinearOptionsDialog`,
+ *    `SequenceChartContributor.java:2487-2617`; see `ChartMenuActions.
+ *    openCustomNonlinearDialog`'s doc for the one deliberate deviation from Java --
+ *    it forces Timeline Mode to Nonlinear on open, where Java's own item leaves the
+ *    mode untouched), Zoom (Default Zoom/Zoom to Fit/Zoom In/Zoom Out — all wired),
+ *    Find Text.../Find Next, Go to (Event.../Simulation Time.../Begin/End), Refresh.
  *  - Phase U5 ADDS: a "Show/Hide" submenu with all ~25 `displayFlags.ts` toggles
  *    (`TOGGLE_ORDER`, each a checkable item — no disabled placeholders here, every one
  *    is fully wired into `drawList.ts`).
@@ -56,11 +61,15 @@
  *    module tree hasn't loaded or the resolved node has no NED type name (see
  *    `uiProtocol.ts`'s `gotoNedDeclaration` message doc for the resolution path, and the
  *    Event Log table's equivalent item in `tableContextMenu.ts`).
+ *  - "Configure Style..." (six pattern->color rule tables, `ConfigureStyleDialog` port)
+ *    is now wired -- see `configureStyleDialog.ts` + `shared/src/eventlog/
+ *    styleRules.ts` for the rule model/evaluator and `ChartMenuActions.
+ *    openConfigureStyleDialog`'s doc for the live-apply/persistence path.
  *  - STILL OMITTED (not even as disabled placeholders — genuinely later-phase
  *    ownership, or out of this port's scope entirely per the port plan's phase
  *    table): Filter (dropdown -- superseded by the in-webview filter panel, U7),
- *    Configure Style, Change Font..., Pin, Self Test (an Eclipse-internal
- *    correctness self-check, not a user-facing feature), Show In.
+ *    Change Font..., Pin, Self Test (an Eclipse-internal correctness self-check, not
+ *    a user-facing feature), Show In.
  */
 
 import { TimelineMode } from '@omnetpp/shared/elog-protocol';
@@ -140,6 +149,34 @@ export interface ChartMenuActions {
   spacingIncrease(): void;
   spacingDecrease(): void;
   setTimelineMode(mode: TimelineMode): void;
+  /**
+   * "Custom nonlinear..." -- opens `customNonlinearDialog.ts`'s 2-slider dialog
+   * (nonlinear focus + minimum timeline-coordinate delta), with a live redraw on every
+   * drag tick and a revert on Cancel/Escape/outside-click (see that module's header
+   * and `chartMain.ts`'s `showCustomNonlinearOptionsDialog()`).
+   *
+   * DEVIATION FROM JAVA (documented): `SequenceChartContributor`'s own "Custom
+   * nonlinear..." menu item never calls `sequenceChart.setTimelineMode()` -- it only
+   * opens the dialog, so the two sliders have a visible effect ONLY if Timeline Mode
+   * already happens to be Nonlinear (both params are read exclusively by the
+   * NONLINEAR-mode coordinate formula; every other mode ignores them). Since the item
+   * sits in the SAME radio group as Linear/Event Number/Step/Nonlinear, that reads as
+   * an accidental omission rather than an intentional "don't touch the mode" design,
+   * and would silently violate this port's own live-redraw requirement for the dialog
+   * (dragging a slider while in Linear mode would visibly do nothing). This port's
+   * `openCustomNonlinearDialog()` therefore switches Timeline Mode to Nonlinear before
+   * opening the dialog; Cancel/Escape/outside-click still restore the EXACT mode+params
+   * combination that was active beforehand (not just the params), so the mode-switch
+   * itself is fully undoable.
+   */
+  openCustomNonlinearDialog(): void;
+  /**
+   * Phase U-gap-closure -- "Configure Style" (`ConfigureStyleDialog`, `configureStyleDialog.ts`):
+   * the six pattern->color rule tables. Live-applies on OK (a fresh `StyleRuleResolver`
+   * compiled + redraw scheduled) and persists to the `omnetpp.sequenceChart.styleRules`
+   * setting via `setStyleRules` (see `uiProtocol.ts`'s doc on that message).
+   */
+  openConfigureStyleDialog(): void;
   /** Time-display accuracy selector: the max number of fractional (seconds) digits to show, or `null` for full precision. See `TIME_ACCURACY_OPTIONS`. */
   setTimeAccuracy(fractionDigits: number | null): void;
   zoomIn(): void;
@@ -385,6 +422,12 @@ export function buildChartContextMenu(params: ChartMenuBuildParams): MenuEntry[]
   entries.push({ id: 'selectModules', label: 'Select Modules...', icon: 'list-tree', onSelect: actions.openSelectModulesDialog });
   entries.push(presetSection(actions));
   entries.push(axisOrderingSection(currentAxisOrderingMode, actions));
+  // Java's menu order here is: axisOrderingModeAction, filterAction, configureStyleAction
+  // (`SequenceChartContributor.java`'s menu listener) -- `filterAction` is superseded by
+  // this port's in-webview filter panel (U7, see this file's header's "STILL OMITTED"
+  // note), so "Configure Style..." is placed right after axis ordering, closest to its
+  // Java neighbor still present in this menu.
+  entries.push({ id: 'configureStyle', label: 'Configure Style...', onSelect: actions.openConfigureStyleDialog });
   entries.push(spacingSection(actions));
   entries.push({ separator: true });
 
@@ -393,7 +436,7 @@ export function buildChartContextMenu(params: ChartMenuBuildParams): MenuEntry[]
     label: 'Timeline Mode',
     submenu: [
       ...TIMELINE_MODE_LABELS.map(([mode, label]): MenuEntry => ({ id: `tm-${mode}`, label, checked: mode === currentTimelineMode, onSelect: () => actions.setTimelineMode(mode) })),
-      { id: 'tm-custom', label: 'Custom nonlinear...', disabled: true },
+      { id: 'tm-custom', label: 'Custom nonlinear...', onSelect: () => actions.openCustomNonlinearDialog() },
     ],
   });
 

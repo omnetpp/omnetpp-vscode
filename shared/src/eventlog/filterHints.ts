@@ -20,19 +20,25 @@
  *    autocompletion instead, which Java's `moduleFilterExpression`/
  *    `messageFilterExpression` content-assist (`ContentAssistCommandAdapter`,
  *    `EventLogEntryProposalProvider`) covers via a much richer attribute-name-aware
- *    mechanism this port does not attempt to fully replicate -- see this file's own
- *    "documented simplification" note below).
+ *    mechanism -- see this file's own "documented simplification" note below).
  *
- * DOCUMENTED SIMPLIFICATION vs Java: `moduleFilterExpression`/`messageFilterExpression`
- * get proposals from `EventLogEntryProposalProvider`, which completes `MatchExpression`
+ * DOCUMENTED SIMPLIFICATION vs Java, for the filter PANEL's `moduleFilterExpression`/
+ * `messageFilterExpression` fields specifically (`filterPanel.ts`): Java gets proposals
+ * there from `EventLogEntryProposalProvider`, which completes `MatchExpression`
  * ATTRIBUTE NAMES against a prototype entry's schema (e.g. `className(`, `id(`, ...),
- * not just free-form value lists. Porting that proposal engine is out of scope for this
- * phase (it belongs with the rest of the NED expression/attribute-schema infrastructure,
- * not the eventlog UI) -- `FilterHints` instead offers plain value lists (module/message
- * names and class names) that the panel's simpler pattern/expression inputs can offer as
- * a flat proposal list, which covers the overwhelmingly common case (matching a specific
- * known name/class) while honestly not reproducing Java's full attribute-aware
- * expression assist.
+ * not just free-form value lists. `FilterHints` instead offers plain value lists
+ * (module/message names and class names) those two fields show as a flat proposal
+ * list, which covers the overwhelmingly common case (matching a specific known name/
+ * class) while not reproducing Java's full attribute-aware expression assist for THAT
+ * particular UI surface.
+ *
+ * `EventLogEntryProposalProvider` itself IS now ported (phase U10,
+ * `entryProposals.ts`'s `computeEntryProposals()`) -- but only wired into the Event Log
+ * Table's Custom-filter box (`tableView.ts`), which folds this file's flat hints INTO
+ * that richer, position-aware mechanism rather than using them standalone (see
+ * `entryProposals.ts`'s and `tableView.ts`'s own headers). Porting the filter panel's
+ * two expression fields onto the same mechanism is a plausible follow-up, not done
+ * here (out of scope for phase U10, which only targeted the table).
  *
  * A pure, one-shot, re-callable snapshot (same "no incremental state to keep" design as
  * `moduleTree.ts`'s `buildModuleTree()` -- see that file's header) so a caller can just

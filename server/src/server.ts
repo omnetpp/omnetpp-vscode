@@ -28,6 +28,7 @@ import { computeHover } from './features/hover';
 import { computeReferences, computeDocumentHighlights } from './features/references';
 import { computeCodeLenses } from './features/codeLens';
 import { computeCompletion } from './features/completion';
+import { resolveCompletionItem } from './features/completionResolve';
 import { computePrepareRename, computeRename } from './features/rename';
 import { computeFormatting } from './features/formatting';
 import { computeCodeActions } from './features/codeActions';
@@ -36,7 +37,16 @@ import {
   computeTypeHierarchySupertypes,
   computeTypeHierarchySubtypes,
 } from './features/typeHierarchy';
-import { ServerState, ctx, currentNedPathDirs, languageOfDoc, safeFsPath } from './serverState';
+import {
+  ServerState,
+  ctx,
+  currentNedPathDirs,
+  iconProvider,
+  invalidateIconIds,
+  invalidateIconProvider,
+  languageOfDoc,
+  safeFsPath,
+} from './serverState';
 import { registerWorkspaceDiagnostics } from './workspaceDiagnostics';
 import { registerIndexLifecycle } from './indexLifecycle';
 import { registerViewRequests } from './viewRequests';
@@ -94,7 +104,7 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
       definitionProvider: true,
       hoverProvider: true,
       referencesProvider: true,
-      completionProvider: { triggerCharacters: ['.', ':', '>', ' ', '"', ';', ',', '=', '@'] },
+      completionProvider: { triggerCharacters: ['.', ':', '>', ' ', '"', ';', ',', '=', '@'], resolveProvider: true },
       renameProvider: { prepareProvider: true },
       documentFormattingProvider: true,
       documentHighlightProvider: true,
@@ -188,7 +198,11 @@ connection.onDidChangeConfiguration((change) => {
     })?.omnetpp,
   );
   const after = `${state.nedPathSetting}\0${state.installDir}`;
-  if (before !== after) indexLifecycle.scheduleReindex(); // re-discover roots with the new path/install dir
+  if (before !== after) {
+    indexLifecycle.scheduleReindex(); // re-discover roots with the new path/install dir
+    invalidateIconIds(state); // installDir changed: re-walk icon search roots on next completion
+    invalidateIconProvider(state);
+  }
   if (state.diagnosticsScope !== beforeScope) {
     if (state.diagnosticsScope === 'workspace') wsDiag.publishWorkspaceDiagnostics();
     else wsDiag.clearWorkspaceDiagnostics();
@@ -247,6 +261,8 @@ connection.onCompletion((params) => {
   if (!parsed || !c) return [];
   return computeCompletion(parsed, params.position, c);
 });
+
+connection.onCompletionResolve((item) => resolveCompletionItem(item, iconProvider(state)));
 
 connection.onCodeLens((params): LspCodeLens[] => {
   const parsed = state.store?.get(params.textDocument.uri);

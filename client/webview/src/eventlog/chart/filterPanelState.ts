@@ -13,10 +13,11 @@
  * SCOPE decisions vs. `FilterEventLogDialog.java`'s 6-section/14-leaf tree (see the U7
  * phase report for the full rationale, summarized here):
  *  - "Range filter by simulation time" (Java's `enableSimulationTimeRangeFilter`) is
- *    DROPPED: `FilterParams`/`FilteredEventLog` (phase E5) never grew simulation-time
- *    range setters, only `firstConsideredEventNumber`/`lastConsideredEventNumber` --
- *    engine-side support does not exist, and adding it is out of this UI-only phase's
- *    scope. Only the event-number range leaf is offered.
+ *    now PORTED (`rangeSimulationTime`, alongside the event-number range leaf
+ *    `rangeEventNumbers`) -- see `FilterParams.lowerSimulationTimeLimit`/
+ *    `upperSimulationTimeLimit` and `filteredEventLog.ts`'s
+ *    `resolveConsideredEventNumberRange()` for the engine-side combination. (Earlier
+ *    phases DROPPED this for lack of engine support; that gap is closed.)
  *  - Java's "by name" (a `ModuleTreeViewer` producing module IDs) and "by ID" (a flat
  *    `CheckboxTableViewer`, ALSO producing module IDs -- same underlying selection,
  *    just two input widgets over the same module list) are MERGED into ONE section,
@@ -44,6 +45,7 @@ import type { FilterParams } from '@omnetpp/shared/elog-protocol';
 export interface FilterSectionFlags {
   collectionLimits: boolean;
   rangeEventNumbers: boolean;
+  rangeSimulationTime: boolean;
   excludedEventNumbers: boolean;
   moduleExpression: boolean;
   moduleNedType: boolean;
@@ -63,6 +65,7 @@ export interface FilterSectionFlags {
 export const FILTER_SECTION_ORDER: (keyof FilterSectionFlags)[] = [
   'collectionLimits',
   'rangeEventNumbers',
+  'rangeSimulationTime',
   'excludedEventNumbers',
   'moduleExpression',
   'moduleNedType',
@@ -81,6 +84,7 @@ export const FILTER_SECTION_ORDER: (keyof FilterSectionFlags)[] = [
 export const DEFAULT_SECTION_FLAGS: FilterSectionFlags = {
   collectionLimits: false,
   rangeEventNumbers: false,
+  rangeSimulationTime: false,
   excludedEventNumbers: false,
   moduleExpression: false,
   moduleNedType: false,
@@ -117,9 +121,18 @@ export interface FilterPanelState {
   maximumNumber: number;
   maximumCollectionTimeMs: number;
 
-  // range filter (event numbers only -- see this file's header)
+  // range filter: event numbers
   firstConsideredEventNumber: number | null;
   lastConsideredEventNumber: number | null;
+
+  // range filter: simulation time (decimal strings, per elogProtocol.ts's wire
+  // convention -- this panel never parses them, just forwards the trimmed text; the
+  // worker-side engine parses via `BigDecimal.parse()`). `''` == unset, mirroring
+  // `firstConsideredEventNumber`/`lastConsideredEventNumber`'s `null` == unset (a plain
+  // string field can't use `null` as cleanly as a text-input value, so empty string is
+  // this field's "unset" sentinel instead).
+  lowerSimulationTimeLimit: string;
+  upperSimulationTimeLimit: string;
 
   // event filter
   excludedEventNumbers: number[];
@@ -145,6 +158,13 @@ export interface FilterPanelState {
   traceConsequences: boolean;
   traceMessageReuses: boolean;
   traceSelfMessages: boolean;
+  // trace filter delta limits -- bound the OVERALL considered window by distance from
+  // `tracedEventNumber` (see `FilterParams`'s doc comment for how these combine with
+  // the range-filter bounds above). `null`/`''` == unbounded on that dimension.
+  causeEventNumberDelta: number | null;
+  consequenceEventNumberDelta: number | null;
+  causeSimulationTimeDelta: string;
+  consequenceSimulationTimeDelta: string;
 }
 
 export const DEFAULT_FILTER_PANEL_STATE: FilterPanelState = {
@@ -155,6 +175,8 @@ export const DEFAULT_FILTER_PANEL_STATE: FilterPanelState = {
   maximumCollectionTimeMs: 100,
   firstConsideredEventNumber: null,
   lastConsideredEventNumber: null,
+  lowerSimulationTimeLimit: '',
+  upperSimulationTimeLimit: '',
   excludedEventNumbers: [],
   moduleExpression: '',
   moduleNedTypeNames: [],
@@ -172,6 +194,13 @@ export const DEFAULT_FILTER_PANEL_STATE: FilterPanelState = {
   traceConsequences: true,
   traceMessageReuses: true,
   traceSelfMessages: true,
+  // Java's dialog pre-fills the two event-number deltas to 1000 (`EventLogFilterParameters
+  // .causeEventNumberDelta`/`consequenceEventNumberDelta` field initializers); the
+  // simulation-time deltas have no such default (`null` there, `''` == unset here).
+  causeEventNumberDelta: 1000,
+  consequenceEventNumberDelta: 1000,
+  causeSimulationTimeDelta: '',
+  consequenceSimulationTimeDelta: '',
 };
 
 /** Merges a (possibly partial/older/newer -- e.g. from a persisted `workspaceState` blob) object over the defaults, so a round trip through `JSON.stringify`/persistence always yields a fully-populated, type-safe state. `enabled` is merged one level deep (a persisted blob missing a newly-added flag defaults that one flag to `false`, not the whole object). */
@@ -226,6 +255,11 @@ export function buildFilterParams(state: FilterPanelState): FilterParams | null 
     if (state.lastConsideredEventNumber !== null) params.lastConsideredEventNumber = state.lastConsideredEventNumber;
   }
 
+  if (enabled.rangeSimulationTime) {
+    if (state.lowerSimulationTimeLimit.trim().length > 0) params.lowerSimulationTimeLimit = state.lowerSimulationTimeLimit.trim();
+    if (state.upperSimulationTimeLimit.trim().length > 0) params.upperSimulationTimeLimit = state.upperSimulationTimeLimit.trim();
+  }
+
   if (enabled.excludedEventNumbers) params.excludedEventNumbers = state.excludedEventNumbers;
 
   const moduleFilterEnabled = enabled.moduleExpression || enabled.moduleNedType || enabled.moduleTree || enabled.moduleClassName;
@@ -255,6 +289,10 @@ export function buildFilterParams(state: FilterPanelState): FilterParams | null 
     params.traceConsequences = state.traceConsequences;
     params.traceMessageReuses = state.traceMessageReuses;
     params.traceSelfMessages = state.traceSelfMessages;
+    if (state.causeEventNumberDelta !== null) params.causeEventNumberDelta = state.causeEventNumberDelta;
+    if (state.consequenceEventNumberDelta !== null) params.consequenceEventNumberDelta = state.consequenceEventNumberDelta;
+    if (state.causeSimulationTimeDelta.trim().length > 0) params.causeSimulationTimeDelta = state.causeSimulationTimeDelta.trim();
+    if (state.consequenceSimulationTimeDelta.trim().length > 0) params.consequenceSimulationTimeDelta = state.consequenceSimulationTimeDelta.trim();
   }
 
   // A section can be "enabled" per `isAnyFilterActive()` yet contribute NOTHING to the

@@ -5,12 +5,60 @@
 // the Eclipse scale percentages, and the bundled index.json natural sizes
 // (with a PNG/GIF header sniff for non-bundled icons). Tinting is deferred
 // to the SVG renderer via ResolvedIcon.tint (no pixel access needed).
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { IconProvider, ResolvedIcon } from '../graphics/diagramLayout';
 import { parseColor } from '../graphics/colors';
 
 const SIZE_SCALE: Record<string, number> = { vs: 40, s: 60, l: 150, vl: 250 };
+const ICON_EXTENSIONS = ['.png', '.gif'];
+
+/**
+ * Enumerate every icon id available under the given ordered search roots
+ * (same Eclipse order as {@link createNodeIconProvider}'s `iconDirs`: project
+ * `images/` dirs, then `installDir/images`, then the bundled `dist/icons`
+ * snapshot). An id is a `.png`/`.gif` file's path relative to its root, minus
+ * the extension, with subdirectories preserved as `/`-joined prefixes (e.g.
+ * `maps/city`) — the same id shape `createNodeIconProvider`'s `findFile`
+ * resolves. When the same id exists under multiple roots, only the first
+ * (highest-precedence) occurrence is kept, so a project-level icon shadows a
+ * same-named bundled one instead of listing both. The result is sorted.
+ *
+ * The `_internal/` namespace (this module's own fallback icons, e.g.
+ * `_internal/unknown` — resolved internally by `createNodeIconProvider`, not
+ * an OMNeT++ icon a user would reference) is excluded: Eclipse's
+ * `ImageFactory.getImageNameList()` has no equivalent category, so including
+ * it would offer bogus completion candidates that don't exist in the IDE.
+ */
+export function listIconIds(iconDirs: string[]): string[] {
+  const seen = new Set<string>();
+  const walk = (root: string, dir: string): void => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return; // root (or a subdirectory) doesn't exist / isn't readable
+    }
+    for (const entry of entries) {
+      const abs = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(root, abs);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const dot = entry.name.lastIndexOf('.');
+      if (dot < 0) continue;
+      const ext = entry.name.slice(dot).toLowerCase();
+      if (!ICON_EXTENSIONS.includes(ext)) continue;
+      const rel = abs.slice(root.length + 1).split(/[\\/]/).join('/');
+      const id = rel.slice(0, rel.length - ext.length);
+      if (id === '_internal' || id.startsWith('_internal/')) continue;
+      if (!seen.has(id)) seen.add(id);
+    }
+  };
+  for (const dir of iconDirs) walk(dir, dir);
+  return [...seen].sort();
+}
 
 export interface NodeIconProviderOptions {
   /** Ordered search roots (Eclipse order: project images/ dirs,

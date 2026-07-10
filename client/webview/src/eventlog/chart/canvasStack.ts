@@ -6,8 +6,10 @@
  * Two `<canvas>` elements, stacked via CSS (`position:absolute`, same rect), each
  * scaled for `devicePixelRatio` so strokes stay crisp on HiDPI displays:
  *  - `content`: axis lines, event/self-event marks, arrows+arrowheads, self-message
- *    ellipse arcs, transmission-duration parallelograms, filtered zigzag signs,
- *    zero-simtime region bands, method-call arrows/labels, dense-column indicator
+ *    ellipse arcs, transmission-duration parallelograms, filtered/collapsed-dependency
+ *    markers (parallel-line glyph; primitive `kind: 'zigzag'` is a legacy name, see
+ *    `arrowGeometry.ts`'s `buildFilteredSignSegments()`), zero-simtime region bands,
+ *    method-call arrows/labels, dense-column indicator
  *    lines (Java's "cachable layer" — the bulk of the drawing, redrawn least often in
  *    Java's design).
  *  - `overlay`: gutter backgrounds, ruler ticks + tick labels, axis labels/headers
@@ -30,6 +32,7 @@
  * eventually drive).
  */
 
+import { AXIS_VECTOR_STRIP_HEIGHT } from './axes';
 import { BOOKMARK_FLAG_HEIGHT, BOOKMARK_FLAG_WIDTH, type DrawPrimitive } from './drawList';
 import { GUTTER_TOP_HEIGHT } from './viewportState';
 
@@ -206,6 +209,20 @@ function isGutterChrome(p: DrawPrimitive): boolean {
  */
 export const DEFAULT_CHART_FONT_SIZE_PX = 12;
 
+/**
+ * Vertical bounds of an axis-vector strip bar, pulled out as a pure function so the geometry
+ * (the part of item 6's fix that isn't itself a canvas draw call) has direct unit-test
+ * coverage, not just the manual-verification checklist the rest of `drawPrimitiveToCanvas`
+ * relies on. Eclipse `AxisVectorBarRenderer` fills local `y in [0, height]` in a space
+ * translated to `(0, axis.y)` -- i.e. the bar HANGS BELOW the axis line, `axis.y .. axis.y +
+ * height`, matching `axes.ts`'s `layoutAxes()` reservation for a strip axis exactly (NOT
+ * centered on `axis.y`).
+ */
+export function axisVectorStripBounds(p: { y: number; height: number }): { top: number; bottom: number } {
+  const top = Math.round(p.y);
+  return { top, bottom: top + p.height };
+}
+
 export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrimitive, baseFontSizePx: number = DEFAULT_CHART_FONT_SIZE_PX): void {
   const mainFont = `${baseFontSizePx}px var(--vscode-font-family, sans-serif)`;
   const secondaryFont = `${baseFontSizePx - 1}px var(--vscode-font-family, sans-serif)`;
@@ -224,11 +241,15 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       ctx.stroke();
       break;
     case 'axisVectorStrip': {
-      // Multi-color step bar centered on the axis line (Eclipse AxisVectorBarRenderer): a
-      // filled rectangle per held-value segment, a black divider at each value change, and
-      // top/bottom border lines.
-      const top = Math.round(p.y - p.height / 2);
-      const bot = top + p.height;
+      // Multi-color step bar HANGING BELOW the axis line (Eclipse AxisVectorBarRenderer:
+      // `SequenceChart.java:3556` translates to `(0, axis.y)`, then `drawAxis()` fills local
+      // `y in [0, getHeight()]` -- i.e. viewport `axis.y .. axis.y + height`, not centered on
+      // the line): a filled rectangle per held-value segment, a black divider at each value
+      // change, and top/bottom border lines. `axes.ts`'s `layoutAxes()` already reserves
+      // exactly this `[axis.y, axis.y + AXIS_VECTOR_STRIP_HEIGHT)` span for a strip axis (its
+      // `lineHeight` is added AFTER placing `axis.y`, not split around it), so this matches
+      // the reserved layout with no gap/overlap into the next axis's spacing.
+      const { top, bottom: bot } = axisVectorStripBounds(p);
       ctx.setLineDash([]);
       for (const seg of p.segments) {
         const x1 = Math.round(seg.x1);
@@ -268,10 +289,11 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       ctx.fillStyle = p.labelColor;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
+      const labelY = top + p.height / 2; // vertically centered within the (now below-the-line) bar, not on `p.y` itself
       for (const seg of p.segments) {
         const tw = ctx.measureText(seg.valueText).width;
         if (seg.x2 - seg.x1 > tw + 6) {
-          for (let x = seg.x1 + 5; x < p.canvasWidth && x < seg.x2 - tw; x += p.canvasWidth) ctx.fillText(seg.valueText, x, p.y);
+          for (let x = seg.x1 + 5; x < p.canvasWidth && x < seg.x2 - tw; x += p.canvasWidth) ctx.fillText(seg.valueText, x, labelY);
         }
       }
       break;
@@ -288,22 +310,25 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       break;
     case 'axisSelectionMark': {
       // Two thin colored lines bracketing whatever is drawn on this row (above and below) --
-      // Java `drawAxisMark()`. What's drawn is always CENTERED on `p.y` and `p.lineHeight`
-      // tall (a plain 1/3px axis line, or the 12px vector-strip row) -- see `axisLine`/
-      // `axisVectorStrip` above -- so the bracket lines are symmetric around that center
-      // with a small fixed margin, instead of a fixed 1px-above offset that would sit INSIDE
-      // a tall strip (the offset used to assume a thin line; see this file's change history
-      // for the bug that motivated this fix).
-      const halfHeight = p.lineHeight / 2;
+      // Java `drawAxisMark()`. A plain 1/3px axis line is CENTERED on `p.y` (`axisLine`
+      // above), so its bracket is symmetric around `p.y` with a small fixed margin. A 12px
+      // vector-data strip instead HANGS BELOW `p.y` (`axisVectorStrip` above, matching
+      // `axes.ts`'s `[axis.y, axis.y+height)` reservation -- item 6's fix), so ITS bracket
+      // must follow: a margin above `p.y` and a margin below `p.y + p.lineHeight`, not
+      // symmetric around the center (that used to leave the bracket straddling only the top
+      // half of the strip, orphaning its bottom half).
       const margin = 1.5;
+      const isStrip = p.lineHeight === AXIS_VECTOR_STRIP_HEIGHT;
+      const topY = isStrip ? p.y - margin : p.y - p.lineHeight / 2 - margin;
+      const botY = isStrip ? p.y + p.lineHeight + margin : p.y + p.lineHeight / 2 + margin;
       ctx.strokeStyle = p.color;
       ctx.lineWidth = 1.5;
       ctx.setLineDash([]);
       ctx.beginPath();
-      ctx.moveTo(p.x1, p.y - halfHeight - margin);
-      ctx.lineTo(p.x2, p.y - halfHeight - margin);
-      ctx.moveTo(p.x1, p.y + halfHeight + margin);
-      ctx.lineTo(p.x2, p.y + halfHeight + margin);
+      ctx.moveTo(p.x1, topY);
+      ctx.lineTo(p.x2, topY);
+      ctx.moveTo(p.x1, botY);
+      ctx.lineTo(p.x2, botY);
       ctx.stroke();
       break;
     }
@@ -414,7 +439,7 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       for (const line of p.lines) textW = Math.max(textW, ctx.measureText(line).width);
       const w = Math.ceil(textW) + 2 * padX;
       const h = p.lines.length * lineH + 2 * padY;
-      const x = p.rightX - w - 4;
+      const x = p.align === 'left' ? p.anchorX + 4 : p.anchorX - w - 4;
       const y = p.edge === 'top' ? p.anchorY + 2 : p.anchorY - h - 2;
       ctx.fillStyle = p.background;
       ctx.fillRect(x, y, w, h);

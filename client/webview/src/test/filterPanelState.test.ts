@@ -44,6 +44,58 @@ test('buildFilterParams: range section populates only the bounds that are non-nu
   assert.equal(params!.lastConsideredEventNumber, undefined);
 });
 
+test('buildFilterParams: simulation time range section populates only the bounds that are non-empty', () => {
+  const s = state({ enabled: { rangeSimulationTime: true }, lowerSimulationTimeLimit: '1.5', upperSimulationTimeLimit: '' });
+  const params = buildFilterParams(s);
+  assert.equal(params!.lowerSimulationTimeLimit, '1.5');
+  assert.equal(params!.upperSimulationTimeLimit, undefined);
+});
+
+test('buildFilterParams: simulation time range values are trimmed', () => {
+  const s = state({ enabled: { rangeSimulationTime: true }, lowerSimulationTimeLimit: '  1.5  ', upperSimulationTimeLimit: ' 3 ' });
+  const params = buildFilterParams(s);
+  assert.equal(params!.lowerSimulationTimeLimit, '1.5');
+  assert.equal(params!.upperSimulationTimeLimit, '3');
+});
+
+test('buildFilterParams: a disabled simulation time range section is not sent even though the state still holds values', () => {
+  const s = state({ enabled: { rangeSimulationTime: false }, lowerSimulationTimeLimit: '1.5', upperSimulationTimeLimit: '3' });
+  const params = buildFilterParams(s);
+  assert.equal(params, null);
+});
+
+test('buildFilterParams: trace section includes the delta limits (event-number and simulation-time)', () => {
+  const s = state({
+    enabled: { trace: true },
+    tracedEventNumber: 100,
+    causeEventNumberDelta: 500,
+    consequenceEventNumberDelta: 250,
+    causeSimulationTimeDelta: '1.5',
+    consequenceSimulationTimeDelta: '2.5',
+  });
+  const params = buildFilterParams(s)!;
+  assert.equal(params.causeEventNumberDelta, 500);
+  assert.equal(params.consequenceEventNumberDelta, 250);
+  assert.equal(params.causeSimulationTimeDelta, '1.5');
+  assert.equal(params.consequenceSimulationTimeDelta, '2.5');
+});
+
+test('buildFilterParams: trace delta limits default to null/empty (unbounded) and are omitted when unset', () => {
+  const s = state({ enabled: { trace: true }, tracedEventNumber: 100, causeEventNumberDelta: null, consequenceEventNumberDelta: null, causeSimulationTimeDelta: '', consequenceSimulationTimeDelta: '' });
+  const params = buildFilterParams(s)!;
+  assert.equal(params.causeEventNumberDelta, undefined);
+  assert.equal(params.consequenceEventNumberDelta, undefined);
+  assert.equal(params.causeSimulationTimeDelta, undefined);
+  assert.equal(params.consequenceSimulationTimeDelta, undefined);
+});
+
+test('DEFAULT_FILTER_PANEL_STATE: trace event-number deltas default to 1000 (matches EventLogFilterParameters.java\'s field initializers)', () => {
+  assert.equal(DEFAULT_FILTER_PANEL_STATE.causeEventNumberDelta, 1000);
+  assert.equal(DEFAULT_FILTER_PANEL_STATE.consequenceEventNumberDelta, 1000);
+  assert.equal(DEFAULT_FILTER_PANEL_STATE.causeSimulationTimeDelta, '');
+  assert.equal(DEFAULT_FILTER_PANEL_STATE.consequenceSimulationTimeDelta, '');
+});
+
 test('buildFilterParams: excluded event numbers section', () => {
   const s = state({ enabled: { excludedEventNumbers: true }, excludedEventNumbers: [1, 2] });
   assert.deepEqual(buildFilterParams(s)!.excludedEventNumbers, [1, 2]);

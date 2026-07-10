@@ -123,9 +123,20 @@ export const DEFAULT_FIND_TEXT_STATE: FindTextState = { search: '', caseSensitiv
  * body is NOT a flat field list (`openPrompt()` below stays the field-list
  * convenience) — the Select Modules module tree and the Manual Axis Ordering reorder
  * list build their own body DOM into `panel`.
+ *
+ * `onDismiss`, if given, fires when the shell is closed via one of its own two
+ * "abandon" paths -- Escape or a mousedown on the overlay outside the panel -- but
+ * NOT when the caller calls the returned `close()` itself (e.g. from an explicit
+ * OK/Cancel button handler, which has already run its own logic). Every existing
+ * caller (Select Modules, Manual Axis Ordering, Export to SVG) omits it, since none
+ * of them apply anything before OK; the Custom Nonlinear dialog (U-phase gap-closure)
+ * is the first with a LIVE preview (every slider tick redraws the chart before OK is
+ * pressed), so for it Escape/outside-click must be treated as Cancel too -- otherwise
+ * dismissing the dialog that way would silently leave the just-previewed values in
+ * effect instead of reverting them.
  */
-export function openDialogShell(title: string): { panel: HTMLElement; close: () => void } {
-  const { panel, close } = buildOverlay();
+export function openDialogShell(title: string, onDismiss?: () => void): { panel: HTMLElement; close: () => void } {
+  const { panel, close } = buildOverlay(onDismiss);
   const titleEl = document.createElement('div');
   titleEl.className = 'elog-dialog-title';
   titleEl.textContent = title;
@@ -133,21 +144,34 @@ export function openDialogShell(title: string): { panel: HTMLElement; close: () 
   return { panel, close };
 }
 
-function buildOverlay(): { overlay: HTMLElement; panel: HTMLElement; close: () => void } {
+function buildOverlay(onDismiss?: () => void): { overlay: HTMLElement; panel: HTMLElement; close: () => void } {
   const overlay = document.createElement('div');
   overlay.className = 'elog-dialog-overlay';
   const panel = document.createElement('div');
   panel.className = 'elog-dialog';
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
-  const close = (): void => overlay.remove();
+  // `close` is called from EVERY dismissal path (OK, Cancel, outside-click, Escape) --
+  // it must unregister `onKey` itself, not just the Escape branch, or a `close()` from
+  // OK/Cancel leaves `onKey` listening on `document` forever (a leak on every dialog
+  // open, and worse than a leak for a caller with an `onDismiss`: a LATER, unrelated
+  // Escape press anywhere in the webview would fire the stale listener and re-invoke
+  // `onDismiss` -- e.g. the Custom Nonlinear dialog would silently revert settings the
+  // user already committed via OK, minutes after this dialog closed).
+  const close = (): void => {
+    document.removeEventListener('keydown', onKey, true);
+    overlay.remove();
+  };
   overlay.addEventListener('mousedown', (e) => {
-    if (e.target === overlay) close();
+    if (e.target === overlay) {
+      onDismiss?.();
+      close();
+    }
   });
   const onKey = (e: KeyboardEvent): void => {
     if (e.key === 'Escape') {
+      onDismiss?.();
       close();
-      document.removeEventListener('keydown', onKey, true);
     }
   };
   document.addEventListener('keydown', onKey, true);

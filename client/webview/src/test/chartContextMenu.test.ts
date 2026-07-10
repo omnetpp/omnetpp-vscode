@@ -44,6 +44,8 @@ function fakeActions(): ChartMenuActions & Record<string, unknown> {
     filterCausesConsequences: record('filterCausesConsequences'),
     filterMessage: record('filterMessage'),
     setTimelineMode: record('setTimelineMode'),
+    openCustomNonlinearDialog: record('openCustomNonlinearDialog'),
+    openConfigureStyleDialog: record('openConfigureStyleDialog'),
     zoomIn: record('zoomIn'),
     zoomOut: record('zoomOut'),
     defaultZoom: record('defaultZoom'),
@@ -297,7 +299,25 @@ test('buildChartContextMenu: Timeline Mode submenu has a checked radio matching 
 
   (findEntry(sub, `tm-${TimelineMode.STEP}`) as { onSelect: () => void }).onSelect();
   assert.deepEqual(actions.calls.setTimelineMode, [TimelineMode.STEP]);
-  assert.ok((findEntry(sub, 'tm-custom') as { disabled: boolean }).disabled);
+});
+
+test('buildChartContextMenu: "Custom nonlinear..." is enabled (no longer a disabled placeholder) and opens the dialog', () => {
+  const actions = fakeActions();
+  const entries = buildChartContextMenu(makeParams(actions));
+  const sub = submenuOf(entries, 'timelineMode');
+  const custom = findEntry(sub, 'tm-custom')! as { disabled?: boolean; onSelect: () => void };
+  assert.ok(!custom.disabled);
+  custom.onSelect();
+  assert.ok(actions.calls.openCustomNonlinearDialog);
+});
+
+test('buildChartContextMenu: "Configure Style..." is a top-level static entry and opens the dialog', () => {
+  const actions = fakeActions();
+  const entries = buildChartContextMenu(makeParams(actions));
+  const entry = findEntry(entries, 'configureStyle')! as { label: string; onSelect: () => void };
+  assert.strictEqual(entry.label, 'Configure Style...');
+  entry.onSelect();
+  assert.ok(actions.calls.openConfigureStyleDialog);
 });
 
 test('buildChartContextMenu: Zoom submenu wires all four actions', () => {
@@ -340,11 +360,13 @@ test('buildChartContextMenu: Find Text/Find Next/Refresh wired at the top level'
   assert.ok(actions.calls.refresh);
 });
 
-test('buildChartContextMenu: still-deferred static items (Filter dropdown, Configure Style, etc.) are not present at all', () => {
+test('buildChartContextMenu: still-deferred static items (Filter dropdown, Change Font, etc.) are not present at all', () => {
   const actions = fakeActions();
   const entries = buildChartContextMenu(makeParams(actions));
   const ids = entries.filter((e): e is Extract<MenuEntry, { id: string }> => 'id' in e).map((e) => e.id);
-  for (const deferred of ['filter', 'configureStyle', 'changeFont', 'bookmark', 'pin', 'selfTest', 'showIn']) {
+  // 'configureStyle' is no longer deferred -- see the dedicated "Configure Style..."
+  // test above (item 13's gap closure).
+  for (const deferred of ['filter', 'changeFont', 'bookmark', 'pin', 'selfTest', 'showIn']) {
     assert.ok(!ids.includes(deferred), `"${deferred}" must not appear (deferred to a later phase, or out of this port's scope)`);
   }
 });

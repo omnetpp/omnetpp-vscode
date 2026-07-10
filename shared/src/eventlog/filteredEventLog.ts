@@ -18,6 +18,20 @@
  *    consequences (with depth/count/time-budget limits, self-message and
  *    message-reuse toggles) -- see `isCauseOfTracedEvent()`/`isConsequenceOfTracedEvent()`.
  *
+ * `firstConsideredEventNumber`/`lastConsideredEventNumber` are themselves the union of
+ * FOUR possible bound sources on the Java side (`EventLogFilterParameters.
+ * getFirstEventNumber()`/`getLastEventNumber()`, a UI-layer class, not part of Java's
+ * own `FilteredEventLog`): an explicit event-number range, an explicit
+ * simulation-time range, and the trace filter's own event-number/simulation-time
+ * "delta" limits (how far from `tracedEventNumber` a cause/consequence may be before
+ * it drops out of consideration entirely, independent of the actual causal-graph
+ * walk). This port folds that UI-layer combination into this module too --
+ * `resolveConsideredEventNumberRange()`/`applyConsideredEventNumberRange()` below --
+ * since simulation-time bounds need `IEventLog` lookups (`getLastEventNotAfter
+ * SimulationTime()`/`getFirstEventNotBeforeSimulationTime()`) that only the engine
+ * layer has, not the browser-side filter panel (`filterPanelState.ts`), which only
+ * ever sends the raw, unresolved bound fields over the wire.
+ *
  * Two behavioral deviations from the literal Java source (both NOT reproduced,
  * following the same policy as eventLogEntryCache.ts's documented boxed-type-mismatch
  * note -- these are latent upstream bugs that would either crash or silently disable
@@ -85,6 +99,31 @@
  *    `isConsequenceOfTracedEvent()`) -- cheap to recompute, so per the plan's own
  *    guidance they are simply cleared wholesale once either exceeds
  *    `filteredFlagCacheLimit` (default 2_000_000), rather than LRU-tracked.
+ *
+ * KNOWN PRE-EXISTING QUIRK (found while adding trace-filter delta limits, NOT
+ * introduced by them -- reproduced with nothing but the already-shipped
+ * `setLastConsideredEventNumber()` + a trace filter, no new code involved): the
+ * `isCauseOfTracedEvent()`/`isConsequenceOfTracedEvent()` BFS shares ONE stateful
+ * queue (`unseenTracedEventCauseEventNumbers`/`...ConsequenceEventNumbers`) across
+ * every call, and each queue-processing loop `return`s the moment it finds the exact
+ * event number it was asked about -- so any SIBLING dependency discovered in the same
+ * loop iteration, but not yet reached when the match is found, never gets pushed onto
+ * the queue at all (this is a literal, faithful port of Java's own shape: `if
+ * (newUnseenTracedEventCauseEventNumber == causeEventNumber) return true;` sits INSIDE
+ * the `for` loop in `FilteredEventLog.java` too). Ordinarily the queue is only ever
+ * consulted in ascending (forward walk) or descending (backward walk) event-number
+ * order, which happens to make this harmless. But `FilteredEvent.getNextEvent()`'s
+ * `filteredEventLog.getFirstEvent() !== this` identity check has a side effect of
+ * calling `getLastEvent()` -- a full BACKWARD search -- partway through what looks
+ * like a purely-forward scan; a tight enough `lastConsideredEventNumber` (whether from
+ * the pre-existing event-number range filter or this phase's new delta/simulation-time
+ * bounds) can make that backward search land on, and early-return at, an event whose
+ * sibling dependencies are still unqueued -- silently dropping a genuine
+ * cause/consequence from the result for events between the traced event and that
+ * backward-search landing point. Reproduced and worked around at the TEST level here
+ * (filteredEventLog.test.ts picks delta values whose backward search doesn't fork) --
+ * fixing the underlying queue algorithm is a separate, deeper change than this phase's
+ * scope (adding the delta/range fields and their bound computation).
  */
 
 import { BigDecimal } from './bigDecimal';
@@ -114,6 +153,151 @@ export interface FilteredEventLogOptions {
   filteredEventCacheLimit?: number;
   /** Max size either boolean memoization map (`matchesFilter()`'s / the trace filter's) may reach before it is wholesale-cleared. Default 2_000_000. */
   filteredFlagCacheLimit?: number;
+}
+
+/**
+ * Structural input for `resolveConsideredEventNumberRange()`/
+ * `FilteredEventLog.applyConsideredEventNumberRange()`. Deliberately NOT the wire
+ * `FilterParams` type (`elogProtocol.ts`) -- this "engine" module must not depend on
+ * the protocol layer (dependency direction is protocol -> engine, never the reverse;
+ * see elogProtocol.ts's own header). Any object with a structurally-compatible subset
+ * of fields satisfies this, including a real `FilterParams` (TS structural typing), so
+ * callers (`engineSession.ts`'s `applyFilterParams()`) can just pass their `FilterParams`
+ * straight through.
+ */
+export interface ConsideredEventNumberRangeInput {
+  /** Explicit event-number range bounds -- Java's `lowerEventNumberLimit`/`upperEventNumberLimit` (gated there by `enableEventNumberRangeFilter`; here, by field presence). */
+  firstConsideredEventNumber?: number;
+  lastConsideredEventNumber?: number;
+  /** Explicit simulation-time range bounds (decimal strings) -- Java's `lowerSimulationTimeLimit`/`upperSimulationTimeLimit` (gated there by `enableSimulationTimeRangeFilter`). */
+  lowerSimulationTimeLimit?: string;
+  upperSimulationTimeLimit?: string;
+  /** The traced event -- both delta fields below are relative to it (gated there by `enableTraceFilter`). */
+  tracedEventNumber?: number;
+  /** Trace filter delta limits: bound the cause/consequence collection by event-number distance from `tracedEventNumber` (Java default: 1000, applied by the UI layer -- this module has no defaulting opinion, `undefined` = unbounded). */
+  causeEventNumberDelta?: number;
+  consequenceEventNumberDelta?: number;
+  /** Trace filter delta limits: bound the cause/consequence collection by simulation-time distance from `tracedEventNumber`'s own simulation time (decimal strings; Java default: unset/unbounded). */
+  causeSimulationTimeDelta?: string;
+  consequenceSimulationTimeDelta?: string;
+}
+
+/**
+ * Port of `EventLogFilterParameters.getFirstEventNumber()`/`getLastEventNumber()`
+ * (`omnetpp-dev/ui/org.omnetpp.common/src/org/omnetpp/common/eventlog/
+ * EventLogFilterParameters.java`, verified by reading the source): computes the
+ * combined `{firstConsideredEventNumber, lastConsideredEventNumber}` window
+ * (`-1` = unbounded on that side, matching `FilteredEventLog`'s own sentinel
+ * convention) from up to four independent LOWER-bound sources and four independent
+ * UPPER-bound sources, each contributing `-1`/unbounded when it does not apply:
+ *  - the explicit event-number range (`firstConsideredEventNumber`/`lastConsideredEventNumber`);
+ *  - the explicit simulation-time range (`lowerSimulationTimeLimit`/`upperSimulationTimeLimit`),
+ *    converted to an event number via `eventLog.getLastEventNotAfterSimulationTime()`/
+ *    `getFirstEventNotBeforeSimulationTime()` (both INCLUSIVE of the bound: the event
+ *    landing exactly on the limit, if any, is kept; the range itself has no separate
+ *    "clamp then exclude" step);
+ *  - the trace filter's event-number delta (`tracedEventNumber` -+ `cause`/
+ *    `consequenceEventNumberDelta`);
+ *  - the trace filter's simulation-time delta (`tracedEventNumber`'s own simulation
+ *    time -+ `cause`/`consequenceSimulationTimeDelta`, again converted to an event
+ *    number the same way as the explicit simulation-time range).
+ * The MAXIMUM of the (up to three, since the event-number and simulation-time trace
+ * deltas are two independent sources alongside the plain range) lower-bound sources
+ * wins (the most restrictive lower bound is authoritative -- these are ANDed, not
+ * ORed: an event must satisfy every applicable bound); symmetrically the MINIMUM
+ * upper-bound source wins. This means, for example, a trace filter with BOTH a
+ * `causeEventNumberDelta` and a `causeSimulationTimeDelta` set uses whichever one cuts
+ * off MORE events near `tracedEventNumber` -- they do not independently gate their own
+ * sub-ranges, there is exactly one combined window.
+ *
+ * NOTE: mirrors Java's own `.doubleValue()`-then-reconstruct precision for the delta ->
+ * simulation-time conversion (`new BigDecimal(event.getSimulationTime().doubleValue() -
+ * causeSimulationTimeDelta.doubleValue())`) rather than doing exact `BigDecimal`
+ * subtraction -- ported literally (not a crash/silent-disable bug, just Java's own
+ * chosen precision), per this file's header policy on faithful-but-not-crashing quirks.
+ */
+export function resolveConsideredEventNumberRange(eventLog: IEventLog, params: ConsideredEventNumberRangeInput): { firstConsideredEventNumber: number; lastConsideredEventNumber: number } {
+  // A target simulation time outside the RAW log's own [firstEvent, lastEvent] time
+  // span is not safe to hand to `getLastEventNotAfterSimulationTime()`/
+  // `getFirstEventNotBeforeSimulationTime()` as-is: below the span it can be negative
+  // (the engine asserts `simulationTime >= 0` -- `EventLog.getEventForSimulationTime()`,
+  // C++ `Assert(simulationTime >= 0)` in eventlog.cc, ported verbatim in eventLog.ts),
+  // and above the span it hits a pre-existing `EventLogIndex.searchForOffset()`
+  // invariant-violation crash (verified directly against that method, unrelated to
+  // this function -- out of scope to fix here). Both are entirely ORDINARY inputs for
+  // this feature (any `cause`/`consequenceSimulationTimeDelta` larger than the traced
+  // event's own distance to the log's start/end reaches past the span; a user typing a
+  // generously-large `lowerSimulationTimeLimit`/`upperSimulationTimeLimit` does too),
+  // so this guard checks against the log's actual bounds first and short-circuits to
+  // "no matching event" -- exactly the answer the engine would give anyway if it could
+  // safely be asked (no event exists before the first event or after the last one).
+  // This port's persistent worker process must not crash on an ordinary filter-panel
+  // input, unlike Eclipse's one-shot dialog -- a deliberate robustness addition, not a
+  // literal Java/C++ port (which has no such guard and would crash on this same input).
+  const safeLastEventNotAfter = (simulationTime: BigDecimal): IEvent | null => {
+    const firstEvent = eventLog.getFirstEvent();
+    if (firstEvent === null || simulationTime.less(firstEvent.getSimulationTime())) return null;
+    return eventLog.getLastEventNotAfterSimulationTime(simulationTime);
+  };
+  const safeFirstEventNotBefore = (simulationTime: BigDecimal): IEvent | null => {
+    const lastEvent = eventLog.getLastEvent();
+    if (lastEvent === null || simulationTime.greater(lastEvent.getSimulationTime())) return null;
+    return eventLog.getFirstEventNotBeforeSimulationTime(simulationTime);
+  };
+
+  // ---- lower bound (cause side) ----
+  let lowerTraceEventNumberLimit1 = -1;
+  if (params.tracedEventNumber !== undefined && params.causeEventNumberDelta !== undefined) lowerTraceEventNumberLimit1 = params.tracedEventNumber - params.causeEventNumberDelta;
+
+  let lowerTraceEventNumberLimit2 = -1;
+  if (params.tracedEventNumber !== undefined && params.causeSimulationTimeDelta !== undefined) {
+    const tracedEvent = eventLog.getEventForEventNumber(params.tracedEventNumber);
+    if (tracedEvent !== null) {
+      const delta = BigDecimal.parse(params.causeSimulationTimeDelta);
+      const target = BigDecimal.fromDouble(tracedEvent.getSimulationTime().doubleValue() - delta.doubleValue());
+      const event = safeLastEventNotAfter(target);
+      if (event !== null) lowerTraceEventNumberLimit2 = event.getEventNumber();
+    }
+  }
+
+  let lowerEventNumberForSimulationTimeLimit = -1;
+  if (params.lowerSimulationTimeLimit !== undefined) {
+    const event = safeLastEventNotAfter(BigDecimal.parse(params.lowerSimulationTimeLimit));
+    if (event !== null) lowerEventNumberForSimulationTimeLimit = event.getEventNumber();
+  }
+
+  const lowerEventNumberLimit = params.firstConsideredEventNumber !== undefined ? params.firstConsideredEventNumber : -1;
+
+  const firstConsideredEventNumber = Math.max(Math.max(lowerEventNumberLimit, lowerEventNumberForSimulationTimeLimit), Math.max(lowerTraceEventNumberLimit1, lowerTraceEventNumberLimit2));
+
+  // ---- upper bound (consequence side) -- UNBOUNDED stands in for Java's Long.MAX_VALUE sentinel ----
+  const UNBOUNDED = Number.MAX_SAFE_INTEGER;
+
+  let upperTraceEventNumberLimit1 = UNBOUNDED;
+  if (params.tracedEventNumber !== undefined && params.consequenceEventNumberDelta !== undefined) upperTraceEventNumberLimit1 = params.tracedEventNumber + params.consequenceEventNumberDelta;
+
+  let upperTraceEventNumberLimit2 = UNBOUNDED;
+  if (params.tracedEventNumber !== undefined && params.consequenceSimulationTimeDelta !== undefined) {
+    const tracedEvent = eventLog.getEventForEventNumber(params.tracedEventNumber);
+    if (tracedEvent !== null) {
+      const delta = BigDecimal.parse(params.consequenceSimulationTimeDelta);
+      const target = BigDecimal.fromDouble(tracedEvent.getSimulationTime().doubleValue() + delta.doubleValue());
+      const event = safeFirstEventNotBefore(target);
+      if (event !== null) upperTraceEventNumberLimit2 = event.getEventNumber();
+    }
+  }
+
+  let upperEventNumberForSimulationTimeLimit = UNBOUNDED;
+  if (params.upperSimulationTimeLimit !== undefined) {
+    const event = safeFirstEventNotBefore(BigDecimal.parse(params.upperSimulationTimeLimit));
+    if (event !== null) upperEventNumberForSimulationTimeLimit = event.getEventNumber();
+  }
+
+  const upperEventNumberLimit = params.lastConsideredEventNumber !== undefined ? params.lastConsideredEventNumber : UNBOUNDED;
+
+  const limit = Math.min(Math.min(upperEventNumberLimit, upperEventNumberForSimulationTimeLimit), Math.min(upperTraceEventNumberLimit1, upperTraceEventNumberLimit2));
+
+  return { firstConsideredEventNumber, lastConsideredEventNumber: limit === UNBOUNDED ? -1 : limit };
 }
 
 /** Port of `FilteredEventLog`. */
@@ -275,6 +459,22 @@ export class FilteredEventLog extends EventLogBase implements IEventLog {
   }
   setLastConsideredEventNumber(lastConsideredEventNumber: number): void {
     this.lastConsideredEventNumber = lastConsideredEventNumber;
+  }
+
+  /**
+   * Computes `firstConsideredEventNumber`/`lastConsideredEventNumber` from `params`
+   * (an explicit event-number range, an explicit simulation-time range, and/or a trace
+   * filter's cause/consequence delta limits) and applies them -- port of
+   * `EventLogFilterParameters.getFirstEventNumber()`/`getLastEventNumber()`
+   * (`omnetpp-dev/ui/.../common/eventlog/EventLogFilterParameters.java`, verified by
+   * reading the source) folded into one call, since this port has no separate
+   * "unapplied dialog parameters" object -- see `resolveConsideredEventNumberRange()`'s
+   * own doc comment for the exact combination rule.
+   */
+  applyConsideredEventNumberRange(params: ConsideredEventNumberRangeInput): void {
+    const range = resolveConsideredEventNumberRange(this.eventLog, params);
+    this.firstConsideredEventNumber = range.firstConsideredEventNumber;
+    this.lastConsideredEventNumber = range.lastConsideredEventNumber;
   }
 
   /** Port of `setExcludedEventNumbers()`. NOTE: accumulates into the existing set rather than replacing it (see this file's header). */

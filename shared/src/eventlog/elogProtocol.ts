@@ -68,6 +68,18 @@ export const ElogMethods = {
    * (bounded by its own cap, unlike `setFilter`/`scGetViewport`).
    */
   getFilterHints: 'elog/getFilterHints',
+  /**
+   * request: void → EntryTypeSchema. ADDITIVE (phase U10, table content-assist):
+   * entry-type-code -> attribute-names schema for the Event Log Table's Custom-filter
+   * position-aware content-assist (`entryProposals.ts`'s `computeEntryProposals()`).
+   * Unlike `getFilterHints`, this is entirely static (derived from `entries.ts`'s
+   * generated classes, not from anything the engine has parsed) -- routed through the
+   * worker anyway (`entryTypeSchema.ts`'s `buildEntryTypeSchema()`) for the same reason
+   * `getFilterHints` is: it needs `entries.ts`, which the browser-side webview bundles
+   * must never import (see `entryTypeSchema.ts`'s header) -- the webview fetches this
+   * once (lazily, like `FilterHints`) and computes proposals against it locally.
+   */
+  getEntryTypeSchema: 'elog/getEntryTypeSchema',
   /** request: FilterParams | null → LogSummary -- long-running, cancellable. `null` reverts to the raw (unfiltered) log. */
   setFilter: 'elog/setFilter',
   /** request: ScSetTimelineModeParams → ScState */
@@ -225,6 +237,14 @@ export interface LogSummary {
   coordinateSystemVersion: number;
   /** `true` once `elog/setFilter` has installed a non-null `FilteredEventLog` in place of the raw log. */
   filtered: boolean;
+  /**
+   * ADDITIVE: the eventlog's own run id (`getSimulationBeginEntry().runId`, Java's `rid`
+   * token), or `null` when the log has no `SimulationBeginEntry` yet (e.g. `isEmpty`).
+   * Used by the "Attach Vector to Axis" flow (`sequenceChartEditor.ts`) to warn on a run-id
+   * mismatch against the chosen `.vec` file's run, matching Eclipse's
+   * `SequenceChartContributor.java:1962-1971`.
+   */
+  runId: string | null;
 }
 
 // ---------------------------------------------------------------------------------
@@ -256,6 +276,13 @@ export interface FilterHints {
 }
 
 // ---------------------------------------------------------------------------------
+// elog/getEntryTypeSchema -- phase U10 (table content-assist)
+// ---------------------------------------------------------------------------------
+
+/** Entry-type code (e.g. `"BS"`) -> that entry type's attribute names (e.g. `["id", "c", "t", ...]`), in declaration order. Built engine-side by `entryTypeSchema.ts`'s `buildEntryTypeSchema()`; consumed by `entryProposals.ts`'s `computeEntryProposals()`. */
+export type EntryTypeSchema = Record<string, string[]>;
+
+// ---------------------------------------------------------------------------------
 // elog/setFilter
 // ---------------------------------------------------------------------------------
 
@@ -268,6 +295,17 @@ export interface FilterHints {
 export interface FilterParams {
   firstConsideredEventNumber?: number;
   lastConsideredEventNumber?: number;
+  /**
+   * Simulation-time range bounds (decimal strings, see this file's header), applied
+   * ALONGSIDE `firstConsideredEventNumber`/`lastConsideredEventNumber` -- both dimensions
+   * independently narrow the considered window (most-restrictive-wins), converted to an
+   * event-number bound engine-side via `resolveConsideredEventNumberRange()`
+   * (filteredEventLog.ts, port of `EventLogFilterParameters.getFirstEventNumber()`/
+   * `getLastEventNumber()`). INCLUSIVE of the bound event itself, if simulation time
+   * lands exactly on it.
+   */
+  lowerSimulationTimeLimit?: string;
+  upperSimulationTimeLimit?: string;
   excludedEventNumbers?: number[];
 
   collectMessageReuses?: boolean;
@@ -300,6 +338,23 @@ export interface FilterParams {
   maximumConsequenceDepth?: number;
   maximumNumberOfConsequences?: number;
   maximumConsequenceCollectionTime?: number;
+  /**
+   * Trace filter "delta" limits: bound the OVERALL considered event-number window (not
+   * the cause/consequence collection walk's depth -- that's `maximumCauseDepth` etc.
+   * above) by distance from `tracedEventNumber`, in either event numbers or simulation
+   * time (decimal string). Combines with `firstConsideredEventNumber`/
+   * `lowerSimulationTimeLimit` etc. via most-restrictive-wins -- see
+   * `resolveConsideredEventNumberRange()`'s doc comment (filteredEventLog.ts) for the
+   * exact rule. Port of `EventLogFilterParameters`'s `causeEventNumberDelta`/
+   * `consequenceEventNumberDelta`/`causeSimulationTimeDelta`/
+   * `consequenceSimulationTimeDelta` (Java UI default for the event-number deltas:
+   * 1000; the simulation-time deltas default to unset/unbounded -- this port has no
+   * defaulting opinion at the protocol level, `undefined` = unbounded either way).
+   */
+  causeEventNumberDelta?: number;
+  consequenceEventNumberDelta?: number;
+  causeSimulationTimeDelta?: string;
+  consequenceSimulationTimeDelta?: string;
 }
 
 // ---------------------------------------------------------------------------------
@@ -708,6 +763,19 @@ export interface RenderedTableRow {
   eventNumberSpan: TableSpan;
   simTimeSpan: TableSpan;
   detailSpans: TableSpan[];
+  /**
+   * Port of `EventLogTableRowRenderer.getImage()`'s icon-id computation (a bundled
+   * `_internal/eventlog/<id>.png`, see `scripts/gen-icons.mjs`): the entry's class name
+   * with the trailing `Entry` stripped (e.g. `BeginSendEntry` -> `"BeginSend"`), with two
+   * overrides checked first -- an `EventEntry` whose event `isSelfMessageProcessingEvent()`
+   * renders as `"SelfEvent"` instead of `"Event"`, and a `BeginSendEntry` immediately
+   * followed (within the same event) by an `EndSendEntry` (the "scheduleAt" pattern --
+   * `IEvent.isSelfMessage()`'s own definition) renders as `"ScheduleAt"` instead of
+   * `"BeginSend"`. Always populated (both DESCRIPTIVE and RAW modes) -- the webview omits
+   * the icon gracefully if this id has no matching bundled asset (e.g. a future entry
+   * type this port doesn't know about yet).
+   */
+  iconId: string;
 }
 
 export interface RowWindow {

@@ -1,8 +1,10 @@
 import { fileURLToPath } from 'node:url';
-import { promises as fsp } from 'node:fs';
+import { existsSync, promises as fsp } from 'node:fs';
+import { join } from 'node:path';
 import type { TextDocument } from 'vscode-languageserver-textdocument';
 import { ParserService, parseIni } from '@omnetpp/shared';
 import type { ActiveConfig, IniDocument } from '@omnetpp/shared';
+import { createNodeIconProvider, listIconIds } from '@omnetpp/shared/node';
 import { DocumentModelStore } from './documentModel';
 import { ProjectIndex } from './projectIndex';
 import type { IndexContext } from './features/context';
@@ -26,6 +28,16 @@ export class ServerState {
   iniParamCodeLensEnabled = true;
   /** Whether the client declared dynamic-registration support for watched files. */
   canRegisterWatchers = false;
+  /** Lazily-computed, cached icon-id list for display-string image completion
+   *  (`i=`/`i2=`/`bgi=`, see `iconIds()`/`invalidateIconIds()` below) — undefined
+   *  means "not computed yet"; recomputed on first use after a cache clear. */
+  iconIdsCache: string[] | undefined;
+  /** Lazily-created, cached icon provider for `completionItem/resolve`'s
+   *  on-demand icon-preview embedding (`iconProvider()`/`invalidateIconProvider()`
+   *  below) — undefined means "not created yet"; recreated on first use after
+   *  a cache clear (same trigger as `iconIdsCache`, since both derive from the
+   *  same icon search roots). */
+  iconProviderCache: ReturnType<typeof createNodeIconProvider> | undefined;
 
   /**
    * The globally-selected active configuration, pushed by the client. Its effective
@@ -48,7 +60,57 @@ export function ctx(state: ServerState): IndexContext | undefined {
     iniCache: index.iniCache,
     // open buffer (unsaved edits) wins over the on-disk index
     getIniDoc: (uri: string) => state.store?.get(uri)?.ini ?? index.iniCache.getDoc(uri),
+    iconIds: iconIds(state),
   };
+}
+
+/**
+ * Ordered icon search roots: workspace `images/` dirs → `installDir/images` →
+ * the bundled `dist/icons` snapshot. The exact construction `docsRequests.ts`
+ * uses for doc-generation diagrams; reused here so display-string icon-name
+ * completion (`iconIds` below) sees the same search order/precedence.
+ */
+export function iconDirs(state: ServerState): string[] {
+  return [
+    ...state.workspaceFolders.map((d) => join(d, 'images')).filter(existsSync),
+    ...(state.installDir ? [join(state.installDir, 'images')] : []),
+    join(__dirname, 'icons'),
+  ];
+}
+
+/**
+ * All available icon ids for display-string `i=`/`i2=`/`bgi=` completion,
+ * computed once per session (or since the last `invalidateIconIds`) — a
+ * filesystem walk on every completion request would be too slow since
+ * completion fires on every keystroke.
+ */
+export function iconIds(state: ServerState): string[] {
+  if (state.iconIdsCache === undefined) state.iconIdsCache = listIconIds(iconDirs(state));
+  return state.iconIdsCache;
+}
+
+/** Drop the cached icon-id list; call after `installDir`/`workspaceFolders` change. */
+export function invalidateIconIds(state: ServerState): void {
+  state.iconIdsCache = undefined;
+}
+
+/**
+ * The icon provider used to lazily embed a `data:image/...;base64,...` preview
+ * when resolving a display-string icon-name completion item
+ * (`server/src/features/completionResolve.ts`). Built once per session (or
+ * since the last `invalidateIconProvider`) over the same search roots as
+ * `iconIds()`, in `'embed'` mode so `.get()` returns self-contained data URIs.
+ */
+export function iconProvider(state: ServerState): ReturnType<typeof createNodeIconProvider> {
+  if (state.iconProviderCache === undefined) {
+    state.iconProviderCache = createNodeIconProvider({ iconDirs: iconDirs(state), emit: 'embed' });
+  }
+  return state.iconProviderCache;
+}
+
+/** Drop the cached icon provider; call after `installDir`/`workspaceFolders` change. */
+export function invalidateIconProvider(state: ServerState): void {
+  state.iconProviderCache = undefined;
 }
 
 export function currentNedPathDirs(state: ServerState): string[] {

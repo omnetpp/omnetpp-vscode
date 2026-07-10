@@ -1,6 +1,7 @@
 import { test } from 'bun:test';
 import assert from 'node:assert';
 import { TimelineMode, type RenderDependency, type RenderMethodCall, type TimelineEvent } from '@omnetpp/shared/elog-protocol';
+import { defaultStyleRuleSettings, StyleRuleResolver, type StyleRuleSettings } from '@omnetpp/shared/style-rules';
 import type { EventLogPalette } from '../eventlog/common/theme';
 import { AUTO_AXIS_SPACING, AXIS_VECTOR_STRIP_HEIGHT, deriveAxes, layoutAxes } from '../eventlog/chart/axes';
 import { calculateAxisHeaders } from '../eventlog/chart/axisHeaders';
@@ -759,4 +760,136 @@ test('U8 moduleIdToAxisModuleId: events/deps of a closed submodule draw on the a
 
   const withoutMap = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: orphanEvents, dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, displayFlags: DEFAULT_DISPLAY_FLAGS });
   assert.equal(withoutMap.filter((p) => p.kind === 'eventMark').length, 0, 'pre-U8 behavior without the map: no axis, no mark');
+});
+
+// ---------------------------------------------------------------------------------
+// Configure Style dialog wiring (item 13) -- verifies drawList.ts actually CONSULTS a
+// supplied StyleRuleResolver at each of the six category call sites, and that omitting
+// it (the default in every test above) leaves every color at its pre-existing default
+// unchanged (non-regression, already exercised implicitly by every test above passing
+// unmodified -- these tests additionally pin down the WIRING itself).
+// ---------------------------------------------------------------------------------
+
+function styleSettingsWith(overrides: Partial<StyleRuleSettings>): StyleRuleSettings {
+  return { ...defaultStyleRuleSettings(), ...overrides };
+}
+
+test('styleRuleResolver omitted: axis/event/arrow colors are exactly the pre-existing defaults', () => {
+  const primitives = draw();
+  const axisLine = primitives.find((p) => p.kind === 'axisLine')!;
+  assert.strictEqual((axisLine as { color: string }).color, theme.foreground);
+});
+
+test('Configure Style "Axes" category overrides the axis line + label color (matched against the LOCAL axis label)', () => {
+  // NOTE: the pattern is quoted -- MatchExpression's lexer treats a bare space as a
+  // token boundary (see shared/src/match/matchExpression.ts's header), so an unquoted
+  // "Module #1" would parse as two adjacent STRINGLITERALs (a parse error) rather than
+  // one pattern; `"..."` keeps it a single quoted-string token.
+  const resolver = new StyleRuleResolver(styleSettingsWith({ axes: { enabled: true, rules: [{ pattern: '"Module #1"', colors: 'red' }] } }));
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, displayFlags: DEFAULT_DISPLAY_FLAGS, styleRuleResolver: resolver });
+  const line1 = primitives.find((p) => p.kind === 'axisLine' && p.moduleId === 1) as { color: string };
+  const line2 = primitives.find((p) => p.kind === 'axisLine' && p.moduleId === 2) as { color: string };
+  const label1 = primitives.find((p) => p.kind === 'axisLabel' && p.moduleId === 1) as { color: string };
+  assert.strictEqual(line1.color, '#ff0000');
+  assert.strictEqual(label1.color, '#ff0000');
+  assert.strictEqual(line2.color, theme.foreground, 'module 2 does not match the "Module #1" pattern, stays default');
+});
+
+test('Configure Style "Axis headers" category overrides the header band color (matched against the header module\'s local name)', () => {
+  const resolver = new StyleRuleResolver(styleSettingsWith({ axisHeaders: { enabled: true, rules: [{ pattern: 'Net', colors: 'red' }] } }));
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const axisHeaderRoot = calculateAxisHeaders([2, 3], (id) => (id === 2 ? 'Net.host1' : 'Net.host2'));
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, displayFlags: DEFAULT_DISPLAY_FLAGS, axisHeaderRoot, styleRuleResolver: resolver, resolveModuleIdentity: (id) => (id === 1 ? { localName: 'Net', fullPath: 'Net' } : null) });
+  const header = primitives.find((p) => p.kind === 'axisHeaderBox') as { color: string };
+  assert.strictEqual(header.color, '#ff0000');
+});
+
+test('Configure Style "Events"/"Self events" categories override event marks, matched against the FULL module path, independently per category', () => {
+  const resolver = new StyleRuleResolver(
+    styleSettingsWith({
+      events: { enabled: true, rules: [{ pattern: 'Net.host1', colors: 'red' }] },
+      selfEvents: { enabled: true, rules: [{ pattern: 'Net.host2', colors: 'blue' }] },
+    }),
+  );
+  const viewport = baseViewport();
+  const testEvents: TimelineEvent[] = [event_(1, 1, 0), event_(2, 2, 10, { isSelfMessageProcessingEvent: true })];
+  const axesLayout = deriveAxes(new Set([1, 2]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const resolveModuleIdentity = (id: number) => (id === 1 ? { localName: 'host1', fullPath: 'Net.host1' } : id === 2 ? { localName: 'host2', fullPath: 'Net.host2' } : null);
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: testEvents, dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, displayFlags: DEFAULT_DISPLAY_FLAGS, styleRuleResolver: resolver, resolveModuleIdentity });
+  const eventMark = primitives.find((p) => p.kind === 'eventMark') as { color: string };
+  const selfMark = primitives.find((p) => p.kind === 'selfEventMark') as { color: string };
+  assert.strictEqual(eventMark.color, '#ff0000');
+  assert.strictEqual(selfMark.color, '#0000ff');
+});
+
+test('Configure Style "Events" category: an event whose module identity is unresolved (no module tree yet) keeps its default color', () => {
+  const resolver = new StyleRuleResolver(styleSettingsWith({ events: { enabled: true, rules: [{ pattern: '*', colors: 'red' }] } }));
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport: baseViewport(), events: [event_(1, 1, 0)], dependencies: [], methodCalls: [], axesLayout: deriveAxes(new Set([1]), null, 400), ticks: [], theme, displayFlags: DEFAULT_DISPLAY_FLAGS, styleRuleResolver: resolver /* resolveModuleIdentity intentionally omitted */ });
+  const eventMark = primitives.find((p) => p.kind === 'eventMark') as { color: string };
+  assert.strictEqual(eventMark.color, theme.eventColor);
+});
+
+test('Configure Style "Message sends" category overrides a plain send arrow\'s color, but NOT a reuse/filtered arrow\'s (Java: messageSendColorFallback is only consulted for plain sends)', () => {
+  const resolver = new StyleRuleResolver(styleSettingsWith({ messageSends: { enabled: true, rules: [{ pattern: 'msg', colors: 'red' }] } }));
+  const viewport = baseViewport();
+  const primitives = buildDrawList({
+    timelineMode: TimelineMode.SIMULATION_TIME,
+    viewport,
+    events: events3,
+    dependencies: deps4,
+    methodCalls: [],
+    axesLayout: deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT),
+    ticks: [],
+    theme,
+    displayFlags: BASE_TEST_FLAGS,
+    styleRuleResolver: resolver,
+  });
+  const sendArrow = primitives.find((p) => p.kind === 'arrow' && (p as { arrowKind: string }).arrowKind === 'send') as { color: string };
+  const reuseArrow = primitives.find((p) => p.kind === 'arrow' && (p as { arrowKind: string }).arrowKind === 'reuse') as { color: string };
+  assert.strictEqual(sendArrow.color, '#ff0000');
+  assert.notStrictEqual(reuseArrow.color, '#ff0000');
+});
+
+test('Configure Style "Message sends" category: pattern can match the class name via the "c" attribute', () => {
+  const resolver = new StyleRuleResolver(styleSettingsWith({ messageSends: { enabled: true, rules: [{ pattern: 'c =~ "cMessage"', colors: 'red' }] } }));
+  const viewport = baseViewport();
+  const primitives = buildDrawList({
+    timelineMode: TimelineMode.SIMULATION_TIME,
+    viewport,
+    events: events3,
+    dependencies: [deps4[0]],
+    methodCalls: [],
+    axesLayout: deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT),
+    ticks: [],
+    theme,
+    displayFlags: BASE_TEST_FLAGS,
+    styleRuleResolver: resolver,
+  });
+  const sendArrow = primitives.find((p) => p.kind === 'arrow' && (p as { arrowKind: string }).arrowKind === 'send') as { color: string };
+  assert.strictEqual(sendArrow.color, '#ff0000');
+});
+
+test('Configure Style "Method calls" category overrides the call arrow color, matched against the method name', () => {
+  const resolver = new StyleRuleResolver(styleSettingsWith({ methodCalls: { enabled: true, rules: [{ pattern: 'doStuff', colors: 'red' }] } }));
+  const primitives = draw(baseViewport(), events3, [], [{ eventNumber: 1, tc: 5, sourceModuleId: 1, targetModuleId: 2, methodName: 'doStuff' }]);
+  const withoutResolver = primitives.find((p) => p.kind === 'arrow' && (p as { arrowKind: string }).arrowKind === 'method') as { color: string };
+  assert.strictEqual(withoutResolver.color, theme.methodCallColor);
+
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const styled = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: events3, dependencies: [], methodCalls: [{ eventNumber: 1, tc: 5, sourceModuleId: 1, targetModuleId: 2, methodName: 'doStuff' }], axesLayout, ticks: [], theme, displayFlags: BASE_TEST_FLAGS, styleRuleResolver: resolver });
+  const styledArrow = styled.find((p) => p.kind === 'arrow' && (p as { arrowKind: string }).arrowKind === 'method') as { color: string };
+  assert.strictEqual(styledArrow.color, '#ff0000');
+});
+
+test('Configure Style: disabled category is a no-op even with rules configured (matches StyleRuleResolver.resolve()\'s own gating)', () => {
+  const resolver = new StyleRuleResolver(styleSettingsWith({ axes: { enabled: false, rules: [{ pattern: '*', colors: 'red' }] } }));
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([1]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, displayFlags: DEFAULT_DISPLAY_FLAGS, styleRuleResolver: resolver });
+  const line = primitives.find((p) => p.kind === 'axisLine') as { color: string };
+  assert.strictEqual(line.color, theme.foreground);
 });

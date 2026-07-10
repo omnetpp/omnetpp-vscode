@@ -314,9 +314,27 @@ export class EventLogSession {
     this.broadcast({ type: 'reveal', target });
   }
 
-  /** Forwards an arbitrary host command (editor/title, view/title) to every attached webview -- mirrors `NedPreviewPanel.sendCommand()`. */
-  sendCommand(command: string, args?: unknown): void {
-    this.broadcast({ type: 'command', command, args });
+  /**
+   * Forwards an arbitrary host command (editor/title, view/title) to attached
+   * webview(s) -- mirrors `NedPreviewPanel.sendCommand()`. `target`, if given,
+   * restricts delivery to only the chart or only the table sinks (Table find parity
+   * gap-closure: `eventLogDialogs.ts`'s `findText`/`findNext` commands route to
+   * whichever of the two currently has focus, and both a chart AND a table can be
+   * attached to the same session simultaneously -- broadcasting a find command to
+   * both would pop the chart's dialog AND drive the table's find bar at once).
+   * Omitted (the default, every other caller) broadcasts to both, unchanged.
+   */
+  sendCommand(command: string, args?: unknown, target?: AttachmentKind): void {
+    const message: HostToWebviewMessage = { type: 'command', command, args };
+    if (target === 'chart') {
+      for (const sink of this.chartSinks) sink.postMessage(message);
+      return;
+    }
+    if (target === 'table') {
+      for (const sink of this.tableSinks) sink.postMessage(message);
+      return;
+    }
+    this.broadcast(message);
   }
 
   // ---- open-filter-on-attach (phase U7: "if no chart editor visible, open one") -------
@@ -378,6 +396,8 @@ export class EventLogSession {
         return wc.getModuleTree(token);
       case ElogMethods.getFilterHints:
         return wc.getFilterHints(token);
+      case ElogMethods.getEntryTypeSchema:
+        return wc.getEntryTypeSchema(token);
       case ElogMethods.setFilter:
         return this.setFilter(params as FilterParams | null, token);
       case ElogMethods.scSetTimelineMode:

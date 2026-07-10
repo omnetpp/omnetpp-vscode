@@ -14,7 +14,7 @@ export function computeCompletion(
   if (!parsed.tree) return [];
   if (parsed.language === 'ned') {
     const file = ctx.nedCache.getFile(parsed.uri);
-    return file ? nedCompletion(ctx.nedCache, file, file.tree, pos, line) : [];
+    return file ? nedCompletion(ctx.nedCache, file, file.tree, pos, line, ctx.iconIds) : [];
   }
   if (parsed.language === 'msg') {
     const file = ctx.msgCache.getFile(parsed.uri);

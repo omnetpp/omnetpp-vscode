@@ -81,8 +81,8 @@ export function registerEventLog(context: vscode.ExtensionContext, client?: Lang
     vscode.commands.registerCommand('omnetpp.eventlog.openFilter', () => void openFilterCommand(controller, tableView)),
     vscode.commands.registerCommand('omnetpp.eventlog.gotoEvent', () => gotoEventCommand(controller)),
     vscode.commands.registerCommand('omnetpp.eventlog.gotoSimulationTime', () => gotoSimulationTimeCommand(controller)),
-    vscode.commands.registerCommand('omnetpp.eventlog.findText', () => findTextCommand(controller)),
-    vscode.commands.registerCommand('omnetpp.eventlog.findNext', () => findNextCommand(controller)),
+    vscode.commands.registerCommand('omnetpp.eventlog.findText', () => findTextCommand(controller, tableView)),
+    vscode.commands.registerCommand('omnetpp.eventlog.findNext', () => findNextCommand(controller, tableView)),
     vscode.commands.registerCommand('omnetpp.eventlog.showBookmarks', () => showBookmarksCommand(controller, tableView.getBoundSession())),
     // Phase U9 -- export/polish
     vscode.commands.registerCommand('omnetpp.eventlog.exportSvg', () => exportSvgCommand(controller)),

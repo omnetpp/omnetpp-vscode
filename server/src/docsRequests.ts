@@ -20,7 +20,7 @@ import {
   type NeddocOptions,
 } from '@omnetpp/shared';
 import { createNodeIconProvider } from '@omnetpp/shared/node';
-import type { ServerState } from './serverState';
+import { iconDirs as computeIconDirs, type ServerState } from './serverState';
 
 export function registerDocsRequests(connection: Connection, state: ServerState): void {
   connection.onRequest(OmnetppMethods.generateDocs, async (params: GenerateDocsParams, token): Promise<GenerateDocsResult> => {
@@ -103,11 +103,7 @@ export function registerDocsRequests(connection: Connection, state: ServerState)
     };
 
     // icons: workspace images/ dirs → installDir/images → bundled dist/icons
-    const iconDirs = [
-      ...folders.map((d) => join(d, 'images')).filter(existsSync),
-      ...(state.installDir ? [join(state.installDir, 'images')] : []),
-      join(__dirname, 'icons'),
-    ];
+    const iconDirs = computeIconDirs(state);
     let bundledIndex: Record<string, [number, number]> | undefined;
     try {
       bundledIndex = (JSON.parse(readFileSync(join(__dirname, 'icons', 'index.json'), 'utf8')) as {

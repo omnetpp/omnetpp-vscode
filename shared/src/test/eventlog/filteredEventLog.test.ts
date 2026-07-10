@@ -17,7 +17,7 @@ import { EventLog } from '../../eventlog/eventLog';
 import type { Event } from '../../eventlog/event';
 import { FileReader } from '../../eventlog/fileReader';
 import { FilteredEvent } from '../../eventlog/filteredEvent';
-import { FilteredEventLog } from '../../eventlog/filteredEventLog';
+import { FilteredEventLog, resolveConsideredEventNumberRange } from '../../eventlog/filteredEventLog';
 import { FilteredMessageDependency } from '../../eventlog/messageDependency';
 import { MatchKind } from '../../eventlog/enums';
 import type { IEvent } from '../../eventlog/ieventlog';
@@ -596,4 +596,189 @@ test('FilteredEvent: getConsequences() count cutoff (maximumNumberOfConsequences
   const limited = capped.getEventForEventNumber(1)!.getConsequences();
   assert.equal(limited.length, 1);
   assert.ok(limited[0].getConsequenceEventNumber() === 4 || limited[0].getConsequenceEventNumber() === 5);
+});
+
+// ---------------------------------------------------------------------------------
+// 6. resolveConsideredEventNumberRange()/applyConsideredEventNumberRange(): the
+// combined event-number/simulation-time range filter + trace filter delta limits.
+// Port of EventLogFilterParameters.getFirstEventNumber()/getLastEventNumber(); see
+// filteredEventLog.ts's doc comment on resolveConsideredEventNumberRange() for the
+// exact "most-restrictive-source-wins" combination rule.
+// ---------------------------------------------------------------------------------
+
+test('resolveConsideredEventNumberRange: nothing set -> unbounded on both sides', () => {
+  const eventLog = openEventLog(synthesizeEventLog({ eventCount: 10 }).text);
+  const range = resolveConsideredEventNumberRange(eventLog, {});
+  assert.deepEqual(range, { firstConsideredEventNumber: -1, lastConsideredEventNumber: -1 });
+});
+
+test('resolveConsideredEventNumberRange: explicit event-number range only, passes through unchanged', () => {
+  const eventLog = openEventLog(synthesizeEventLog({ eventCount: 30 }).text);
+  const range = resolveConsideredEventNumberRange(eventLog, { firstConsideredEventNumber: 5, lastConsideredEventNumber: 20 });
+  assert.deepEqual(range, { firstConsideredEventNumber: 5, lastConsideredEventNumber: 20 });
+});
+
+test('resolveConsideredEventNumberRange: explicit simulation-time range, bounds land exactly on events -> INCLUSIVE', () => {
+  // synthesizeEventLog's default simTimeForEvent(i) == String(i), so event #N has simulation time N.
+  const eventLog = openEventLog(synthesizeEventLog({ eventCount: 30 }).text);
+  const range = resolveConsideredEventNumberRange(eventLog, { lowerSimulationTimeLimit: '5', upperSimulationTimeLimit: '20' });
+  assert.deepEqual(range, { firstConsideredEventNumber: 5, lastConsideredEventNumber: 20 });
+});
+
+test('resolveConsideredEventNumberRange: explicit simulation-time range, bounds BETWEEN events snap inward (last-not-after / first-not-before)', () => {
+  const eventLog = openEventLog(synthesizeEventLog({ eventCount: 30 }).text);
+  const range = resolveConsideredEventNumberRange(eventLog, { lowerSimulationTimeLimit: '5.5', upperSimulationTimeLimit: '20.5' });
+  // last event not after 5.5 -> #5; first event not before 20.5 -> #21.
+  assert.deepEqual(range, { firstConsideredEventNumber: 5, lastConsideredEventNumber: 21 });
+});
+
+test('resolveConsideredEventNumberRange: simulation-time bound outside the log\'s own time span contributes no constraint (Java: null event -> unused)', () => {
+  const eventLog = openEventLog(synthesizeEventLog({ eventCount: 30 }).text);
+  const belowAll = resolveConsideredEventNumberRange(eventLog, { lowerSimulationTimeLimit: '-10' });
+  assert.equal(belowAll.firstConsideredEventNumber, -1);
+  const aboveAll = resolveConsideredEventNumberRange(eventLog, { upperSimulationTimeLimit: '1000' });
+  assert.equal(aboveAll.lastConsideredEventNumber, -1);
+});
+
+test('resolveConsideredEventNumberRange: event-number range AND simulation-time range combine via most-restrictive-wins (max lower / min upper)', () => {
+  const eventLog = openEventLog(synthesizeEventLog({ eventCount: 30 }).text);
+  // event-number range says [2, 25]; simulation-time range says [10, 15] (== event numbers 10..15,
+  // since simtime == event number here) -- the tighter bound wins on each side.
+  const range = resolveConsideredEventNumberRange(eventLog, {
+    firstConsideredEventNumber: 2,
+    lastConsideredEventNumber: 25,
+    lowerSimulationTimeLimit: '10',
+    upperSimulationTimeLimit: '15',
+  });
+  assert.deepEqual(range, { firstConsideredEventNumber: 10, lastConsideredEventNumber: 15 });
+});
+
+// ---- trace filter delta limits: uses the same hand-built causal graph as section 4
+// above (traceFixtureText(), tracedEventNumber=2 @ t=1): #1 t=0, #2 t=1, #3 t=1,
+// #4 t=1.5, #5 t=2, #6 t=3, #7 t=4. ----
+
+test('resolveConsideredEventNumberRange: trace filter, causeEventNumberDelta only', () => {
+  const eventLog = openEventLog(traceFixtureText());
+  assert.equal(resolveConsideredEventNumberRange(eventLog, { tracedEventNumber: 2, causeEventNumberDelta: 0 }).firstConsideredEventNumber, 2);
+  assert.equal(resolveConsideredEventNumberRange(eventLog, { tracedEventNumber: 2, causeEventNumberDelta: 1 }).firstConsideredEventNumber, 1);
+  // no cap set at all -> unbounded, even though tracedEventNumber is set.
+  assert.equal(resolveConsideredEventNumberRange(eventLog, { tracedEventNumber: 2 }).firstConsideredEventNumber, -1);
+});
+
+test('resolveConsideredEventNumberRange: trace filter, consequenceEventNumberDelta only', () => {
+  const eventLog = openEventLog(traceFixtureText());
+  assert.equal(resolveConsideredEventNumberRange(eventLog, { tracedEventNumber: 2, consequenceEventNumberDelta: 2 }).lastConsideredEventNumber, 4);
+  assert.equal(resolveConsideredEventNumberRange(eventLog, { tracedEventNumber: 2, consequenceEventNumberDelta: 3 }).lastConsideredEventNumber, 5);
+});
+
+test('resolveConsideredEventNumberRange: trace filter, causeSimulationTimeDelta only -- converts to an event number via getLastEventNotAfterSimulationTime', () => {
+  const eventLog = openEventLog(traceFixtureText());
+  // traced (#2) is at t=1; delta 0.5 -> target t=0.5 -> last event not after 0.5 is #1 (t=0).
+  assert.equal(resolveConsideredEventNumberRange(eventLog, { tracedEventNumber: 2, causeSimulationTimeDelta: '0.5' }).firstConsideredEventNumber, 1);
+  // delta large enough that the target time (1 - 10 = -9) is before the whole log -> no constraint.
+  assert.equal(resolveConsideredEventNumberRange(eventLog, { tracedEventNumber: 2, causeSimulationTimeDelta: '10' }).firstConsideredEventNumber, -1);
+});
+
+test('resolveConsideredEventNumberRange: trace filter, consequenceSimulationTimeDelta only -- converts to an event number via getFirstEventNotBeforeSimulationTime', () => {
+  const eventLog = openEventLog(traceFixtureText());
+  // traced (#2) is at t=1; delta 1 -> target t=2 -> first event not before 2 is #5 (t=2).
+  assert.equal(resolveConsideredEventNumberRange(eventLog, { tracedEventNumber: 2, consequenceSimulationTimeDelta: '1' }).lastConsideredEventNumber, 5);
+});
+
+test('resolveConsideredEventNumberRange: trace filter, BOTH event-number and simulation-time deltas set -> most restrictive (max lower / min upper) wins', () => {
+  const eventLog = openEventLog(traceFixtureText());
+  // causeEventNumberDelta=0 -> lower candidate 2; causeSimulationTimeDelta="1" -> target t=0,
+  // last-not-after(0) lands on #0 (t=0, tie with #1 which is also t=0 -- FIRST_OR_PREVIOUS's
+  // documented quirk lands on the FIRST of a tied run) -> lower candidate 0. max(2, 0) = 2.
+  const range = resolveConsideredEventNumberRange(eventLog, { tracedEventNumber: 2, causeEventNumberDelta: 0, causeSimulationTimeDelta: '1' });
+  assert.equal(range.firstConsideredEventNumber, 2);
+});
+
+test('resolveConsideredEventNumberRange: trace filter, neither delta set -> unbounded (matches plain trace filter behavior, no extra restriction)', () => {
+  const eventLog = openEventLog(traceFixtureText());
+  const range = resolveConsideredEventNumberRange(eventLog, { tracedEventNumber: 2 });
+  assert.deepEqual(range, { firstConsideredEventNumber: -1, lastConsideredEventNumber: -1 });
+});
+
+test('resolveConsideredEventNumberRange: no tracedEventNumber -> trace deltas are ignored entirely', () => {
+  const eventLog = openEventLog(traceFixtureText());
+  const range = resolveConsideredEventNumberRange(eventLog, { causeEventNumberDelta: 0, consequenceEventNumberDelta: 0, causeSimulationTimeDelta: '0', consequenceSimulationTimeDelta: '0' });
+  assert.deepEqual(range, { firstConsideredEventNumber: -1, lastConsideredEventNumber: -1 });
+});
+
+// ---- end-to-end: applyConsideredEventNumberRange() actually gates matchesEvent() (not
+// just resolves a number), verified against the real trace-filtered output. ----
+
+test('FilteredEventLog: applyConsideredEventNumberRange() + trace filter -- a causeEventNumberDelta of 0 excludes an event that WOULD otherwise be a genuine cause', () => {
+  const eventLog = openEventLog(traceFixtureText());
+  const filteredLog = new FilteredEventLog(eventLog);
+  filteredLog.setTracedEventNumber(2);
+  filteredLog.setTraceCauses(true);
+  filteredLog.setTraceConsequences(false);
+  // Without any delta limit, #1 is included (see "trace filter, causes only" above).
+  filteredLog.applyConsideredEventNumberRange({ tracedEventNumber: 2, causeEventNumberDelta: 0 });
+  assert.deepEqual(filteredEventNumbersForward(filteredLog), [2]);
+});
+
+test('FilteredEventLog: applyConsideredEventNumberRange() + trace filter -- a consequenceSimulationTimeDelta trims the consequence side', () => {
+  const eventLog = openEventLog(traceFixtureText());
+  const filteredLog = new FilteredEventLog(eventLog);
+  filteredLog.setTracedEventNumber(2);
+  filteredLog.setTraceCauses(false);
+  filteredLog.setTraceConsequences(true);
+  // Without any delta limit: [2, 4, 5, 7] (see "trace filter, consequences only" above).
+  // consequenceSimulationTimeDelta="0.5" -> target t=1.5 -> lastConsideredEventNumber=4
+  // (the first event not before 1.5 is #4 itself) -> #5 (t=2) and #7 (t=4) drop out.
+  filteredLog.applyConsideredEventNumberRange({ tracedEventNumber: 2, consequenceSimulationTimeDelta: '0.5' });
+  assert.deepEqual(filteredEventNumbersForward(filteredLog), [2, 4]);
+});
+
+test('FilteredEventLog: CHARACTERIZATION of the pre-existing BFS ordering quirk (see filteredEventLog.ts header, "KNOWN PRE-EXISTING QUIRK") -- consequenceSimulationTimeDelta="1" silently drops the genuine consequence #4', () => {
+  const eventLog = openEventLog(traceFixtureText());
+  const filteredLog = new FilteredEventLog(eventLog);
+  filteredLog.setTracedEventNumber(2);
+  filteredLog.setTraceCauses(false);
+  filteredLog.setTraceConsequences(true);
+  // consequenceSimulationTimeDelta="1" -> target t=2 -> lastConsideredEventNumber=5, which
+  // makes getLastEvent()'s backward search land on #5 directly (a fork point in the causal
+  // graph) instead of #7 -- the shared BFS queue's early-return-on-match then never queues
+  // #4 as a sibling, so it is WRONGLY excluded even though #4 (event number 4) is well
+  // inside the [2, 5] considered range and genuinely IS a consequence of #2 (confirmed by
+  // the unrestricted "trace filter, consequences only" test above, which correctly
+  // includes it as [2, 4, 5, 7]). This is a pre-existing algorithmic limitation, not
+  // something this phase's delta/range computation introduces (reproducible with nothing
+  // but the already-shipped setLastConsideredEventNumber(5) too -- see the header note).
+  // Pinned here on purpose so the wrong output stays visible in the suite instead of
+  // silently living only in a comment.
+  filteredLog.applyConsideredEventNumberRange({ tracedEventNumber: 2, consequenceSimulationTimeDelta: '1' });
+  assert.deepEqual(filteredEventNumbersForward(filteredLog), [2, 5], 'KNOWN BUG: #4 is a genuine consequence within range but is dropped -- see this test\'s comment');
+});
+
+test('FilteredEventLog: applyConsideredEventNumberRange() with the filter panel\'s DEFAULT trace deltas (1000/1000) on a log large enough for the default to actually bind (not a no-op)', () => {
+  // Regression coverage for the "default configuration is unexercised" gap: every other
+  // trace-delta test above uses a small hand-picked delta on a ~8-event fixture, where a
+  // delta of 1000 would never actually narrow anything. This uses a plain 2500-event log
+  // (event number == simulation time, via synthesizeEventLog) with the traced event near
+  // the middle, exactly like the filter panel's own DEFAULT_FILTER_PANEL_STATE
+  // (causeEventNumberDelta/consequenceEventNumberDelta = 1000, matching
+  // EventLogFilterParameters.java's own field initializers) would send for an ordinary
+  // "just check trace filter and pick an event" interaction on a real, larger elog file.
+  const { text } = synthesizeEventLog({ eventCount: 2500 });
+  const eventLog = openEventLog(text);
+  const traced = 1250;
+  const range = resolveConsideredEventNumberRange(eventLog, { tracedEventNumber: traced, causeEventNumberDelta: 1000, consequenceEventNumberDelta: 1000 });
+  // The default actually bites (narrower than the log's own [0, 2499] extent), unlike a
+  // small-fixture test where min(lastEvent, traced+1000) always degenerates to lastEvent.
+  assert.deepEqual(range, { firstConsideredEventNumber: traced - 1000, lastConsideredEventNumber: traced + 1000 });
+  assert.ok(range.firstConsideredEventNumber > 0 && range.lastConsideredEventNumber < 2499, 'the default delta must be an actual (non-degenerate) restriction on a log this size');
+});
+
+test('FilteredEventLog: applyConsideredEventNumberRange() combines an explicit event-number range with a simulation-time range on a plain (non-trace) filter', () => {
+  const { text } = synthesizeEventLog({ eventCount: 30 });
+  const eventLog = openEventLog(text);
+  const filteredLog = new FilteredEventLog(eventLog);
+  filteredLog.applyConsideredEventNumberRange({ firstConsideredEventNumber: 2, lastConsideredEventNumber: 25, lowerSimulationTimeLimit: '10', upperSimulationTimeLimit: '15' });
+  assert.deepEqual(filteredEventNumbersForward(filteredLog), [10, 11, 12, 13, 14, 15]);
+  assert.equal(filteredLog.getFirstConsideredEventNumber(), 10);
+  assert.equal(filteredLog.getLastConsideredEventNumber(), 15);
 });

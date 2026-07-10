@@ -319,6 +319,32 @@ test('no doc completion outside a comment', () => {
   assert.equal(docCommentCompletion('simple @'), undefined);
 });
 
+test('private doc-comment (//#) offers CHECKME/FIXME/TBD/TODO after @, not DOC_KEYWORDS', () => {
+  const items = docCommentCompletion('//# @')!;
+  assert.deepEqual(items.map((i) => i.label).sort(), ['CHECKME', 'FIXME', 'TBD', 'TODO']);
+  assert.ok(!items.some((i) => i.label === '@author'), 'regular DOC_KEYWORDS must not appear');
+});
+
+test('private doc-comment (//#) offers the TODO keywords with no @ present at all', () => {
+  // NedPrivateDocCompletionProcessor.java uses a plain NedWordDetector (startStr = ""),
+  // unlike NedDocCompletionProcessor's "@"-gated createProposals call -- the private
+  // partition's completion is not gated behind '@' the way the regular '//' partition is.
+  const items = docCommentCompletion('//# FIX')!;
+  assert.deepEqual(items.map((i) => i.label).sort(), ['CHECKME', 'FIXME', 'TBD', 'TODO']);
+});
+
+test('regular doc-comment (//, not //#) still offers DOC_KEYWORDS after @ (regression guard)', () => {
+  const items = docCommentCompletion('// @')!;
+  assert.ok(items.some((i) => i.label === '@author'));
+  assert.ok(!items.some((i) => i.label === 'TODO'));
+});
+
+test('private doc-comment (//#) does not offer DOC_TAGS after < (NedPrivateDocCompletionProcessor has no <-branch)', () => {
+  const items = docCommentCompletion('//# <')!;
+  assert.deepEqual(items.map((i) => i.label).sort(), ['CHECKME', 'FIXME', 'TBD', 'TODO']);
+  assert.ok(!items.some((i) => i.label.startsWith('<')), 'no HTML-tag proposals in the private-doc partition');
+});
+
 // ---- Phase 7: module tree (data backing the tree views) ----
 
 test('networkModuleTree builds a nested module tree', async () => {

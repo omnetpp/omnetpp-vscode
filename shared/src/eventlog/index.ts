@@ -68,6 +68,37 @@ export { buildModuleTree, type ElogModule } from './moduleTree';
 // phase U7: filter-panel autocompletion data (see filterHints.ts's header).
 export { buildFilterHints } from './filterHints';
 
+// Configure Style dialog + style-rule model (see styleRules.ts's header). Also
+// re-exported via the dedicated '@omnetpp/shared/style-rules' subpath (see
+// shared/package.json), which the browser-side chart webview bundle imports instead
+// of this barrel -- same "narrow subpath over the full engine barrel" convention as
+// './elog-protocol'/'./entry-proposals' above.
+export {
+  STYLE_CATEGORIES,
+  emptyStyleCategorySettings,
+  defaultStyleRuleSettings,
+  coerceStyleRuleSettings,
+  expandStyleColorTokens,
+  javaStringHashCode,
+  StyleRuleResolver,
+  axisMatchable,
+  eventMatchable,
+  messageSendMatchable,
+  methodCallMatchable,
+  type StyleCategory,
+  type StyleRule,
+  type StyleCategorySettings,
+  type StyleRuleSettings,
+} from './styleRules';
+
+// phase U10: Event Log Table position-aware content-assist (see entryProposals.ts's
+// header). Also re-exported via the dedicated '@omnetpp/shared/entry-proposals'
+// subpath (see shared/package.json), which the browser-side webview bundle imports
+// instead of this barrel -- entryProposals.ts itself has no dependency on the rest of
+// this engine, unlike entryTypeSchema.ts (worker-side only, needs entries.ts).
+export { computeEntryProposals, type EntryProposal, type EntryProposalPositionKind, type EntryProposalResult } from './entryProposals';
+export { buildEntryTypeSchema, ENTRY_TYPE_CODES } from './entryTypeSchema';
+
 // phase U2: the Event Log table's row DTO builder (pure: EventLogEntry + modes ->
 // styled spans, ported from EventLogTableRowRenderer.java).
 export { renderTableRow, secondsToTimeString, UnsupportedTableEntryError, type TableRowRenderContext } from './tableRowRenderer';

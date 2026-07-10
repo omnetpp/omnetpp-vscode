@@ -899,9 +899,9 @@
           "markdownDescription": "Font size (px) used for chart labels (axis labels, message names, time-difference/info-panel text, rotated axis-header text); `0` keeps the chart's own built-in default (12px). This is a uniform scale of the built-in sizes, not real font-metrics-aware relayout -- at sizes far from the default, label spacing/gutter widths may look slightly cramped or loose."
         },
         "omnetpp.sequenceChart.styleRules": {
-          "type": "array",
-          "default": [],
-          "markdownDescription": "Reserved for a later phase's module-specific chart styling rules."
+          "type": "object",
+          "default": {},
+          "markdownDescription": "Module/message/method-name pattern -> color override rules for the Sequence Chart's Axes / Axis headers / Events / Self events / Message sends / Method calls, edited via the chart's \"Configure Style...\" context-menu item (not meant to be hand-edited here -- the object shape mirrors `shared/src/eventlog/styleRules.ts`'s `StyleRuleSettings`, one `{enabled, rules: [{pattern, colors}]}` entry per category)."
         },
         "omnetpp.eventlog.followEndOnAppend": {
           "type": "boolean",

@@ -334,15 +334,18 @@ export function buildFilterPanel(parent: HTMLElement, deps: FilterPanelDeps): Fi
 
   function buildRangeSection(container: HTMLElement): void {
     sectionHeader(container, 'rangeEventNumbers', 'Range filter (by event numbers)');
-    const detail = document.createElement('div');
-    detail.className = 'elog-filter-section-detail';
-    fieldRow(detail, 'Lower event number limit:', numberInput(state.firstConsideredEventNumber, (v) => setField('firstConsideredEventNumber', v)));
-    fieldRow(detail, 'Upper event number limit:', numberInput(state.lastConsideredEventNumber, (v) => setField('lastConsideredEventNumber', v)));
-    const note = document.createElement('div');
-    note.className = 'elog-filter-note';
-    note.textContent = 'Range by simulation time is not available (the eventlog engine only supports an event-number range).';
-    detail.appendChild(note);
-    container.appendChild(detail);
+    const eventNumberDetail = document.createElement('div');
+    eventNumberDetail.className = 'elog-filter-section-detail';
+    fieldRow(eventNumberDetail, 'Lower event number limit:', numberInput(state.firstConsideredEventNumber, (v) => setField('firstConsideredEventNumber', v)));
+    fieldRow(eventNumberDetail, 'Upper event number limit:', numberInput(state.lastConsideredEventNumber, (v) => setField('lastConsideredEventNumber', v)));
+    container.appendChild(eventNumberDetail);
+
+    sectionHeader(container, 'rangeSimulationTime', 'Range filter (by simulation time)');
+    const simTimeDetail = document.createElement('div');
+    simTimeDetail.className = 'elog-filter-section-detail';
+    fieldRow(simTimeDetail, 'Lower simulation time limit:', textInput(state.lowerSimulationTimeLimit, '(none)', undefined, (v) => setField('lowerSimulationTimeLimit', v)));
+    fieldRow(simTimeDetail, 'Upper simulation time limit:', textInput(state.upperSimulationTimeLimit, '(none)', undefined, (v) => setField('upperSimulationTimeLimit', v)));
+    container.appendChild(simTimeDetail);
   }
 
   function buildEventFilterSection(container: HTMLElement): void {
@@ -454,6 +457,29 @@ export function buildFilterPanel(parent: HTMLElement, deps: FilterPanelDeps): Fi
     detail.appendChild(checkboxField(state.traceConsequences, 'Include consequence events', (v) => setField('traceConsequences', v)));
     detail.appendChild(checkboxField(state.traceMessageReuses, 'Follow message reuse dependencies', (v) => setField('traceMessageReuses', v)));
     detail.appendChild(checkboxField(state.traceSelfMessages, 'Follow self-message dependencies', (v) => setField('traceSelfMessages', v)));
+
+    // "Event number limits" / "Simulation time limits" groups (FilterEventLogDialog.java's
+    // two `Group`s at the bottom of the trace filter page).
+    const eventNumberLimitsGroup = document.createElement('div');
+    eventNumberLimitsGroup.className = 'elog-filter-group';
+    const eventNumberLimitsTitle = document.createElement('div');
+    eventNumberLimitsTitle.className = 'elog-filter-group-title';
+    eventNumberLimitsTitle.textContent = 'Event number limits';
+    eventNumberLimitsGroup.appendChild(eventNumberLimitsTitle);
+    fieldRow(eventNumberLimitsGroup, 'Cause event number delta limit:', numberInput(state.causeEventNumberDelta, (v) => setField('causeEventNumberDelta', v)));
+    fieldRow(eventNumberLimitsGroup, 'Consequence event number delta limit:', numberInput(state.consequenceEventNumberDelta, (v) => setField('consequenceEventNumberDelta', v)));
+    detail.appendChild(eventNumberLimitsGroup);
+
+    const simTimeLimitsGroup = document.createElement('div');
+    simTimeLimitsGroup.className = 'elog-filter-group';
+    const simTimeLimitsTitle = document.createElement('div');
+    simTimeLimitsTitle.className = 'elog-filter-group-title';
+    simTimeLimitsTitle.textContent = 'Simulation time limits';
+    simTimeLimitsGroup.appendChild(simTimeLimitsTitle);
+    fieldRow(simTimeLimitsGroup, 'Cause simulation time delta limit:', textInput(state.causeSimulationTimeDelta, '(none)', undefined, (v) => setField('causeSimulationTimeDelta', v)));
+    fieldRow(simTimeLimitsGroup, 'Consequence simulation time delta limit:', textInput(state.consequenceSimulationTimeDelta, '(none)', undefined, (v) => setField('consequenceSimulationTimeDelta', v)));
+    detail.appendChild(simTimeLimitsGroup);
+
     container.appendChild(detail);
   }
 

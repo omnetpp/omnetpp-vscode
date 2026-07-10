@@ -1,7 +1,8 @@
 /**
  * The Event Log table's DOM orchestrator (phase U2): header + resizable columns,
  * fixed-height row pool, custom approximate scrollbar, keyboard/mouse selection, Ctrl+C
- * copy, a minimal find bar, and follow-end-on-append. Everything DOM-free (the fix-point
+ * copy, an inline find bar (forward/backward, case-sensitive -- see the "find" section
+ * below), and follow-end-on-append. Everything DOM-free (the fix-point
  * windowing clamp, the scrollbar math, the selection-state reducer) lives in
  * `rowPool.ts`/`scrollMath.ts`/`selectionModel.ts` and is unit-tested there; this file is
  * the (untested, by design) glue that wires those pure pieces to real DOM events and
@@ -27,6 +28,8 @@
 import {
   ElogMethods,
   EventLogTableFilterMode,
+  type EntryTypeSchema,
+  type FilterHints,
   type FindTextParams,
   type FindTextResult,
   type RowAnchor,
@@ -42,11 +45,14 @@ import {
   type TableRow,
   DEFAULT_TABLE_RENDER_MODES,
 } from '@omnetpp/shared/elog-protocol';
+import { computeEntryProposals } from '@omnetpp/shared/entry-proposals';
 import type { Bookmark, EventLogSelection, RevealTarget, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
 import type { EngineRpc } from '../common/rpc';
 import { loadPersistedBlob, withVersion } from '../common/persistedState';
 import { showContextMenu } from '../common/contextMenu';
 import { buildToolbar, type ToolbarHandle } from '../common/toolbar';
+import { attachAutocomplete, type AutocompleteProposals } from '../common/autocompleteDropdown';
+import { DEFAULT_FIND_TEXT_STATE, type FindTextState } from '../common/dialogs';
 import { createRowPool, computeTopIndex, type RowPool } from './rowPool';
 import { buildTableContextMenu, type TableMenuActions } from './tableContextMenu';
 import { compareRowRef, gotoElement, isSelected, moveFocusTo, refEquals, selectAll as selectAllRange, EMPTY_SELECTION, type SelectionState } from './selectionModel';
@@ -77,6 +83,10 @@ export interface TableViewOptions {
   persistedState: unknown;
   /** Phase U6 -- the session's bookmark list as of when this table view was (re)mounted (see `tableMain.ts`'s `init`/`bookmarksChanged` handling). */
   initialBookmarks?: Bookmark[];
+  /** Table popup Pin entry gap-closure -- the table's pinned state as of when this view was (re)mounted (see `tableMain.ts`'s `init`/`pinnedChanged` handling); feeds the context menu's "Pin"/"Unpin" item label/checkmark. */
+  initialPinned?: boolean;
+  /** Event Log table row icons -- icon id (`RenderedTableRow.iconId`) -> webview URI, precomputed host-side (see `uiProtocol.ts`'s `iconMap` doc comment); `renderRowInto()` looks up each row's icon here and omits it gracefully if absent. */
+  iconMap?: Record<string, string>;
   /**
    * ADDITIVE (phase U9): called when `reload()` (the table's primary data-fetch path)
    * fails for a reason other than being superseded by a newer reload (see `reload()`'s
@@ -107,6 +117,18 @@ export interface TableViewHandle {
   applySetSelection(selection: EventLogSelection): void;
   /** Phase U6 -- replaces the bookmark set this view tints rows for (`bookmarksChanged`/fresh `init`). */
   setBookmarks(bookmarks: Bookmark[]): void;
+  /** Table popup Pin entry gap-closure -- updates the pinned state the context menu's "Pin"/"Unpin" item reflects (`pinnedChanged`/fresh `init`). */
+  setPinned(pinned: boolean): void;
+  /**
+   * Table find parity gap-closure -- driven by the host's `'command'` messages
+   * (`tableMain.ts`'s `'command'` case), mirroring `chartMain.ts`'s
+   * `showFindTextDialog()`/`repeatFind()`: opens (focuses) the inline find bar, for
+   * `omnetpp.eventlog.findText` routed here (`eventLogDialogs.ts`) when this table
+   * currently has focus.
+   */
+  openFindBar(): void;
+  /** Table find parity gap-closure -- repeats the last search (same direction/case-sensitivity as last used), or opens the find bar if nothing has been searched for yet; for `omnetpp.eventlog.findNext` routed here. */
+  repeatFind(): void;
   /**
    * ADDITIVE (phase U9): the notification overlay's "Refresh" action -- re-resolves
    * the SAME anchor the table was last showing (same re-anchor logic `onFilterChanged()`
@@ -119,6 +141,7 @@ export interface TableViewHandle {
 
 export function createTableView(options: TableViewOptions): TableViewHandle {
   const { root, rpc, postToHost } = options;
+  const iconMap = options.iconMap ?? {};
   const persisted = loadPersistedBlob<PersistedTableState>(options.persistedState, TABLE_STATE_VERSION);
 
   let modes: TableRenderModes = { ...DEFAULT_TABLE_RENDER_MODES, ...persisted.modes };
@@ -145,8 +168,32 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
   findBarEl.className = 'elog-findbar';
   const findInputEl = document.createElement('input');
   findInputEl.type = 'text';
-  findInputEl.placeholder = 'Find text in event log… (Enter = next, Esc = close)';
+  findInputEl.placeholder = 'Find text in event log… (Enter = next, Shift+Enter = previous, Esc = close)';
   findBarEl.appendChild(findInputEl);
+  /**
+   * Table find parity gap-closure -- upgrades this bar to match the chart's
+   * `FindTextState` (`common/dialogs.ts`): a case-sensitivity toggle button (mirrors
+   * VS Code's own find widget's "Match Case" button) and forward/backward search,
+   * reachable both via these two buttons and via Enter/Shift+Enter on the input
+   * (`findInputEl`'s own `keydown` handler below). Kept as plain icon buttons rather
+   * than porting the chart's modal dialog wholesale -- this bar is meant to stay a
+   * lightweight, always-inline affordance, not a dialog.
+   */
+  const findCaseButton = document.createElement('button');
+  findCaseButton.innerHTML = '<span class="codicon codicon-case-sensitive"></span>';
+  findCaseButton.title = 'Match Case';
+  findCaseButton.setAttribute('aria-label', 'Match Case');
+  findBarEl.appendChild(findCaseButton);
+  const findPrevButton = document.createElement('button');
+  findPrevButton.innerHTML = '<span class="codicon codicon-arrow-up"></span>';
+  findPrevButton.title = 'Find Previous';
+  findPrevButton.setAttribute('aria-label', 'Find Previous');
+  findBarEl.appendChild(findPrevButton);
+  const findNextButton = document.createElement('button');
+  findNextButton.innerHTML = '<span class="codicon codicon-arrow-down"></span>';
+  findNextButton.title = 'Find Next';
+  findNextButton.setAttribute('aria-label', 'Find Next');
+  findBarEl.appendChild(findNextButton);
   /** Phase U9 (loose end, U2's find was minimal) -- a miss used to be entirely silent; a small inline status word now confirms the search actually ran and simply found nothing. */
   const findStatusEl = document.createElement('span');
   findStatusEl.className = 'elog-findbar-status';
@@ -186,8 +233,12 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
   let lastAnchorRef: RowRef | null = null;
   let approximateNumberOfEntries = 0;
   let selection: SelectionState = EMPTY_SELECTION;
+  /** Table find parity gap-closure -- the last-used search params (case sensitivity persists across searches; `backward` reflects whichever direction was used most recently, so `repeatFind()`/the host's `findNext` command continues the same way F3 would). Mirrors `chartMain.ts`'s own `findTextState` variable. */
+  let findTextState: FindTextState = { ...DEFAULT_FIND_TEXT_STATE };
   /** Phase U6 -- event numbers with an `'Event'`-kind bookmark, for the row-background tint (the port plan's "table = row background tint" -- see this file's `renderRowInto()`). */
   let bookmarkedEventNumbers = new Set<number>(options.initialBookmarks?.filter((b) => b.kind === 'Event').map((b) => b.eventNumber!));
+  /** Table popup Pin entry gap-closure -- the context menu's "Pin"/"Unpin" item label/checkmark; the host owns the authoritative state (`pinnedChanged`/fresh `init` keep this in sync). */
+  let pinned = options.initialPinned ?? false;
   let scrolledToEnd = false;
   /**
    * Phase U10 (cheap gap) -- `VirtualTable.java`'s ArrowLeft/ArrowRight horizontal
@@ -235,6 +286,24 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
 
   tableEl.addEventListener('focus', () => tableEl.classList.add('focused'));
   tableEl.addEventListener('blur', () => tableEl.classList.remove('focused'));
+  /**
+   * Table find parity gap-closure -- reports "does any part of this view (the row
+   * grid OR the inline find bar) currently have DOM focus" to the host, via
+   * `focusin`/`focusout` delegation on `root` (both bubble, unlike plain `focus`/
+   * `blur` above, which only fire on `tableEl` itself and would wrongly report a
+   * blur while the user is merely typing in `findInputEl`, a sibling of `tableEl`
+   * under `root` -- see this file's DOM layout above). `eventLogTableView.ts` uses
+   * this to route `omnetpp.eventlog.findText`/`.findNext` here instead of into the
+   * Sequence Chart when this table is the focused webview (see `uiProtocol.ts`'s
+   * `tableFocusChanged` doc comment). `focusout` fires before the new focus target is
+   * committed, so the "did focus really leave `root`" check runs on a microtask tick.
+   */
+  root.addEventListener('focusin', () => postToHost({ type: 'tableFocusChanged', focused: true }));
+  root.addEventListener('focusout', () => {
+    queueMicrotask(() => {
+      if (!root.contains(document.activeElement)) postToHost({ type: 'tableFocusChanged', focused: false });
+    });
+  });
   tableEl.addEventListener(
     'wheel',
     (e) => {
@@ -257,10 +326,28 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
     void handleTrackClick(e);
   });
   findInputEl.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') void doFind(true);
+    // Table find parity gap-closure -- Enter = forward (matches the pre-existing
+    // behavior), Shift+Enter = backward (mirrors VS Code's own find widget and the
+    // chart's `FindTextState.backward`); Escape still closes, unchanged.
+    if (e.key === 'Enter') void doFind(!e.shiftKey);
     else if (e.key === 'Escape') closeFindBar();
   });
   findInputEl.addEventListener('input', () => (findStatusEl.textContent = ''));
+  // Table find parity gap-closure -- case-sensitivity toggle + explicit
+  // forward/backward buttons, the mouse-driven equivalents of Shift+Enter above.
+  findCaseButton.addEventListener('click', () => {
+    findTextState = { ...findTextState, caseSensitive: !findTextState.caseSensitive };
+    findCaseButton.classList.toggle('active', findTextState.caseSensitive);
+    if (findInputEl.value) void doFind(!findTextState.backward);
+  });
+  findPrevButton.addEventListener('click', () => {
+    findInputEl.focus();
+    void doFind(false);
+  });
+  findNextButton.addEventListener('click', () => {
+    findInputEl.focus();
+    void doFind(true);
+  });
 
   // ---- viewport sizing -----------------------------------------------------------------
 
@@ -409,6 +496,21 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
       timeCol.textContent = rendered.simTimeSpan.text;
       timeCol.classList.add(`elog-span-${rendered.simTimeSpan.style}`);
       detailsCol.style.paddingLeft = `${BASE_INDENT_PX + rendered.indentUnits * INDENT_UNIT_PX}px`;
+      // Row icon (EventLogTableRowRenderer.java's getImage() -- see elogProtocol.ts's
+      // `RenderedTableRow.iconId` doc comment): drawn immediately to the left of the
+      // Details text, inside the row's existing indent. Omitted gracefully if `iconId`
+      // has no matching bundled asset (e.g. an entry type this port doesn't ship an icon
+      // for yet, or the eventlog icon snapshot was never generated).
+      const iconUri = iconMap[rendered.iconId];
+      if (iconUri) {
+        const icon = document.createElement('img');
+        icon.className = 'elog-row-icon';
+        icon.src = iconUri;
+        icon.width = 16;
+        icon.height = 16;
+        icon.alt = '';
+        detailsCol.appendChild(icon);
+      }
       for (const span of rendered.detailSpans) {
         const s = document.createElement('span');
         s.className = `elog-span-${span.style}`;
@@ -726,7 +828,8 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
     return `#${row.eventNumber}\t${row.simulationTime}\t${row.entryClassCode}`;
   }
 
-  // ---- find (Ctrl+F, minimal -- U4 does the full filter/find UI) ---------------------------
+  // ---- find (Ctrl+F; table find parity gap-closure -- forward/backward + case toggle,
+  // matching the chart's FindTextState; U4 does the full filter/find UI) ------------------
 
   function openFindBar(): void {
     findBarEl.classList.add('open');
@@ -737,10 +840,32 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
     findBarEl.classList.remove('open');
     tableEl.focus();
   }
+  /** Table find parity gap-closure -- host-driven "Find Next" (`omnetpp.eventlog.findNext` routed here, see `TableViewHandle.repeatFind()`'s doc comment): repeats the last search in its last-used direction, or just opens the bar if nothing has been searched for yet (mirrors `chartMain.ts`'s `repeatFind()`). */
+  function repeatFind(): void {
+    if (!findTextState.search) {
+      openFindBar();
+      return;
+    }
+    findInputEl.value = findTextState.search;
+    void doFind(!findTextState.backward);
+  }
+  /**
+   * Table find parity gap-closure -- now carries direction + case sensitivity
+   * (`findTextState`, matching the chart's `FindTextState`/`performFind()`), not just
+   * a hardcoded forward+case-insensitive search. Continuation semantics are unchanged
+   * from before this gap-closure: `start: selection.focus` anchors on the currently
+   * focused row, which -- since a hit moves focus onto the found row via
+   * `gotoElement()` below -- naturally makes a repeated call (Enter again, `repeatFind()`,
+   * or the opposite-direction button) continue from the last match, in either
+   * direction, with no separate "last found ref" bookkeeping needed (contrast
+   * `chartMain.ts`'s `lastFindRef`, needed there only because ITS dialog always starts
+   * a fresh submit from `null`, not from the current selection).
+   */
   async function doFind(forward: boolean): Promise<void> {
     const search = findInputEl.value;
     if (!search) return;
-    const params: FindTextParams = { start: selection.focus, search, forward, caseSensitive: false };
+    findTextState = { ...findTextState, search, backward: !forward };
+    const params: FindTextParams = { start: selection.focus, search, forward, caseSensitive: findTextState.caseSensitive };
     let result;
     try {
       result = await rpc.request<FindTextResult>(ElogMethods.findText, params);
@@ -850,6 +975,7 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
       setTypeMode,
       setNameMode,
       setDisplayMode,
+      togglePin: () => postToHost({ type: 'togglePin' }),
     };
     const entries = buildTableContextMenu({
       hasFocus: selection.focus !== null,
@@ -857,6 +983,7 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
       focusedRowNedTypeName: focusedRowNedTypeName(),
       currentFilterMode: filterMode,
       currentModes: modes,
+      pinned,
       actions,
     });
     showContextMenu(e.clientX, e.clientY, entries);
@@ -885,10 +1012,74 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
   /** Handle of the toolbar built by `buildTableToolbar()`, kept so the setters below can update its dropdown display when a mode changes via the CONTEXT MENU (the toolbar's own `onChange` already reflects a toolbar-driven change for free). */
   let toolbarHandle: ToolbarHandle | undefined;
 
+  /**
+   * Table content-assist (phase U10): flat, deduped, sorted module/message names (from
+   * `elog/getFilterHints`, same RPC and data shape the chart's filter panel already
+   * consumes) folded into the `customFilter` box's autocomplete dropdown at "value"
+   * positions (right after `field =~`) -- `entryProposals.ts`'s `computeEntryProposals()`
+   * is a faithful port of Eclipse's `EventLogEntryProposalProvider`, whose own
+   * `getFieldValueProposals()` is an unconditional no-op there too (see that file's
+   * header), so this is a UI-layer enrichment on top of the ported grammar logic, not
+   * part of it. Formerly rendered via a native `<datalist>` (`ToolbarInputSpec.
+   * datalistId`) -- upgraded to route through `attachAutocomplete()` instead once that
+   * existed, since a native datalist popup and a custom one can both render at once in
+   * Chromium (a confusing double dropdown), and `computeEntryProposals()`'s
+   * `positionKind` now lets this be folded in only where it's actually relevant (a bare
+   * value position) rather than unconditionally on every keystroke.
+   */
+  let flatValueHints: string[] = [];
+  /** Set once an `elog/getFilterHints` request SUCCEEDS, so repeated switches into Custom-filter mode don't re-request; left `false` on failure so the next opportunity retries (same best-effort policy as the chart's `chartMain.ts` `filterHintsLoaded`). */
+  let filterHintsLoaded = false;
+  /** The entry-type-code -> attribute-names schema `computeEntryProposals()` needs (`elog/getEntryTypeSchema`) -- `undefined` until loaded, in which case the dropdown offers nothing (fails closed, not open with a stale/empty schema silently misbehaving). Static data (independent of the open file), but still fetched lazily/once on the same trigger as `flatValueHints` for symmetry. */
+  let entryTypeSchema: EntryTypeSchema | undefined;
+  let entryTypeSchemaLoaded = false;
+
+  /** Lazily fetches both content-assist data sources the first time the Custom-filter box becomes relevant (mirrors `chartMain.ts`'s `requestData` -> `elog/getFilterHints` lazy-load-once-on-first-need pattern). Each is independently best-effort: a failed request leaves its own `*Loaded` flag false so the next opportunity retries that one without re-requesting the other. */
+  function requestCustomFilterAssistDataOnce(): void {
+    if (!filterHintsLoaded) {
+      void rpc
+        .request<FilterHints>(ElogMethods.getFilterHints, undefined)
+        .then((hints) => {
+          filterHintsLoaded = true;
+          flatValueHints = [...new Set([...hints.moduleNames, ...hints.moduleClassNames, ...hints.moduleNedTypeNames, ...hints.messageNames, ...hints.messageClassNames])].sort((a, b) => a.localeCompare(b));
+        })
+        .catch(() => {
+          // best effort -- flatValueHints just stays empty until the next Custom-filter activation
+        });
+    }
+    if (!entryTypeSchemaLoaded) {
+      void rpc
+        .request<EntryTypeSchema>(ElogMethods.getEntryTypeSchema, undefined)
+        .then((schema) => {
+          entryTypeSchemaLoaded = true;
+          entryTypeSchema = schema;
+        })
+        .catch(() => {
+          // best effort -- the dropdown just stays inactive until the next Custom-filter activation
+        });
+    }
+  }
+
+  /** `AutocompleteProposals` source for the `customFilter` input (see `attachAutocomplete()`'s wiring below): the Java-faithful grammar proposals from `computeEntryProposals()`, with `flatValueHints` folded in at "value" positions (see `flatValueHints`'s own doc comment). Returns no proposals (dropdown stays closed) until `entryTypeSchema` has loaded. */
+  function computeCustomFilterProposals(text: string, cursorOffset: number): AutocompleteProposals {
+    if (!entryTypeSchema) return { replaceStart: cursorOffset, replaceEnd: cursorOffset, items: [] };
+    const result = computeEntryProposals(text, cursorOffset, entryTypeSchema);
+    const items = result.proposals.map((p) => ({ text: p.text, label: p.label }));
+    if (result.positionKind === 'after-matches' && flatValueHints.length > 0) {
+      const prefix = text.slice(result.replaceStart, cursorOffset);
+      const lowerPrefix = prefix.toLowerCase();
+      for (const value of flatValueHints) {
+        if (value.toLowerCase().startsWith(lowerPrefix) && value.length !== prefix.length) items.push({ text: `${value} `, label: value });
+      }
+    }
+    return { replaceStart: result.replaceStart, replaceEnd: result.replaceEnd, items };
+  }
+
   function setLineFilterMode(mode: EventLogTableFilterMode): void {
     filterMode = mode;
     toolbarHandle?.setDropdownValue('lineFilter', mode === EventLogTableFilterMode.CUSTOM_ENTRIES ? 'CUSTOM' : mode);
     toolbarHandle?.setItemVisible('customFilter', mode === EventLogTableFilterMode.CUSTOM_ENTRIES);
+    if (mode === EventLogTableFilterMode.CUSTOM_ENTRIES) requestCustomFilterAssistDataOnce();
     persistState();
     void reload({ kind: 'ref', ref: lastAnchorRef ?? { eventNumber: 0, entryIndex: 0 } }, 0);
   }
@@ -999,6 +1190,11 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
       },
     ]);
     handle.setItemVisible('customFilter', filterMode === EventLogTableFilterMode.CUSTOM_ENTRIES);
+    // Table content-assist (phase U10): wire the position-aware autocomplete dropdown
+    // onto the raw `<input>` `buildToolbar()` just created for the `customFilter` item
+    // -- see `computeCustomFilterProposals()`'s doc comment for the proposal source.
+    const customFilterInput = handle.getInputElement('customFilter');
+    if (customFilterInput) attachAutocomplete(customFilterInput, computeCustomFilterProposals);
     return handle;
   }
 
@@ -1006,7 +1202,13 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
   // DOM (`#toolbar`, alongside the status strip U1 built) -- looked up lazily so this
   // module doesn't need to know tableMain.ts's exact DOM layout beyond that one id.
   const toolbarContainer = document.getElementById('toolbar');
-  if (toolbarContainer) toolbarHandle = buildTableToolbar(toolbarContainer, () => void rpc.request(ElogMethods.checkChanges, undefined));
+  if (toolbarContainer) {
+    toolbarHandle = buildTableToolbar(toolbarContainer, () => void rpc.request(ElogMethods.checkChanges, undefined));
+    // Cover the "reopened with Custom-filter already persisted" case -- the toolbar's
+    // initial dropdown value already reflects `filterMode` without a `setLineFilterMode()`
+    // call, so that setter's own `requestCustomFilterAssistDataOnce()` never runs for this case.
+    if (filterMode === EventLogTableFilterMode.CUSTOM_ENTRIES) requestCustomFilterAssistDataOnce();
+  }
 
   return {
     start(): void {
@@ -1052,6 +1254,11 @@ export function createTableView(options: TableViewOptions): TableViewHandle {
       bookmarkedEventNumbers = new Set(bookmarks.filter((b) => b.kind === 'Event').map((b) => b.eventNumber!));
       repaint();
     },
+    setPinned(newPinned): void {
+      pinned = newPinned;
+    },
+    openFindBar,
+    repeatFind,
     dispose(): void {
       disposed = true;
       resizeObserver.disconnect();

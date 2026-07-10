@@ -36,6 +36,15 @@ export function unitDimension(unit: string): string | undefined {
 }
 
 /**
+ * All recognized unit-symbol names (base dimensions and their synonyms), for
+ * `@unit(...)` value completion. Ported from Eclipse's `UnitConversion.getKnownUnits()`
+ * (`NedCompletionHelper.proposedNedUnitTempl`).
+ */
+export function knownUnitNames(): string[] {
+  return Object.keys(BASE);
+}
+
+/**
  * Whether two units are dimensionally compatible. Returns true when either unit
  * is unrecognized (conservative: never flag the unknown).
  */

@@ -1,4 +1,5 @@
 import { CompletionItem, CompletionItemKind, InsertTextFormat } from '../model/completion';
+import { knownUnitNames } from '../expr/units';
 
 /**
  * Standard OMNeT++ NED properties (`@name`), the NED element each attaches to,
@@ -82,4 +83,106 @@ export function propertyCompletions(...scopes: NedPropScope[]): CompletionItem[]
     });
   }
   return items;
+}
+
+// --- argument-position completion: `@unit(...)`, `@signal[...](...)`, `@statistic[...](...)` ---
+// Ported from NedCompletionProcessor.java:388-405 and the corresponding static template
+// tables in NedCompletionHelper.java (`proposedNedUnitTempl`,
+// `proposedNedSignalPropertyParameterTempl`, `proposedNedStatisticPropertyParameterTempl`,
+// `proposedNedStatisticPropertyRecordParameterValueTempl`,
+// `proposedNedStatisticPropertyInterpolationModeParameterValueTempl`).
+
+/**
+ * Known measurement-unit names, for `@unit(...)`'s argument and the nested `unit=`
+ * argument of `@signal[...](...)` / `@statistic[...](...)`.
+ */
+export function unitNameCompletions(): CompletionItem[] {
+  return knownUnitNames().map((u) => ({ label: u, kind: CompletionItemKind.Unit, detail: 'unit' }));
+}
+
+interface ArgTemplate {
+  name: string;
+  snippet: string;
+  doc: string;
+}
+
+const SIGNAL_ARG_TEMPLATES: ArgTemplate[] = [
+  { name: 'unit=', snippet: 'unit=${1:s};', doc: 'Measurement unit of the signal value' },
+  { name: 'enum=', snippet: 'enum=${1:value1},${2:value2};', doc: 'Restricts the signal value to an enumeration' },
+  { name: 'type=', snippet: 'type=${1:type};', doc: 'C++ type of the signal value' },
+];
+
+const STATISTIC_ARG_TEMPLATES: ArgTemplate[] = [
+  { name: 'title=', snippet: 'title="${1:title}";', doc: 'Human-readable title of the statistic' },
+  { name: 'unit=', snippet: 'unit=${1:s};', doc: 'Measurement unit of the recorded value' },
+  {
+    name: 'interpolationmode=',
+    snippet: 'interpolationmode=${1:mode};',
+    doc: 'Interpolation mode used when plotting the statistic',
+  },
+  { name: 'source=', snippet: 'source=${1:signal};', doc: 'Signal (or filter expression) the statistic records' },
+  { name: 'enum=', snippet: 'enum=${1:value1},${2:value2};', doc: 'Restricts the recorded value to an enumeration' },
+  {
+    name: 'record=',
+    snippet: 'record=${1:expr1},${2:expr2};',
+    doc: 'Recording mode(s)/expression(s) for the statistic',
+  },
+];
+
+function argTemplateCompletions(templates: ArgTemplate[]): CompletionItem[] {
+  return templates.map((t) => ({
+    label: t.name,
+    kind: CompletionItemKind.Property,
+    detail: t.doc,
+    insertText: t.snippet,
+    insertTextFormat: InsertTextFormat.Snippet,
+  }));
+}
+
+/** `@signal[...](...)` argument-name templates: `unit=`, `enum=`, `type=`. */
+export function signalArgCompletions(): CompletionItem[] {
+  return argTemplateCompletions(SIGNAL_ARG_TEMPLATES);
+}
+
+/** `@statistic[...](...)` argument-name templates. */
+export function statisticArgCompletions(): CompletionItem[] {
+  return argTemplateCompletions(STATISTIC_ARG_TEMPLATES);
+}
+
+interface EnumOption {
+  name: string;
+  doc: string;
+}
+
+const RECORD_MODES: EnumOption[] = [
+  { name: 'auto', doc: 'automatically select the best mode(s) for a statistic (currently selects histogram mode)' },
+  { name: 'count', doc: 'record the number of values emitted; values are ignored' },
+  { name: 'vector', doc: 'record all values' },
+  { name: 'last', doc: 'record the last value' },
+  { name: 'sum', doc: 'record the sum of the values' },
+  { name: 'mean', doc: 'record the mean of the values' },
+  { name: 'min', doc: 'record the minimum value' },
+  { name: 'max', doc: 'record the maximum value' },
+  { name: 'timeavg', doc: 'record the time average, interpreting the signal as a step function (sample-hold)' },
+  { name: 'stats', doc: 'record the count, sum, mean, standard deviation, minimum and maximum of the values' },
+  {
+    name: 'histogram',
+    doc: 'record everything stats records, plus a histogram of the values (bins are set up automatically)',
+  },
+];
+
+/** `record=...` recording-mode enum, inside `@statistic[...](...)`. */
+export function recordModeCompletions(): CompletionItem[] {
+  return RECORD_MODES.map((m) => ({ label: m.name, kind: CompletionItemKind.EnumMember, detail: m.doc }));
+}
+
+const INTERPOLATION_MODES = ['none', 'linear', 'sample-hold', 'backward-sample-hold'];
+
+/** `interpolationmode=...` enum, inside `@statistic[...](...)`. */
+export function interpolationModeCompletions(): CompletionItem[] {
+  return INTERPOLATION_MODES.map((m) => ({
+    label: m,
+    kind: CompletionItemKind.EnumMember,
+    detail: 'interpolation mode',
+  }));
 }

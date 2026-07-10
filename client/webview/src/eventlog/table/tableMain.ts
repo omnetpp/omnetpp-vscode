@@ -31,6 +31,10 @@ let persistedState: unknown;
 let table: TableViewHandle | null = null;
 /** Phase U6 -- the session's current bookmark list, kept even while no table is mounted yet (an empty/not-yet-loaded summary) so `mountTableIfNeeded()` can seed a fresh `TableViewHandle` with it immediately. */
 let latestBookmarks: Bookmark[] = [];
+/** Table popup Pin entry gap-closure -- the table's current pinned state, kept even while no table is mounted yet, same reasoning as `latestBookmarks` above. */
+let pinned = false;
+/** Event Log table row icons -- icon id -> webview URI, precomputed host-side (`eventLogTableView.ts`'s `buildEventLogTableIconMap()`) and threaded straight through to `createTableView()`; kept even while no table is mounted yet, same reasoning as `latestBookmarks`/`pinned` above. */
+let iconMap: Record<string, string> = {};
 
 document.getElementById('root')!.innerHTML = `
   <div id="toolbar"></div>
@@ -82,6 +86,8 @@ function mountTableIfNeeded(): void {
     postToHost: (m) => vscode.postMessage(m),
     persistedState,
     initialBookmarks: latestBookmarks,
+    initialPinned: pinned,
+    iconMap,
     onError: (err) => notificationOverlay.show(classifyEngineError(err)!),
   });
   table.start();
@@ -125,6 +131,8 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
       summary = message.summary;
       persistedState = message.persistedState;
       latestBookmarks = message.bookmarks;
+      pinned = message.pinned;
+      iconMap = message.iconMap ?? {};
       if (fileChanged) unmountTable();
       render();
       // Phase U6: seed the (possibly freshly (re)mounted) table with the session's
@@ -135,6 +143,7 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
       // `eventLogTableView.ts`'s `attachToCurrent()`).
       table?.applySetSelection(message.selection);
       table?.setBookmarks(message.bookmarks);
+      table?.setPinned(message.pinned);
       break;
     }
     case 'engineResponse':
@@ -187,6 +196,14 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
       latestBookmarks = message.bookmarks;
       table?.setBookmarks(message.bookmarks);
       break;
+    case 'pinnedChanged':
+      // Table popup Pin entry gap-closure -- the host's `togglePin()` confirmed a new
+      // state (either from this webview's own menu item or the native view-title
+      // commands); keep `pinned` current even while no table is mounted, same reasoning
+      // as `latestBookmarks` above.
+      pinned = message.pinned;
+      table?.setPinned(message.pinned);
+      break;
     case 'command':
       if (message.command === 'resetViewState') {
         // "OMNeT++: Reset Event Log View State": the host wiped the persisted blob;
@@ -195,6 +212,15 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
         persistedState = undefined;
         unmountTable();
         render();
+      } else if (message.command === 'openFindTextDialog') {
+        // Table find parity gap-closure -- `omnetpp.eventlog.findText` routed here
+        // (`eventLogDialogs.ts`) because this table currently has focus; unlike the
+        // chart, the table has no modal dialog, so this just opens/focuses the
+        // existing inline find bar (`tableView.ts`'s `openFindBar()`).
+        table?.openFindBar();
+      } else if (message.command === 'findNext') {
+        // Table find parity gap-closure -- `omnetpp.eventlog.findNext` routed here.
+        table?.repeatFind();
       }
       break;
   }

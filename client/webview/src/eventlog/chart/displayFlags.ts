@@ -18,13 +18,15 @@ export interface ChartDisplayFlags {
   showAxes: boolean;
   showAxisHeaders: boolean;
   /**
-   * Port of Java's `drawAxisInfo()` (a small hover-tracked "which axis is the mouse
-   * over" readout). STUB (documented, unlike `showAxisVectorData`'s permanent
-   * out-of-scope): the toggle exists, is wired into the Show/Hide menu, and persists
-   * like every other flag, but `chartMain.ts` has no hovered-axis tracking to feed it
-   * text yet (no protocol/state gap — just not wired up this phase), so it currently
-   * renders nothing regardless of value. A future phase can wire it by computing an
-   * `infoPanelText`-shaped hover string in `chartMain.ts`'s mousemove handler.
+   * Port of Java's `drawAxisInfo()` (`SequenceChart.java:4361-4390`, read in full):
+   * NOT hover-tracked, despite the plausible-sounding "which axis is the mouse over"
+   * guess a prior version of this comment made — the method has no mouse reference at
+   * all. It's a small static box (top-left corner, below the top gutter) reporting two
+   * counts, redrawn every frame: axes "Closed" (in the module tree but not open) and
+   * "Invisible" (open but not currently laid out, e.g. scrolled off or empty with
+   * `showEmptyAxes` off) — see `openAxisModules.ts`'s `computeAxisInfoText()`. Rendered
+   * via `drawList.ts`'s `InfoPanelText.axisInfo`, computed each frame by
+   * `chartMain.ts`'s `render()`.
    */
   showAxisInfo: boolean;
   showAxisLabels: boolean;

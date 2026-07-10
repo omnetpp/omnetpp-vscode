@@ -37,6 +37,7 @@
  */
 
 import type { FilterParams, LogSummary, RowRef, VectorIdentity } from './elogProtocol';
+import type { StyleRuleSettings } from './styleRules';
 
 // ---------------------------------------------------------------------------------
 // Shared payload shapes
@@ -144,7 +145,18 @@ export interface EventLogUiSettings {
   sequenceChart?: {
     defaultTimelineMode?: string;
     fontSize?: number;
-    styleRules?: unknown;
+    /**
+     * The "Configure Style" rule model (`shared/src/eventlog/styleRules.ts`'s
+     * `StyleRuleSettings`, port of `SequenceChartStyleProvider`'s six pattern->color
+     * rule tables) -- previously a reserved `unknown` passthrough. Read from/written to
+     * the `omnetpp.sequenceChart.styleRules` setting, same "global preference, not
+     * per-file state" treatment as `defaultTimelineMode`/`fontSize` above (see
+     * `sequenceChartEditor.ts`'s `readEventLogUiSettings()`). Untyped at the JSON-Schema
+     * level (`package.json`'s `type: "object"`) since VS Code settings.json can hold
+     * arbitrary/stale JSON (e.g. this field's own pre-this-phase `[]` array default) --
+     * always run through `coerceStyleRuleSettings()` before use, never trusted as-is.
+     */
+    styleRules?: StyleRuleSettings;
   };
   eventlog?: {
     followEndOnAppend?: boolean;
@@ -282,7 +294,44 @@ export type WebviewToHostMessage =
    * looks up the type's `@defaultStatistic`, and if a sibling `.vec` records that vector for
    * the module, attaches it (replying `axisVectorAttachmentChanged`). Silent on any miss.
    */
-  | { type: 'autoAttachAxisVectors'; candidates: { moduleId: number; moduleFullPath: string; nedTypeName: string }[] };
+  | { type: 'autoAttachAxisVectors'; candidates: { moduleId: number; moduleFullPath: string; nedTypeName: string }[] }
+  /**
+   * ADDITIVE (Table find parity gap-closure): the Event Log table webview's DOM focus
+   * moved in (`true`) or entirely out (`false`) of its own root (the row grid OR its
+   * inline find bar -- see `tableView.ts`'s `root`-level `focusin`/`focusout`
+   * delegation). The host (`eventLogTableView.ts`) tracks this per table view so
+   * `omnetpp.eventlog.findText`/`.findNext` (`eventLogDialogs.ts`) can route to the
+   * table's own inline find bar instead of always forwarding into the Sequence Chart's
+   * modal dialog -- mirrors `chartMain.ts`'s webview panel `active` state (tracked
+   * natively via `vscode.WebviewPanel.onDidChangeViewState`), which `vscode.WebviewView`
+   * (the table's host) has no equivalent API for, hence this explicit message.
+   */
+  | { type: 'tableFocusChanged'; focused: boolean }
+  /**
+   * ADDITIVE (Table popup Pin entry gap-closure): the Event Log table's own context
+   * menu (`tableContextMenu.ts`) gained a "Pin"/"Unpin" item mirroring the native
+   * `omnetpp.eventlog.pinEventLogTable`/`.unpinEventLogTable` view-title commands
+   * (`eventLogTableView.ts`'s `togglePin()`, which both commands already call — a
+   * single boolean flip, not two distinct actions). Sent instead of a generic
+   * "execute host command" passthrough (this envelope has no such escape hatch by
+   * design, see file header — every message here is specific and typed) and instead
+   * of a dedicated `pin`/`unpin` pair, since the host-side operation IS a toggle
+   * (`togglePin()`'s own shape), matching this same envelope's `toggleBookmark`
+   * precedent (one message, host decides the resulting state) rather than mirroring
+   * two separately-named native commands that happen to alias the same handler.
+   */
+  | { type: 'togglePin' }
+  /**
+   * ADDITIVE (Configure Style dialog): the user pressed OK on the six-table style-rule
+   * editor (`client/webview/src/eventlog/chart/configureStyleDialog.ts`). The host
+   * (`sequenceChartEditor.ts`) persists `styleRules` to the `omnetpp.sequenceChart.
+   * styleRules` setting (Global scope -- a preference like `fontSize`, not per-file
+   * state) and replies `styleRulesChanged` so the chart that opened the dialog applies
+   * it immediately, without waiting for a reload (other already-open chart tabs for
+   * OTHER files pick it up the next time they're opened/refreshed, same "takes effect
+   * next open" precedent as `fontSize`/`defaultTimelineMode`).
+   */
+  | { type: 'setStyleRules'; styleRules: StyleRuleSettings };
 
 // ---------------------------------------------------------------------------------
 // host -> webview
@@ -327,6 +376,30 @@ export type HostToWebviewMessage =
        * webview itself.
        */
       filterParams: FilterParams | null;
+      /**
+       * ADDITIVE (Table popup Pin entry gap-closure): the Event Log table's current
+       * pinned state (`eventLogTableView.ts`'s `pinned` field, previously host-only) --
+       * `false` for the Sequence Chart editor's own `init` reply, which has no pin
+       * concept (see `handleWebviewMessage()`'s generic `'ready'` case in
+       * `sequenceChartEditor.ts`). Lets the table webview's own context menu show the
+       * correct "Pin"/"Unpin" label and checkmark without a round trip, same reasoning
+       * as `selection`/`bookmarks`/`filterParams` above.
+       */
+      pinned: boolean;
+      /**
+       * ADDITIVE (Event Log table row icons): icon id (`RenderedTableRow.iconId`, e.g.
+       * `"ModuleCreated"`, `"SelfEvent"`) -> resolved webview URI, precomputed once
+       * host-side (`eventLogTableView.ts`, `webview.asWebviewUri()` over the bundled
+       * `dist/icons/_internal/eventlog/*.png` snapshot -- see `scripts/gen-icons.mjs`)
+       * since this icon set is small and static (all ~32 ids known in advance, unlike the
+       * NED preview's dynamic display-string icon ids), so a per-request resolution
+       * round trip is unnecessary. `undefined`/omitted for the Sequence Chart editor's own
+       * `init` (it has no row-icon concept); the table degrades gracefully (omits the
+       * `<img>`) for any id not present in the map, e.g. `dist/icons/_internal/eventlog/`
+       * missing because `scripts/gen-icons.mjs` was never run against an OMNeT++ source
+       * tree.
+       */
+      iconMap?: Record<string, string>;
     }
   /** Reply to a proxied `engineRequest` with the same `id`. Exactly one of `result`/`error` is set. */
   | { type: 'engineResponse'; id: number; result?: unknown; error?: { message: string; code?: number; data?: unknown } }
@@ -353,4 +426,23 @@ export type HostToWebviewMessage =
    * with `attachment: null`). The webview updates its attachment map (menu Attach-vs-Detach
    * state + persistence) and refreshes the chart. `fileUri` is a `vscode.Uri.toString()`.
    */
-  | { type: 'axisVectorAttachmentChanged'; moduleId: number; attachment: { fileUri: string; vector: VectorIdentity } | null };
+  | { type: 'axisVectorAttachmentChanged'; moduleId: number; attachment: { fileUri: string; vector: VectorIdentity } | null }
+  /**
+   * ADDITIVE (Table popup Pin entry gap-closure): the Event Log table's pinned state
+   * changed -- either via its own context menu's `togglePin` (echoed back so the menu's
+   * checkmark/label update without a full `init`) or via the native
+   * `omnetpp.eventlog.pinEventLogTable`/`.unpinEventLogTable` view-title commands (so the
+   * in-webview menu stays in sync with the native toggle too). Table-only; never sent to
+   * the Sequence Chart editor, which has no pin concept (mirrors `bookmarksChanged`'s
+   * shape: an unsolicited state broadcast rather than a request/response pair).
+   */
+  | { type: 'pinnedChanged'; pinned: boolean }
+  /**
+   * ADDITIVE (Configure Style dialog): reply to `setStyleRules` -- the freshly saved
+   * rules, applied to the live chart immediately (a fresh `StyleRuleResolver` compiled
+   * and a redraw scheduled). Sequence Chart editor only, mirroring `pinnedChanged`'s
+   * "unsolicited state broadcast, not request/response" shape (though today it only
+   * ever follows a `setStyleRules` from the SAME webview -- see `setStyleRules`'s doc
+   * for why other open chart tabs are not live-updated).
+   */
+  | { type: 'styleRulesChanged'; styleRules: StyleRuleSettings };

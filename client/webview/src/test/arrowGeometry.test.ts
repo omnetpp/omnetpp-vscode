@@ -306,15 +306,35 @@ test('lineArrowGeometryContainsPoint: on/off tolerance for a plain straight arro
 });
 
 // ---------------------------------------------------------------------------------
-// Filtered zigzag sign segments -- shape sanity (decoration only, not hit-tested)
+// Filtered/collapsed-dependency marker segments -- shape sanity (decoration only, not
+// hit-tested). Straight parallel lines (default count=2), not the old Eclipse zigzag.
 // ---------------------------------------------------------------------------------
 
-test('buildFilteredSignSegments: count=2 produces 6 segments (2 polylines of 3 segments), centered at the anchor', () => {
+test('buildFilteredSignSegments: default count=2 produces 2 straight segments, centered at the anchor', () => {
   const segments = buildFilteredSignSegments({ x: 100, y: 50, angle: 0 });
-  assert.strictEqual(segments.length, 6);
+  assert.strictEqual(segments.length, 2);
   for (const seg of segments) {
     assert.ok(Math.abs((seg.x1 + seg.x2) / 2 - 100) < 20, 'segments stay near the anchor x');
   }
+});
+
+test('buildFilteredSignSegments: at angle=0, each segment is horizontal (parallel to the arrow) and they are stacked vertically (perpendicular to it), symmetrically flanking the arrow line itself (no stroke at offset 0)', () => {
+  const segments = buildFilteredSignSegments({ x: 0, y: 0, angle: 0 }, 5, 4, 2);
+  assert.strictEqual(segments.length, 2);
+  for (const seg of segments) {
+    assert.strictEqual(seg.y1, seg.y2, 'each line runs parallel to the (horizontal) arrow direction');
+    assert.ok(Math.abs(seg.x2 - seg.x1) > 0, 'each line has nonzero length along the arrow direction');
+    assert.notStrictEqual(seg.y1, 0, 'no stroke coincides with the arrow line itself (y=0), which is already drawn underneath');
+  }
+  const ys = segments.map(s => s.y1).sort((a, b) => a - b);
+  assert.deepStrictEqual(ys, [-2, 2], 'two lines symmetric around the anchor, spaced by `spacing`, flanking the arrow');
+});
+
+test('buildFilteredSignSegments: honors an explicit odd count (3 lines) -- the middle one lands on the arrow line (y=0) by construction', () => {
+  const segments = buildFilteredSignSegments({ x: 0, y: 0, angle: 0 }, 5, 4, 3);
+  assert.strictEqual(segments.length, 3);
+  const ys = segments.map(s => s.y1).sort((a, b) => a - b);
+  assert.deepStrictEqual(ys, [-4, 0, 4], 'three lines spaced by `spacing`, centered on the anchor (middle one overlaps the arrow -- why the default is an even count)');
 });
 
 test('buildFilteredSignSegments: rotating the anchor angle rotates the segments (not identical to angle=0)', () => {

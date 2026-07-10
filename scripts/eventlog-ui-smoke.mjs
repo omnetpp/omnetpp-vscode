@@ -40,6 +40,7 @@ const ElogMethods = {
   findText: 'elog/findText',
   getEventDetail: 'elog/getEventDetail',
   getFilterHints: 'elog/getFilterHints',
+  getEntryTypeSchema: 'elog/getEntryTypeSchema',
   setFilter: 'elog/setFilter',
   releaseMemory: 'elog/releaseMemory',
 };
@@ -109,6 +110,9 @@ async function main() {
 
   // ---- U7: filter panel plumbing (elog/getFilterHints, elog/setFilter apply/remove) --
   await smokeFilterU7(session, summary);
+
+  // ---- U10: table content-assist schema (elog/getEntryTypeSchema) -------------------
+  await smokeEntryTypeSchemaU10(session);
 
   // ---- U8: axis management -- adjacency matrix round trip (minimize crossings) ------
   await smokeAxisU8(session, summary);
@@ -292,6 +296,19 @@ async function smokeFilterU7(session, summary) {
   assert(restoredSummary.filtered === false, 'smokeFilterU7: setFilter(null) removes the filter (filtered=false)');
   assert(restoredSummary.lastEventNumber === summary.lastEventNumber, 'smokeFilterU7: removing the filter restores the original last event number');
   assert(restoredSummary.approximateNumberOfEvents === summary.approximateNumberOfEvents, 'smokeFilterU7: removing the filter restores the original approximate event count');
+}
+
+// ---------------------------------------------------------------------------------
+// U10 (table content-assist): elog/getEntryTypeSchema round trip through the actual
+// bundled worker/session -- the schema `computeEntryProposals()` (shared/src/eventlog/
+// entryProposals.ts) needs, static and independent of the open file (unlike
+// getFilterHints above), but still routed through the worker for the reasons
+// `entryTypeSchema.ts`'s header explains.
+// ---------------------------------------------------------------------------------
+async function smokeEntryTypeSchemaU10(session) {
+  const schema = await session.handleEngineRequest(ElogMethods.getEntryTypeSchema, undefined);
+  assert(Array.isArray(schema.BS) && schema.BS.includes('id') && schema.BS.includes('sd'), 'smokeEntryTypeSchemaU10: getEntryTypeSchema returns BS\'s attribute names, including an inherited one ("id") and a BS-specific one ("sd")');
+  assert(Array.isArray(schema.ES) && schema.ES.includes('i'), 'smokeEntryTypeSchemaU10: getEntryTypeSchema returns ES\'s own attribute ("i")');
 }
 
 /** Streams a large, plain synthetic .elog -- same shape as scripts/elog-worker-smoke.mjs's own fixture generator -- so a findText miss forces a genuinely long full-file scan (needed to measure cancellation latency meaningfully; a tiny fixture like Fifo1 finishes before a cancelRequest notification could ever land, which is exactly why this needs its own big file + its own session/worker rather than reusing the one above). */

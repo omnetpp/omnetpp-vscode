@@ -34,6 +34,16 @@ import { SEQUENCE_CHART_VIEW_TYPE } from './sequenceChartEditor';
  * session (if any) is used instead -- the table has no filter panel of its own (see
  * `uiProtocol.ts`'s `requestFilterPanel` doc comment) but IS a legitimate source of
  * "which file did the user mean".
+ *
+ * `omnetpp.eventlog.findText`/`.findNext` (table find parity gap-closure): unlike
+ * every other command above, the table ALSO has its own genuine in-webview find UI
+ * (`tableView.ts`'s inline find bar, upgraded to match the chart's `FindTextState`
+ * shape -- direction + case sensitivity), matching Eclipse's table having its own
+ * independent Find/Find Next actions distinct from the chart's
+ * (`EventLogTableContributor.findTextAction`/`findNextAction`). So these two commands
+ * route to whichever of the two webviews currently has DOM focus
+ * (`EventLogTableViewProvider.hasFocus()`, see that field's own doc comment) before
+ * falling back to the chart-only forwarding every other command here uses.
  */
 
 async function withActiveSession(controller: EventLogController, action: string): Promise<EventLogSession | undefined> {
@@ -117,29 +127,58 @@ export async function openFilterPanelForSession(session: EventLogSession): Promi
 }
 
 /**
- * Forwards to the webview's in-webview Find Text dialog (see this file's header). No
- * native fallback: Find in the Event Log is chart/table-content-specific and has no
- * sensible standalone native-input-box equivalent (there is nothing to search without
- * a webview showing rows/events) -- if no chart is attached, this just informs the
- * user instead of popping an input box that could never resolve to anything.
+ * Forwards to a webview's in-webview find UI (see this file's header). No native
+ * fallback: Find in the Event Log is chart/table-content-specific and has no sensible
+ * standalone native-input-box equivalent (there is nothing to search without a webview
+ * showing rows/events) -- if neither a focused table nor an attached chart exists,
+ * this just informs the user instead of popping an input box that could never resolve
+ * to anything.
+ *
+ * Table find parity gap-closure: unlike every other command in this file (which only
+ * ever forwards into the Sequence Chart), Find/Find Next have a genuine SECOND target
+ * -- the Event Log table's own inline find bar (`tableView.ts`'s `doFind()`), which
+ * gained backward search + a case-sensitivity toggle to match the chart's
+ * `FindTextState` (`common/dialogs.ts`). Eclipse gives the table its own independent
+ * Find/Find Next actions distinct from the chart's (`EventLogTableContributor.
+ * findTextAction`/`findNextAction`), so this routes to WHICHEVER webview currently has
+ * DOM focus -- the table (`tableView.hasFocus()`, see `eventLogTableView.ts`'s
+ * `focused` field) takes priority when focused, since that is the more specific signal
+ * (a table can be focused while a chart for the same or a different file is merely
+ * open/attached in the background); otherwise this falls back to the original
+ * chart-only behavior unchanged, so command-palette/menu invocations with nothing
+ * focused keep working exactly as before.
  */
-export function findTextCommand(controller: EventLogController): void {
+export function findTextCommand(controller: EventLogController, tableView: EventLogTableViewProvider): void {
+  if (tableView.hasFocus()) {
+    const tableSession = tableView.getBoundSession();
+    if (tableSession) {
+      tableSession.sendCommand('openFindTextDialog', undefined, 'table');
+      return;
+    }
+  }
   const session = controller.getActiveSession();
   if (!session?.hasChartAttachment()) {
-    void vscode.window.showInformationMessage('OMNeT++: Find in Event Log needs a focused Sequence Chart editor.');
+    void vscode.window.showInformationMessage('OMNeT++: Find in Event Log needs a focused Sequence Chart editor or Event Log table.');
     return;
   }
-  session.sendCommand('openFindTextDialog');
+  session.sendCommand('openFindTextDialog', undefined, 'chart');
 }
 
-/** Repeats the webview's last Find Text search (`chartMain.ts` keeps the last `FindTextState`). */
-export function findNextCommand(controller: EventLogController): void {
+/** Repeats a webview's last Find Text search (each webview keeps its own last `FindTextState` -- `chartMain.ts`/`tableView.ts`); routes the same way `findTextCommand()` does (see its doc comment). */
+export function findNextCommand(controller: EventLogController, tableView: EventLogTableViewProvider): void {
+  if (tableView.hasFocus()) {
+    const tableSession = tableView.getBoundSession();
+    if (tableSession) {
+      tableSession.sendCommand('findNext', undefined, 'table');
+      return;
+    }
+  }
   const session = controller.getActiveSession();
   if (!session?.hasChartAttachment()) {
-    void vscode.window.showInformationMessage('OMNeT++: Find Next needs a focused Sequence Chart editor.');
+    void vscode.window.showInformationMessage('OMNeT++: Find Next needs a focused Sequence Chart editor or Event Log table.');
     return;
   }
-  session.sendCommand('findNext');
+  session.sendCommand('findNext', undefined, 'chart');
 }
 
 /**

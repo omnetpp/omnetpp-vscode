@@ -4,7 +4,14 @@ import { ancestorOfType, namedDescendantAt, nodeRange } from '../parser/treeUtil
 import { NedResourceCache, NedFileInfo, BUILTIN_URI } from './nedResourceCache';
 import { DocRefResolver, DocRefTarget, linkifyDocRefs } from '../doc/docRefs';
 import { NedTypeInfo } from './nedTypeInfo';
-import { NED_TYPE_NODES, isTypeNode, nameNode, paramInfo, paramDocComment } from './nedAst';
+import {
+  NED_TYPE_NODES,
+  isTypeNode,
+  nameNode,
+  paramInfo,
+  paramDocComment,
+  type SubmoduleInfo,
+} from './nedAst';
 
 const TYPEREF_NODES = ['extends', 'implements', 'like_type'];
 
@@ -149,7 +156,155 @@ export interface ParamRef {
   range: Range;
 }
 
-/** Resolve a parameter NAME at a position (declaration or override) to its decl. */
+/** The type whose `parameters:` section a node's dotted pattern/param is declared in. */
+function paramDeclContextType(
+  cache: NedResourceCache,
+  file: NedFileInfo,
+  node: SyntaxNode,
+): NedTypeInfo | undefined {
+  return (
+    enclosingSubmoduleType(cache, file, node) ??
+    (() => {
+      const tnode = ancestorOfType(node, NED_TYPE_NODES as unknown as string[]);
+      return tnode ? cache.typeInfoForNode(tnode, file.uri) : undefined;
+    })()
+  );
+}
+
+/** A `[start, end)` character span of one dot-separated segment within a `pattern`
+ *  node's raw text (bracket-aware, so a `[1..3]` index's internal dots are never
+ *  mistaken for a path separator). */
+interface PatternSegment {
+  text: string;
+  start: number;
+  end: number;
+}
+
+function splitPatternSegments(text: string): PatternSegment[] {
+  const segments: PatternSegment[] = [];
+  let depth = 0;
+  let segStart = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '[') depth++;
+    else if (ch === ']') depth--;
+    else if (ch === '.' && depth === 0) {
+      segments.push({ text: text.slice(segStart, i), start: segStart, end: i });
+      segStart = i + 1;
+    }
+  }
+  segments.push({ text: text.slice(segStart), start: segStart, end: text.length });
+  return segments;
+}
+
+/** Strip a trailing `[idx]` / `[*]` array-index suffix from a submodule-reference
+ *  segment. `isIndexWildcard` is true for the `[*]` "all vector elements" form,
+ *  which — like a bare `*`/`**` name segment — has no single resolvable target. */
+function stripIndexSuffix(seg: string): { name: string; isIndexWildcard: boolean } {
+  const m = /^(.*)\[([^\]]*)\]$/.exec(seg);
+  return m ? { name: m[1], isIndexWildcard: m[2].trim() === '*' } : { name: seg, isIndexWildcard: false };
+}
+
+/** Walk `text` char-by-char from `start` (a tree-sitter Point) until `pos` is
+ *  reached, returning the offset into `text`, or null if `pos` falls outside it. */
+function offsetAtPos(start: { row: number; column: number }, text: string, pos: Position): number | null {
+  let row = start.row;
+  let col = start.column;
+  for (let i = 0; i < text.length; i++) {
+    if (row === pos.line && col === pos.character) return i;
+    if (text[i] === '\n') { row++; col = 0; } else { col++; }
+  }
+  return row === pos.line && col === pos.character ? text.length : null;
+}
+
+/** Inverse of {@link offsetAtPos}: the document Position reached after consuming
+ *  `offset` characters of `text` starting at `start`. */
+function posAtOffset(start: { row: number; column: number }, text: string, offset: number): Position {
+  let row = start.row;
+  let col = start.column;
+  for (let i = 0; i < offset; i++) {
+    if (text[i] === '\n') { row++; col = 0; } else { col++; }
+  }
+  return { line: row, character: col };
+}
+
+/** A submodule's declared/interface type, for deep-path walking (mirrors
+ *  nedParamHierarchy.ts's resolveSubType: a `like` submodule resolves to its
+ *  declared interface — deep navigation doesn't need the config-time
+ *  typename-precedence chain that the graphical preview's resolver does). */
+function submoduleWalkType(
+  cache: NedResourceCache,
+  owner: NedTypeInfo,
+  sub: SubmoduleInfo,
+): NedTypeInfo | undefined {
+  const typeName = sub.isLike ? sub.likeType : sub.type;
+  return typeName ? cache.lookupType(typeName, owner.file, owner.fqName) : undefined;
+}
+
+/**
+ * Resolve a deep/dotted parameter-assignment path (`ipv4.arp.proxyArpInterfaces =
+ * default("")`) to the parameter's declaration on the type reached by walking the
+ * path's submodule segments. Ports Eclipse's `NedTextUtils.resolveDeepParamDeclaration`
+ * (`NedTextUtils.java:222-251`) plus its dispatch condition in `getNedReferenceFromSource`
+ * (same file, ~125-131): navigation only fires when the cursor is on the FINAL segment
+ * (the actual parameter name) — clicking an intermediate submodule segment yields
+ * nothing there either, and the returned range covers only that final word, matching
+ * Eclipse's `wordRegion` (not the whole dotted path). A `*`/`**` name segment or a
+ * `[*]` "all vector elements" index segment aborts with no navigation target (Eclipse
+ * returns null for a wildcard segment); an unresolvable submodule name or type also
+ * aborts gracefully rather than crashing.
+ */
+function deepParamRefAt(
+  cache: NedResourceCache,
+  file: NedFileInfo,
+  patternNode: SyntaxNode,
+  pos: Position,
+): ParamRef | null {
+  const text = patternNode.text;
+  const segments = splitPatternSegments(text);
+  if (segments.length < 2) return null; // grammar guarantees >=2, but be defensive
+  const last = segments[segments.length - 1];
+
+  // Only the final segment (the real parameter name) is a navigable target.
+  const offset = offsetAtPos(patternNode.startPosition, text, pos);
+  if (offset === null || offset < last.start || offset > last.end) return null;
+
+  const name = last.text.trim();
+  let owner = paramDeclContextType(cache, file, patternNode);
+  if (!owner) return null;
+
+  for (const seg of segments.slice(0, -1)) {
+    const raw = seg.text.trim();
+    if (raw === '*' || raw === '**') return null; // wildcard — no static target
+    const { name: subName, isIndexWildcard } = stripIndexSuffix(raw);
+    if (isIndexWildcard) return null;
+    const sub = owner.getSubmodule(subName);
+    if (!sub) return null;
+    const next = submoduleWalkType(cache, owner, sub);
+    if (!next) return null;
+    owner = next;
+  }
+
+  const decl = owner.paramDecl(name);
+  if (!decl) return null;
+  const nn = nameNode(decl.node) ?? decl.node;
+  return {
+    decl: { uri: decl.owner.file.uri, range: nodeRange(nn) },
+    name,
+    type: paramInfo(decl.node).type,
+    doc: paramDocComment(decl.node),
+    ownerFq: decl.owner.fqName,
+    range: {
+      start: posAtOffset(patternNode.startPosition, text, last.start),
+      end: posAtOffset(patternNode.startPosition, text, last.end),
+    },
+  };
+}
+
+/** Resolve a parameter NAME at a position (declaration or override) to its decl.
+ *  Also handles a deep/dotted parameter-assignment PATH (`a.b.c = ...`, parsed by
+ *  the grammar as a single `pattern` node rather than a plain `name`) — see
+ *  {@link deepParamRefAt}. */
 export function paramRefAt(
   cache: NedResourceCache,
   file: NedFileInfo,
@@ -157,14 +312,19 @@ export function paramRefAt(
   pos: Position,
 ): ParamRef | null {
   const node = namedDescendantAt(tree, pos);
-  if (!node || node.type !== 'name' || node.parent?.type !== 'parameter') return null;
+  if (!node) return null;
+
+  // Dotted deep-assignment key: the whole path is one flat `pattern` node (its only
+  // possible named child is a `pattern_index` for a `[N]`/`[N..M]` array index), so
+  // the cursor may land on `pattern` itself or, inside brackets, on `pattern_index`.
+  const patternNode = node.type === 'pattern' ? node : ancestorOfType(node, ['pattern']);
+  if (patternNode && patternNode.parent?.type === 'parameter') {
+    return deepParamRefAt(cache, file, patternNode, pos);
+  }
+
+  if (node.type !== 'name' || node.parent?.type !== 'parameter') return null;
   const name = node.text;
-  let owner =
-    enclosingSubmoduleType(cache, file, node) ??
-    (() => {
-      const tnode = ancestorOfType(node, NED_TYPE_NODES as unknown as string[]);
-      return tnode ? cache.typeInfoForNode(tnode, file.uri) : undefined;
-    })();
+  const owner = paramDeclContextType(cache, file, node);
   if (!owner) return null;
   const decl = owner.paramDecl(name);
   if (!decl) return null;

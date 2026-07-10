@@ -291,8 +291,18 @@ function tagSnippet(tag: DisplayTag): string {
  * Build display-string completion proposals for a context and the in-quote
  * prefix up to the cursor: tag keys when starting a tag, otherwise enumerated /
  * color values for the current tag's argument.
+ *
+ * `iconIds` is the host-enumerated list of all available icon ids (project
+ * `images/` dirs → install dir → bundled snapshot, deduped by search-root
+ * precedence — see `shared/src/node/docIcons.ts`'s `listIconIds`). It is
+ * optional/defaulted so callers that don't have filesystem access (e.g. tests)
+ * still get a graceful `[]` for image-typed arguments instead of a crash.
+ * Ported from `NedCompletionProcessor.java:377-386`'s `addImageProposals`
+ * calls: `i=`/`i2=` and `bgi=`'s non-first arguments offer every icon id;
+ * `bgi=`'s first argument (the image name itself) is restricted to ids under
+ * the `maps/` category, matching Eclipse's `"maps/.*"` regex.
  */
-export function displayCompletions(ctx: DisplayContext, insideQuotes: string): CompletionItem[] {
+export function displayCompletions(ctx: DisplayContext, insideQuotes: string, iconIds: string[] = []): CompletionItem[] {
   const cur = displayCursorContext(insideQuotes);
 
   if (cur.typingKey) {
@@ -326,6 +336,22 @@ export function displayCompletions(ctx: DisplayContext, insideQuotes: string): C
       detail: `${tag.name} — ${arg.name}`,
     }));
   }
-  // image / free-text arguments: no enumerated proposals (see plan "Out of scope")
+  if (arg.type === 'image') {
+    const restrictToMaps = tag.key === 'bgi' && cur.argIndex === 0;
+    const ids = restrictToMaps ? iconIds.filter((id) => id.startsWith('maps/')) : iconIds;
+    // No image bytes here — that would bloat every completion response by
+    // every candidate icon's worth of base64 data on every keystroke. Instead
+    // tag each item with a small `data` payload the server's
+    // `completionItem/resolve` handler (server/src/features/completionResolve.ts)
+    // reads back to lazily embed a preview for just the one item the user
+    // highlights (see shared/src/model/completion.ts's `CompletionItem.data`).
+    return ids.map((id) => ({
+      label: id,
+      kind: CompletionItemKind.Value,
+      detail: `${tag.name} — ${arg.name}`,
+      data: { kind: 'nedDisplayIcon', iconId: id },
+    }));
+  }
+  // other free-text arguments (e.g. tooltip/text/group strings): no enumerated proposals
   return [];
 }

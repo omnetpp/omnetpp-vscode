@@ -45,6 +45,7 @@ import {
   type ElogChangedParams,
   type ElogModule,
   type ElogProgressParams,
+  type EntryTypeSchema,
   type EventDetail,
   type EventDetailParams,
   type FilterHints,
@@ -281,6 +282,11 @@ export class WorkerClient {
   /** ADDITIVE (phase U7): filter-panel autocompletion data -- see `elogProtocol.ts`'s `FilterHints` doc. */
   getFilterHints(token?: CancellationToken): Promise<FilterHints> {
     return this.rawRequest(ElogMethods.getFilterHints, undefined, token);
+  }
+
+  /** ADDITIVE (phase U10): Event Log Table content-assist schema -- see `elogProtocol.ts`'s `EntryTypeSchema` doc. */
+  getEntryTypeSchema(token?: CancellationToken): Promise<EntryTypeSchema> {
+    return this.rawRequest(ElogMethods.getEntryTypeSchema, undefined, token);
   }
 
   async setFilter(params: FilterParams | null, token?: CancellationToken): Promise<LogSummary> {

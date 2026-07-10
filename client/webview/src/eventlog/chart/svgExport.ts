@@ -37,6 +37,8 @@
  */
 
 import { SvgBuilder, fmt } from '@omnetpp/shared/preview';
+import { AXIS_VECTOR_STRIP_HEIGHT } from './axes';
+import { axisVectorStripBounds } from './canvasStack';
 import type { DrawPrimitive } from './drawList';
 import type { LineSegment } from './arrowGeometry';
 
@@ -163,7 +165,7 @@ function ellipseArcPolylinePath(cx: number, cy: number, rx: number, ry: number, 
   return parts.join(' ');
 }
 
-/** One `<path>` `d` string covering every (independent, possibly-disjoint) segment of a filtered-dependency "zigzag" sign -- each segment is its own `M...L...` subpath. */
+/** One `<path>` `d` string covering every (independent, possibly-disjoint) segment of a filtered/collapsed-dependency marker (parallel-line glyph; function/primitive name `zigzag` is legacy, see `arrowGeometry.ts`'s `buildFilteredSignSegments()`) -- each segment is its own `M...L...` subpath. */
 function zigzagPath(segments: readonly LineSegment[]): string {
   return segments.map((s) => `M ${fmt(s.x1)} ${fmt(s.y1)} L ${fmt(s.x2)} ${fmt(s.y2)}`).join(' ');
 }
@@ -181,9 +183,12 @@ function emitPrimitive(b: SvgBuilder, p: DrawPrimitive, fontFamily: string): voi
       b.el('line', { x1: p.x1, y1: p.y, x2: p.x2, y2: p.y, stroke: p.color, 'stroke-width': p.lineHeight });
       return;
     case 'axisVectorStrip': {
-      // Multi-color step bar centered on the axis line (see canvasStack.ts).
-      const top = p.y - p.height / 2;
-      const bot = top + p.height;
+      // Multi-color step bar HANGING BELOW the axis line (see canvasStack.ts's matching
+      // case for the Eclipse `AxisVectorBarRenderer` rationale -- item 6's fix). Reuses
+      // `axisVectorStripBounds()` from canvasStack.ts so the on-screen canvas and this SVG
+      // export can't independently drift on the geometry formula.
+      const { top, bottom: bot } = axisVectorStripBounds(p);
+      const labelY = top + p.height / 2;
       for (const seg of p.segments) {
         const w = Math.max(1, seg.x2 - seg.x1);
         b.el('rect', { x: seg.x1, y: top, width: w, height: p.height, fill: seg.color });
@@ -201,19 +206,22 @@ function emitPrimitive(b: SvgBuilder, p: DrawPrimitive, fontFamily: string): voi
         const tw = seg.valueText.length * 5.4;
         if (seg.x2 - seg.x1 > tw + 6) {
           for (let x = seg.x1 + 5; x < p.canvasWidth && x < seg.x2 - tw; x += p.canvasWidth) {
-            b.el('text', { x, y: p.y, fill: p.labelColor, 'font-size': 9, 'font-family': 'monospace', 'text-anchor': 'start', 'dominant-baseline': 'middle' }, seg.valueText);
+            b.el('text', { x, y: labelY, fill: p.labelColor, 'font-size': 9, 'font-family': 'monospace', 'text-anchor': 'start', 'dominant-baseline': 'middle' }, seg.valueText);
           }
         }
       }
       return;
     }
     case 'axisSelectionMark': {
-      // Symmetric bracket around whatever is centered on p.y (a plain line or a vector
-      // strip) -- see canvasStack.ts's matching case for why this isn't a fixed offset.
-      const halfHeight = p.lineHeight / 2;
+      // Bracket around whatever is drawn on this row -- see canvasStack.ts's matching case:
+      // a plain axis line is centered on `p.y` (symmetric bracket), a 12px vector-data strip
+      // instead hangs BELOW `p.y` (item 6's fix), so its bracket is asymmetric too.
       const margin = 1.5;
-      b.el('line', { x1: p.x1, y1: p.y - halfHeight - margin, x2: p.x2, y2: p.y - halfHeight - margin, stroke: p.color, 'stroke-width': 1.5 });
-      b.el('line', { x1: p.x1, y1: p.y + halfHeight + margin, x2: p.x2, y2: p.y + halfHeight + margin, stroke: p.color, 'stroke-width': 1.5 });
+      const isStrip = p.lineHeight === AXIS_VECTOR_STRIP_HEIGHT;
+      const topY = isStrip ? p.y - margin : p.y - p.lineHeight / 2 - margin;
+      const botY = isStrip ? p.y + p.lineHeight + margin : p.y + p.lineHeight / 2 + margin;
+      b.el('line', { x1: p.x1, y1: topY, x2: p.x2, y2: topY, stroke: p.color, 'stroke-width': 1.5 });
+      b.el('line', { x1: p.x1, y1: botY, x2: p.x2, y2: botY, stroke: p.color, 'stroke-width': 1.5 });
       return;
     }
     case 'axisLabel':
@@ -304,7 +312,7 @@ function emitPrimitive(b: SvgBuilder, p: DrawPrimitive, fontFamily: string): voi
       const textW = Math.max(0, ...p.lines.map((l) => l.length * 6));
       const w = textW + 12;
       const h = p.lines.length * lineH + 6;
-      const x = p.rightX - w - 4;
+      const x = p.align === 'left' ? p.anchorX + 4 : p.anchorX - w - 4;
       const y = p.edge === 'top' ? p.anchorY + 2 : p.anchorY - h - 2;
       b.el('rect', { x, y, width: w, height: h, fill: p.background, stroke: p.color });
       for (let i = 0; i < p.lines.length; i++) {

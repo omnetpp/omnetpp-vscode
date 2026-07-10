@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { getParsers } from './helpers';
 import { BUILTIN_NED_TEXT, BUILTIN_URI, NedResourceCache } from '../ned/nedResourceCache';
 import { nedCompletion } from '../ned/nedCompletion';
-import { displayCursorContext } from '../ned/displayString';
+import { displayCompletions, displayCursorContext } from '../ned/displayString';
 
 async function nedCache(files: Record<string, string>) {
   const svc = await getParsers();
@@ -14,13 +14,13 @@ async function nedCache(files: Record<string, string>) {
 }
 
 /** Completion labels with the cursor positioned just before `")` on the given line. */
-function completeInDisplay(cache: NedResourceCache, uri: string, lineIdx: number): string[] {
+function completeInDisplay(cache: NedResourceCache, uri: string, lineIdx: number, iconIds: string[] = []): string[] {
   const file = cache.getFile(uri)!;
   const lines = file.tree.rootNode.text.split('\n');
   const line = lines[lineIdx];
   const character = line.indexOf('")');
   assert.ok(character >= 0, `line ${lineIdx} has no \`")\`: ${line}`);
-  return nedCompletion(cache, file, file.tree, { line: lineIdx, character }, line).map((i) => i.label);
+  return nedCompletion(cache, file, file.tree, { line: lineIdx, character }, line, iconIds).map((i) => i.label);
 }
 
 const SUB = `simple SBase {
@@ -147,6 +147,79 @@ test('display: bgi mode enum in compound context', async () => {
     completeInDisplay(cache, 'file:///bgi.ned', 2).sort(),
     ['center', 'fix', 'stretch', 'tile'],
   );
+});
+
+const ICON_FIXTURE = ['device/pc', 'device/router', 'maps/world', 'maps/europe', 'status/ok'];
+
+test('display: i= offers the full icon list when icon ids are supplied', async () => {
+  const ned = SUB + `module M {
+    submodules:
+        a: SBase {
+            @display("i=");
+        }
+}
+`;
+  const cache = await nedCache({ 'file:///icon.ned': ned });
+  const labels = completeInDisplay(cache, 'file:///icon.ned', 8, ICON_FIXTURE);
+  assert.deepStrictEqual([...labels].sort(), [...ICON_FIXTURE].sort());
+});
+
+test('display: i2= (status icon) also offers the full unrestricted icon list', async () => {
+  const ned = SUB + `module M {
+    submodules:
+        a: SBase {
+            @display("i2=");
+        }
+}
+`;
+  const cache = await nedCache({ 'file:///icon2.ned': ned });
+  const labels = completeInDisplay(cache, 'file:///icon2.ned', 8, ICON_FIXTURE);
+  assert.deepStrictEqual([...labels].sort(), [...ICON_FIXTURE].sort());
+});
+
+test('display: image-typed candidates carry a nedDisplayIcon data tag, not embedded image bytes', () => {
+  const items = displayCompletions('submodule', 'i=', ICON_FIXTURE);
+  assert.equal(items.length, ICON_FIXTURE.length);
+  for (const item of items) {
+    assert.deepStrictEqual(item.data, { kind: 'nedDisplayIcon', iconId: item.label });
+    // documentation/image bytes are resolve-only (server-side); nothing image-ish here
+    assert.equal(item.documentation, undefined);
+  }
+});
+
+test('display: bgi= first argument is restricted to maps/-prefixed icon ids', async () => {
+  const ned = `module M {
+    parameters:
+        @display("bgi=");
+}
+`;
+  const cache = await nedCache({ 'file:///bgiicon.ned': ned });
+  const labels = completeInDisplay(cache, 'file:///bgiicon.ned', 2, ICON_FIXTURE);
+  assert.deepStrictEqual([...labels].sort(), ['maps/europe', 'maps/world']);
+});
+
+test('display: bgi= second argument (mode) is unaffected by the maps/ restriction', async () => {
+  const ned = `module M {
+    parameters:
+        @display("bgi=back,");
+}
+`;
+  const cache = await nedCache({ 'file:///bgimode.ned': ned });
+  // arg index 1 is the enum-valued 'mode' arg, not image-typed — icon ids must not leak in
+  const labels = completeInDisplay(cache, 'file:///bgimode.ned', 2, ICON_FIXTURE);
+  assert.deepStrictEqual(labels.sort(), ['center', 'fix', 'stretch', 'tile']);
+});
+
+test('display: image-typed argument with no icon ids supplied returns [] gracefully (backward compat)', async () => {
+  const ned = SUB + `module M {
+    submodules:
+        a: SBase {
+            @display("i=");
+        }
+}
+`;
+  const cache = await nedCache({ 'file:///noicons.ned': ned });
+  assert.deepStrictEqual(completeInDisplay(cache, 'file:///noicons.ned', 8), []);
 });
 
 test('displayCursorContext: distinguishes tag key vs argument index', () => {

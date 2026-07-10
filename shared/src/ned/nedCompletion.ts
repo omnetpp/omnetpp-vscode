@@ -6,7 +6,25 @@ import { NedResourceCache, NedFileInfo } from './nedResourceCache';
 import { NedTypeInfo } from './nedTypeInfo';
 import { NED_TYPE_NODES, NedTypeKind } from './nedAst';
 import { DisplayContext, displayCompletions } from './displayString';
-import { propertyCompletions } from './nedProperties';
+import {
+  propertyCompletions,
+  unitNameCompletions,
+  signalArgCompletions,
+  statisticArgCompletions,
+  recordModeCompletions,
+  interpolationModeCompletions,
+} from './nedProperties';
+import { expressionBuiltinCompletions } from './nedExpressionBuiltins';
+import {
+  figureTypeCompletions,
+  figurePropertyKeyCompletions,
+  figureKeyValueCompletions,
+} from './nedFigureSchema';
+import {
+  globalSkeletonCompletions,
+  submoduleSkeletonCompletions,
+  connectionSkeletonCompletions,
+} from './nedTemplates';
 
 const TOP_LEVEL_KEYWORDS = [
   'import', 'simple', 'module', 'network', 'channel', 'moduleinterface', 'channelinterface',
@@ -21,6 +39,8 @@ const GATE_TYPE_KEYWORDS = ['input', 'output', 'inout'];
  * Doc-comment keywords (after `@`) and HTML tags (after `<`), as in the IDE.
  * Ported from: ui/org.omnetpp.common/src/org/omnetpp/common/editor/text/Keywords.java
  * (`DOC_KEYWORDS`, `DOC_TAGS`, `NED_GATE_TYPES`, `NED_PARAM_TYPES` fields).
+ * This is the `NED_DOC` partition (a plain `//` comment); see `DOC_TODO_KEYWORDS`
+ * below for the separate `NED_PRIVATE_DOC` (`//#`) partition's keyword set.
  */
 export const DOC_KEYWORDS = [
   'author', 'bug', 'date', 'see', 'since', 'todo', 'version', 'warning', 'page', 'titlepage',
@@ -33,13 +53,39 @@ export const DOC_TAGS = [
 ];
 
 /**
- * Completion inside a `//` documentation comment: doc keywords after `@`,
- * HTML tags after `<`. Returns undefined when not in a doc-comment context.
+ * Keywords for a `//#`-prefixed "private"/internal doc comment (the `NED_PRIVATE_DOC`
+ * partition). Ported from `Keywords.DOC_TODO`
+ * (ui/org.omnetpp.common/src/org/omnetpp/common/editor/text/Keywords.java).
+ */
+export const DOC_TODO_KEYWORDS = ['CHECKME', 'FIXME', 'TBD', 'TODO'];
+
+/**
+ * Completion inside a `//` or `//#` documentation comment.
+ *
+ * Eclipse's `NedContentAssistPartitionScanner` (ui/org.omnetpp.ned.editor/.../text/assist/
+ * NedContentAssistPartitionScanner.java) partitions a `//#`-prefixed line as
+ * `NED_PRIVATE_DOC` (its rule is tried before the plain `//` rule, so the literal `//#`
+ * — no whitespace between `//` and `#` — wins); everything else starting with `//` is
+ * `NED_DOC`.
+ *
+ * `NedPrivateDocCompletionProcessor` (same directory) offers only
+ * `Keywords.DOC_TODO` (`CHECKME`/`FIXME`/`TBD`/`TODO`) for the private partition, matched
+ * against the current word under the cursor — unlike `NedDocCompletionProcessor`, it is
+ * NOT gated behind a leading `@`, and it has no `<`/HTML-tag branch at all (`DOC_TAGS` is
+ * never offered in a `//#` comment).
+ *
+ * `NedDocCompletionProcessor` (the regular `NED_DOC` partition) offers `DOC_KEYWORDS`
+ * after `@` and `DOC_TAGS` after `<`/`</`, as before.
+ *
+ * Returns undefined when not in a doc-comment context.
  */
 export function docCommentCompletion(prefix: string): CompletionItem[] | undefined {
   const comment = prefix.indexOf('//');
   if (comment < 0) return undefined;
   const inComment = prefix.slice(comment);
+  if (inComment.startsWith('//#')) {
+    return DOC_TODO_KEYWORDS.map((label) => ({ label, kind: CompletionItemKind.Keyword, insertText: label }));
+  }
   if (/@(\w*)$/.test(inComment)) {
     return DOC_KEYWORDS.map((label) => ({ label: '@' + label, kind: CompletionItemKind.Keyword, insertText: '@' + label }));
   }
@@ -117,6 +163,20 @@ function sectionByScan(lines: string[], line: number): string | undefined {
   return undefined;
 }
 
+/** Fq name of the topmost enclosing module/network (context for inner-type lookup). */
+function topmostFqName(cache: NedResourceCache, file: NedFileInfo, node: SyntaxNode): string | undefined {
+  let top: SyntaxNode | null = node;
+  let topFq: string | undefined;
+  while (top) {
+    if (top.type === 'module' || top.type === 'network') {
+      const f = cache.getFqNameForNode(top, file.uri);
+      if (f) topFq = f;
+    }
+    top = top.parent;
+  }
+  return topFq;
+}
+
 /** The submodule whose body the cursor is in (for inherited-param completion). */
 function enclosingSubmoduleType(
   cache: NedResourceCache,
@@ -131,17 +191,64 @@ function enclosingSubmoduleType(
     if (c.type === 'type') typeName = c.text;
   }
   if (!typeName) return undefined;
-  // resolve in the topmost compound's scope
-  let top: SyntaxNode | null = sub;
-  let topFq: string | undefined;
-  while (top) {
-    if (top.type === 'module' || top.type === 'network') {
-      const f = cache.getFqNameForNode(top, file.uri);
-      if (f) topFq = f;
-    }
-    top = top.parent;
+  return cache.lookupType(typeName, file, topmostFqName(cache, file, sub));
+}
+
+/**
+ * Resolve an EXPLICITLY NAMED submodule (by name, declared on `ownerType`) to its
+ * type — unlike {@link enclosingSubmoduleType}, which resolves "the submodule whose
+ * body the cursor is currently in". Used for connection-endpoint gate completion
+ * (`sub1.` -> sub1's gates). Falls back to the `like` interface name when the
+ * submodule has no concrete type, matching Eclipse's `extractSubmoduleTypeName`
+ * (`AbstractNedCompletionProcessor.java:149-166`).
+ */
+function resolveSubmoduleTypeByName(
+  cache: NedResourceCache,
+  file: NedFileInfo,
+  ownerType: NedTypeInfo,
+  submoduleName: string,
+): NedTypeInfo | undefined {
+  const sub = ownerType.getSubmodule(submoduleName);
+  const typeName = sub?.type || sub?.likeType;
+  if (!typeName) return undefined;
+  return cache.lookupType(typeName, file, topmostFqName(cache, file, ownerType.node));
+}
+
+/**
+ * Submodule name from a trailing `sub.` / `sub[idx].` on the line, ignoring
+ * anything before a connection arrow (so `a.g --> b.` resolves to `b`, not `a`).
+ * Ported from Eclipse's `extractSubmoduleTypeName` (name-extraction half only —
+ * type resolution is {@link resolveSubmoduleTypeByName} here).
+ */
+function trailingDottedSubmoduleName(prefix: string): string | undefined {
+  const afterArrow = prefix.replace(/^.*(-->|<-->|<--)/, '');
+  const m = /([A-Za-z_]\w*)\s*(\[[^[\]]*\])?\s*\.$/.exec(afterArrow);
+  return m?.[1];
+}
+
+/**
+ * True if `line` contains an unbalanced `[` (an in-progress array-size expression,
+ * e.g. a submodule/gate vector size like `sub[sizeof(`). Repeatedly blanks out
+ * balanced `[...]` pairs, then checks whether a stray `[` remains.
+ * Ported from `AbstractNedCompletionProcessor.containsOpenBracket`.
+ */
+function containsOpenBracket(line: string): boolean {
+  while (/\[[^[\]]*\]/.test(line)) {
+    line = line.replace(/\[[^[\]]*\]/g, '###');
   }
-  return cache.lookupType(typeName, file, topFq);
+  return line.includes('[');
+}
+
+/**
+ * True when the cursor is inside a NED value expression: an assignment RHS
+ * (`name = ...`, but not when a `(` precedes the `=`, which would be a property
+ * argument list like `@statistic[x](title=...)` handled elsewhere), an `if`/`for`
+ * condition, or an in-progress array-size expression (unbalanced `[`).
+ * Ported from `NedCompletionProcessor.java:202` (the `if (line.matches(...))` guard
+ * that gates the whole expression-completion block).
+ */
+function isExpressionContext(line: string): boolean {
+  return /^[^(]*=.*$/.test(line) || /\b(if|for)\b/.test(line) || containsOpenBracket(line);
 }
 
 /**
@@ -155,6 +262,11 @@ export function nedCompletion(
   tree: Tree,
   pos: Position,
   lineText: string,
+  /** Icon ids available for `i=`/`i2=`/`bgi=` display-string completion (see
+   *  `displayCompletions`'s `iconIds` param). Host-provided, since enumerating
+   *  the filesystem needs Node access `shared/` doesn't have; defaults to `[]`
+   *  for callers (tests, other hosts) that don't supply it. */
+  iconIds: string[] = [],
 ): CompletionItem[] {
   const prefix = lineText.slice(0, pos.character);
 
@@ -175,10 +287,80 @@ export function nedCompletion(
       node && ancestorOfType(node, ['connection']) ? 'connection'
         : node && ancestorOfType(node, ['submodule']) ? 'submodule'
           : 'compound';
-    return displayCompletions(ctx, dm[1]);
+    return displayCompletions(ctx, dm[1], iconIds);
   }
 
+  // inside `@unit(...)`'s argument list: offer known unit names. Ported from
+  // NedCompletionProcessor.java:390-391.
+  if (/@unit\s*\(\s*\w*$/.test(prefix)) {
+    return unitNameCompletions();
+  }
+
+  // inside `@signal[...](...)` / `@statistic[...](...)`'s argument list: argument-name
+  // templates, plus nested `unit=`/`record=`/`interpolationmode=` value completion.
+  // Ported from NedCompletionProcessor.java:392-405.
+  const inSignalArgs = /@signal\s*\[[^\]]*\]\s*\(/.test(prefix);
+  const inStatisticArgs = /@statistic\s*\[[^\]]*\]\s*\(/.test(prefix);
+  if (inSignalArgs || inStatisticArgs) {
+    if (/\bunit\s*=\s*\w*$/.test(prefix)) return unitNameCompletions();
+    if (inStatisticArgs) {
+      if (/\brecord\s*=\s*(?:[\w-]*,)*[\w-]*$/.test(prefix)) return recordModeCompletions();
+      if (/\binterpolationmode\s*=\s*[\w-]*$/.test(prefix)) return interpolationModeCompletions();
+      return statisticArgCompletions();
+    }
+    return signalArgCompletions();
+  }
+
+  // inside `@figure[...](...)`'s argument list: type-aware property-key/value
+  // completion. Ported from NedCompletionProcessor.java:406-510, driven by the
+  // NedCanvasFigureValidator schema transcribed in nedFigureSchema.ts. The three
+  // sub-cases are mutually exclusive (by construction of the regexes below, same
+  // as in the Java source): first unnamed arg (no `=` typed yet) -> figure-type
+  // candidates; right after a completed `key=value;` pair -> that type's valid
+  // property keys; inside a key's own value -> per-key value completion
+  // (color/image/transform/enum, or [] when the key has no enumerated values).
+  if (/@figure\s*\[[^\]]*\]\s*\(/.test(prefix)) {
+    if (/@figure\s*\[[^\]]*\]\s*\([^=,;]*$/.test(prefix)) {
+      return figureTypeCompletions();
+    }
+    if (/;\s*$/.test(prefix)) {
+      const typeMatch = /\btype\s*=\s*([A-Za-z_]\w*)\s*;/.exec(prefix);
+      return typeMatch ? figurePropertyKeyCompletions(typeMatch[1]) : [];
+    }
+    const kv = /\W*(\w*)\s*=([\w\s.,()#/-]*)$/.exec(prefix);
+    if (kv) {
+      const key = kv[1];
+      const valueIndex = (kv[2].match(/,/g) ?? []).length;
+      return figureKeyValueCompletions(key, valueIndex, kv[2], iconIds);
+    }
+    return [];
+  }
+
+  // --- section-scoped contexts ---
+  // An empty section (e.g. `parameters:` then a blank line) does not span to the
+  // cursor in the parse tree, so fall back to scanning upward for the nearest
+  // section keyword within the current type body. Computed up front (rather than
+  // just before its first use) so the fine cues below can be section-aware too.
+  const lines = tree.rootNode.text.split('\n');
+  const scanned = sectionByScan(lines, pos.line);
+  const inParams = !!(node && ancestorOfType(node, ['parameters'])) || scanned === 'parameters';
+  const inGates = !!(node && ancestorOfType(node, ['gates'])) || scanned === 'gates';
+  const inSubmodules = !!(node && ancestorOfType(node, ['submodules'])) || scanned === 'submodules';
+  const inConnections =
+    !!(node && ancestorOfType(node, ['connections'])) || scanned === 'connections';
+  const inTypes = !!(node && ancestorOfType(node, ['types'])) || scanned === 'types';
+
   // --- fine cues (work regardless of section) ---
+
+  // bare type header, neither `extends` nor `like` typed yet: offer the keywords
+  // themselves (e.g. `module Foo ` -> `extends`/`like`). Ported from
+  // NedCompletionProcessor.java:138-142. Interfaces only support `extends`.
+  const bareHeader =
+    /^\s*(simple|module|network|channel|moduleinterface|channelinterface)\s+[A-Za-z_]\w*\s+[A-Za-z]*$/.exec(prefix);
+  if (bareHeader && !/\b(extends|like)\b/.test(prefix)) {
+    const isIface = bareHeader[1] === 'moduleinterface' || bareHeader[1] === 'channelinterface';
+    return isIface ? kw(['extends']) : kw(['extends', 'like']);
+  }
 
   // `extends <Type>` — filter by the kind of the type being defined
   if (/\bextends\s+[\w.]*$/.test(prefix)) {
@@ -195,29 +377,75 @@ export function nedCompletion(
     return typeItems(cache, k === 'channel' ? isChannelIface : isModuleIface);
   }
 
-  // channel on a connection: `--> <Chan>` / `<--> <Chan>`
-  if (/(-->|<-->|<--)\s*[\w.]*$/.test(prefix)) {
-    return typeItems(cache, isChannel);
+  // bare `connections` keyword, no colon yet: offer the `allowunconnected` keyword
+  // so it can be completed to `connections allowunconnected:`.
+  if (enclosingTypeNode && /\bconnections\s*$/.test(prefix)) {
+    return kw(['allowunconnected']);
   }
 
-  // submodule type: `name: <type>` / `name[..]: type` (but NOT a section header line)
+  // submodule type: `name: <type>` / `name[..]: type` (but NOT a section header
+  // line, and not the `channelname:` position inside a `connections:` section —
+  // that is handled by the connections-endpoint logic below).
   const subMatch = /^\s*([A-Za-z_]\w*)(\[[^\]]*\])?\s*:\s*<?[\w.]*$/.exec(prefix);
-  if (subMatch && !SECTION_KEYWORDS.includes(subMatch[1])) {
+  if (subMatch && !SECTION_KEYWORDS.includes(subMatch[1]) && !inConnections) {
     return typeItems(cache, isModule);
   }
 
-  // --- section-scoped contexts ---
-  // An empty section (e.g. `parameters:` then a blank line) does not span to the
-  // cursor in the parse tree, so fall back to scanning upward for the nearest
-  // section keyword within the current type body.
-  const lines = tree.rootNode.text.split('\n');
-  const scanned = sectionByScan(lines, pos.line);
-  const inParams = !!(node && ancestorOfType(node, ['parameters'])) || scanned === 'parameters';
-  const inGates = !!(node && ancestorOfType(node, ['gates'])) || scanned === 'gates';
-  const inSubmodules = !!(node && ancestorOfType(node, ['submodules'])) || scanned === 'submodules';
-  const inConnections =
-    !!(node && ancestorOfType(node, ['connections'])) || scanned === 'connections';
-  const inTypes = !!(node && ancestorOfType(node, ['types'])) || scanned === 'types';
+  // Expression-context member-access + built-ins completion: cursor is inside a
+  // value expression (assignment RHS, `if`/`for` condition, or an in-progress
+  // array-size expression). Checked regardless of section, matching the Java
+  // source's unconditional placement. Ported from NedCompletionProcessor.java:202-246.
+  if (isExpressionContext(prefix)) {
+    const items: CompletionItem[] = [];
+    // `submoduleType`: the type of the submodule whose body the cursor is
+    // currently in (only set inside a submodule's own `{ ... }` block) — matches
+    // Java's `submoduleType` (SECT_SUBMODULE_PARAMETERS/GATES only).
+    const submoduleType = node ? enclosingSubmoduleType(cache, file, node) : undefined;
+    // `typeInfo`: the innermost enclosing type actually being defined (module/
+    // network/... header) — matches Java's `nedTypeInfo`.
+    const typeInfo = enclosingTypeNode ? cache.typeInfoForNode(enclosingTypeNode, file.uri) : undefined;
+
+    if (/\bthis *\.$/.test(prefix)) {
+      // `this.` -> the submodule's own parameter names (only meaningful inside a
+      // submodule's parameter-assignment body, matching Java's `submoduleType!=null` guard).
+      if (submoduleType) for (const [name, p] of submoduleType.params()) {
+        items.push({ label: name, kind: CompletionItemKind.Property, detail: p.type });
+      }
+    } else if (/\bsizeof *\($/.test(prefix)) {
+      // `sizeof(` -> gate + submodule names of the enclosing type.
+      if (typeInfo) {
+        for (const [name, g] of typeInfo.gates()) {
+          items.push({ label: name, kind: CompletionItemKind.Field, detail: g.type });
+        }
+        for (const name of typeInfo.submodules().keys()) {
+          items.push({ label: name, kind: CompletionItemKind.Variable, detail: 'submodule' });
+        }
+      }
+    } else if (prefix.endsWith('.')) {
+      // trailing `sub.` -> parameter names of the resolved submodule's type (and,
+      // specifically inside `sizeof(...)`, its gate names too).
+      const dotSub = trailingDottedSubmoduleName(prefix);
+      const subType = dotSub && typeInfo && resolveSubmoduleTypeByName(cache, file, typeInfo, dotSub);
+      if (subType) {
+        if (/\bsizeof *\(/.test(prefix)) {
+          for (const [name, g] of subType.gates()) {
+            items.push({ label: name, kind: CompletionItemKind.Field, detail: g.type });
+          }
+        }
+        for (const [name, p] of subType.params()) {
+          items.push({ label: name, kind: CompletionItemKind.Property, detail: p.type });
+        }
+      }
+    } else {
+      // bare expression position: parameter names of the enclosing type.
+      if (typeInfo) for (const [name, p] of typeInfo.params()) {
+        items.push({ label: name, kind: CompletionItemKind.Property, detail: p.type });
+      }
+    }
+
+    items.push(...expressionBuiltinCompletions());
+    return items;
+  }
 
   // The (implicit) parameters section: param type keywords + inherited params to
   // assign + type/parameter-level properties. The `parameters:` keyword is
@@ -271,14 +499,75 @@ export function nedCompletion(
     return paramBundle();
   }
 
-  // submodules section (line start, not yet a `name:` decl): offer nothing type-y
-  if (inSubmodules || inConnections) {
+  // submodules section: `if <cond>` after a completed submodule type name, or
+  // after a `like Interface` clause. Ported from NedCompletionProcessor.java:276-303
+  // (only the `if` cue — the type-name-after-`:` and interface-name-after-`like`
+  // cues are already covered by the `subMatch`/`like` cues above). On any other
+  // (typically empty) line in the section, offer submodule-declaration skeleton
+  // snippets — ported from NedCompletionProcessor.java:191-193
+  // (`proposedNedSubmoduleTempl`, offered on an empty SECT_SUBMODULES line).
+  if (inSubmodules) {
+    const ifAfterType =
+      /^\s*[A-Za-z_]\w*(\[[^\]]*\])?\s*:\s*[A-Za-z_][\w.]*\s+[A-Za-z]*$/.test(prefix);
+    const ifAfterLike =
+      /^\s*[A-Za-z_]\w*(\[[^\]]*\])?\s*:\s*<[^>]*>\s*like\s+[A-Za-z_][\w.]*\s+[A-Za-z]*$/.test(prefix);
+    if (ifAfterType || ifAfterLike) return kw(['if']);
+    return submoduleSkeletonCompletions();
+  }
+
+  // connections section: endpoint completion. Ported from
+  // NedCompletionProcessor.java:305-342 (SECT_CONNECTIONS).
+  if (inConnections) {
+    const typeInfo = enclosingTypeNode ? cache.typeInfoForNode(enclosingTypeNode, file.uri) : undefined;
+
+    // after `sub.` / `sub[i].`: gate names of the resolved submodule's type
+    const dotSub = trailingDottedSubmoduleName(prefix);
+    if (dotSub) {
+      const subType = typeInfo && resolveSubmoduleTypeByName(cache, file, typeInfo, dotSub);
+      const items: CompletionItem[] = [];
+      if (subType) for (const [name, g] of subType.gates()) {
+        items.push({ label: name, kind: CompletionItemKind.Field, detail: g.type });
+      }
+      return items;
+    }
+
+    // after a trailing `channelname:` — offer channel types
+    if (/[A-Za-z_]\w*\s*:\s*\w*$/.test(prefix)) {
+      return typeItems(cache, isChannel);
+    }
+
+    // at line start, or right after an arrow (`-->`/`<--`/`<-->`): submodule names
+    // + the enclosing type's own gate names; if exactly one arrow is already on
+    // the line, also channel type names (for a channel-mediated connection). At
+    // (true) line start only — not right after an arrow — also offer connection
+    // topology skeleton snippets, matching Eclipse's `line.equals("")` guard around
+    // `proposedNedConnectionTempl` (NedCompletionProcessor.java:340-341).
+    const atLineStart = /^\s*\w*$/.test(prefix);
+    const afterArrow = /(-->|<-->|<--)\s*\w*$/.test(prefix);
+    if (atLineStart || afterArrow) {
+      const items: CompletionItem[] = [];
+      if (typeInfo) {
+        for (const name of typeInfo.submodules().keys()) {
+          items.push({ label: name, kind: CompletionItemKind.Variable, detail: 'submodule' });
+        }
+        for (const [name, g] of typeInfo.gates()) {
+          items.push({ label: name, kind: CompletionItemKind.Field, detail: g.type });
+        }
+        const arrowCount = (prefix.match(/-->|<-->|<--/g) ?? []).length;
+        if (arrowCount === 1) items.push(...typeItems(cache, isChannel));
+      }
+      if (atLineStart) items.push(...connectionSkeletonCompletions());
+      return items;
+    }
+
     return [];
   }
 
-  // `types:` section: offer inner type-definition keywords
+  // `types:` section: offer inner type-definition keywords + module/type skeleton
+  // snippets. Ported from NedCompletionProcessor.java:188-190
+  // (`proposedNedGlobalTempl`, also offered for SECT_TYPES, not just SECT_GLOBAL).
   if (inTypes) {
-    return kw(TYPE_DEF_KEYWORDS);
+    return [...kw(TYPE_DEF_KEYWORDS), ...globalSkeletonCompletions()];
   }
 
   // inside a type body, between/before sections: the `parameters:` keyword is
@@ -287,6 +576,8 @@ export function nedCompletion(
     return [...kw(SECTION_KEYWORDS), ...paramBundle()];
   }
 
-  // file top level: type-definition / import keywords + file-level properties
-  return [...kw(TOP_LEVEL_KEYWORDS), ...propertyCompletions('file')];
+  // file top level: type-definition / import keywords + file-level properties +
+  // module/type skeleton snippets. Ported from NedCompletionProcessor.java:188-190
+  // (`proposedNedGlobalTempl`, offered for SECT_GLOBAL).
+  return [...kw(TOP_LEVEL_KEYWORDS), ...propertyCompletions('file'), ...globalSkeletonCompletions()];
 }

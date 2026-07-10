@@ -14,12 +14,6 @@
  *
  * Deliberate deviations from the Java source (all noted inline at the point they apply
  * too):
- *  - No icon/image column (`getImage()`) -- the Java row renderer draws a per-entry-type
- *    icon to the left of the "Details" text (`ImageFactory.EVENTLOG_IMAGE_DIR +
- *    className`); this port has no equivalent icon-resolution pipeline for eventlog
- *    entry types (unlike the NED preview's display-string icon search order) and the
- *    port plan's U2 scope list does not call for icons. Degradable gap, not a
- *    correctness bug -- every row still renders its full text.
  *  - No per-row selection-foreground flip (`Builder.selectedStyle()`) -- see
  *    `TableSpanStyle`'s doc comment in elogProtocol.ts for why that is pure
  *    presentation state the webview applies via CSS instead.
@@ -269,6 +263,30 @@ function computeIndentUnits(entry: EventLogEntry): number {
 }
 
 // ---------------------------------------------------------------------------------
+// getImage() -- row icon id (EventLogTableRowRenderer.java, ~lines 242-268)
+// ---------------------------------------------------------------------------------
+
+/**
+ * Port of `EventLogTableRowRenderer.getImage()`: the generic rule is the entry's class
+ * name with the trailing `Entry` stripped, with two overrides checked first (verified
+ * against the Java source):
+ *  - an `EventEntry` whose event `isSelfMessageProcessingEvent()` -> `"SelfEvent"`
+ *    instead of `"Event"`.
+ *  - a `BeginSendEntry` immediately followed (within the SAME event, `index + 1 <
+ *    event.getNumEventLogEntries()`) by an `EndSendEntry` -> `"ScheduleAt"` instead of
+ *    `"BeginSend"`. This is exactly `IEvent.isSelfMessage()`'s own definition (see
+ *    `Event.isSelfMessage()` in event.ts), already used elsewhere in this file for the
+ *    "Scheduling self "/"self " text -- reused here rather than re-deriving the same
+ *    index peek by hand.
+ */
+function computeIconId(entry: EventLogEntry, event: IEvent): string {
+  if (entry instanceof EventEntry && event.isSelfMessageProcessingEvent()) return 'SelfEvent';
+  if (entry instanceof BeginSendEntry && event.isSelfMessage(entry)) return 'ScheduleAt';
+  const className = entry.getClassName();
+  return className.endsWith('Entry') ? className.slice(0, -'Entry'.length) : className;
+}
+
+// ---------------------------------------------------------------------------------
 // getRawStyledText()
 // ---------------------------------------------------------------------------------
 
@@ -442,6 +460,10 @@ export function renderTableRow(entry: EventLogEntry, ctx: TableRowRenderContext,
 
   const eventNumberSpan: TableSpan = { text: `#${event.getEventNumber()}`, style: isEventLogEntry ? 'eventNo' : 'faint' };
   const simTimeSpan: TableSpan = { text: secondsToTimeString(event.getSimulationTime()), style: isEventLogEntry ? 'simtime' : 'faint' };
+  // Computed once, outside the RAW/DESCRIPTIVE branch below and outside the
+  // UnsupportedTableEntryError fallback -- identical in both display modes, per Java
+  // (getImage() is a column of its own, independent of getStyledText()'s mode).
+  const iconId = computeIconId(entry, event);
 
   let detailSpans: TableSpan[];
   if (modes.displayMode === 'RAW') detailSpans = renderRaw(entry);
@@ -454,5 +476,5 @@ export function renderTableRow(entry: EventLogEntry, ctx: TableRowRenderContext,
     }
   }
 
-  return { indentUnits: computeIndentUnits(entry), eventNumberSpan, simTimeSpan, detailSpans };
+  return { indentUnits: computeIndentUnits(entry), eventNumberSpan, simTimeSpan, detailSpans, iconId };
 }

@@ -47,6 +47,11 @@ test('handlers: elog/open returns a populated, non-empty LogSummary', () => {
   assert.equal(typeof summary.firstSimulationTime, 'string');
   assert.equal(typeof summary.lastSimulationTime, 'string');
   assert.ok(summary.approximateNumberOfEvents > 0);
+  // ADDITIVE (axis-vector run-id mismatch warning, `sequenceChartEditor.ts`'s
+  // `attachAxisVectorFlow`): a non-empty fixture has a `SimulationBeginEntry`, so its run id
+  // is surfaced rather than left `null`.
+  assert.equal(typeof summary.runId, 'string');
+  assert.ok((summary.runId as string).length > 0);
 });
 
 test('handlers: elog/getModuleTree returns the fixture\'s module hierarchy', () => {
@@ -277,6 +282,17 @@ test('handlers: elog/getFilterHints on an unopened session returns empty (not th
   // that DOES have modules; this test only guards against a throw on the call shape.
   const hints = call<FilterHints>(session, ElogMethods.getFilterHints, undefined);
   assert.ok(Array.isArray(hints.moduleNames));
+});
+
+// Phase U10: elog/getEntryTypeSchema -- static, so it doesn't even need a file open
+// (unlike getFilterHints/getModuleTree, which reflect the currently-parsed log).
+
+test('handlers: elog/getEntryTypeSchema returns the BS schema, with no file open at all', () => {
+  const session = new EngineSession();
+  const schema = call<Record<string, string[]>>(session, ElogMethods.getEntryTypeSchema, undefined);
+  assert.ok(Array.isArray(schema.BS));
+  assert.ok(schema.BS.includes('id'));
+  assert.ok(schema.BS.includes('sd'));
 });
 
 test('handlers: elog/setFilter with a trace filter (traceMessageReuses=true) on the reuse fixture follows the reuse dependency back to its origin event', () => {

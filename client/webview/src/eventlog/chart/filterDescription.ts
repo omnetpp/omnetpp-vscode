@@ -8,6 +8,16 @@
  *
  * Faithfully ported, INCLUDING two Java quirks/artifacts (kept deliberately, not
  * cleaned up, so the generated text matches Java's for the same inputs):
+ *  - The event-number range and simulation-time range are two children of ONE "Range
+ *    filter" tree node in Java, and `toString()` combines them into a SINGLE OR-group
+ *    (`if (enableRangeFilter) { rangeFilters = []; if (enableEventNumberRangeFilter)
+ *    ...; if (enableSimulationTimeRangeFilter) ...; filters.add(combineDesriptions("OR",
+ *    rangeFilters)); }`) -- so e.g. both ranges enabled at once produce ONE
+ *    parenthesized "(a) OR (b)" entry in the outer AND-list, not two separate entries.
+ *    This port has no single parent flag for the pair (`rangeEventNumbers`/
+ *    `rangeSimulationTime` are independent leaves, see filterPanelState.ts's header),
+ *    so it pushes the combined entry whenever EITHER leaf is enabled, mirroring the
+ *    same net effect.
  *  - An enabled OR-group section (module/message) that ends up with zero populated
  *    sub-filters (e.g. "by NED type" is ticked but nothing is checked in the list)
  *    still contributes an EMPTY STRING to the outer AND-list (Java:
@@ -56,14 +66,24 @@ export function buildFilterDescription(state: FilterPanelState, resolveModuleNam
   const { enabled } = state;
   const filters: string[] = [];
 
-  // ---- range filter (event numbers only -- see filterPanelState.ts's header) ----
-  if (enabled.rangeEventNumbers) {
+  // ---- range filter: event-number range + simulation-time range combine into ONE
+  // OR-group (see this file's header) ----
+  if (enabled.rangeEventNumbers || enabled.rangeSimulationTime) {
     const rangeFilters: string[] = [];
-    const first = state.firstConsideredEventNumber;
-    const last = state.lastConsideredEventNumber;
-    if (first !== null && last !== null) rangeFilters.push(`${first} <= event number <= ${last}`);
-    else if (first !== null) rangeFilters.push(`event number >= ${first}`);
-    else if (last !== null) rangeFilters.push(`event number <= ${last}`);
+    if (enabled.rangeEventNumbers) {
+      const first = state.firstConsideredEventNumber;
+      const last = state.lastConsideredEventNumber;
+      if (first !== null && last !== null) rangeFilters.push(`${first} <= event number <= ${last}`);
+      else if (first !== null) rangeFilters.push(`event number >= ${first}`);
+      else if (last !== null) rangeFilters.push(`event number <= ${last}`);
+    }
+    if (enabled.rangeSimulationTime) {
+      const lower = state.lowerSimulationTimeLimit.trim();
+      const upper = state.upperSimulationTimeLimit.trim();
+      if (lower.length > 0 && upper.length > 0) rangeFilters.push(`${lower} <= simulation time of event <= ${upper}`);
+      else if (lower.length > 0) rangeFilters.push(`simulation time of event >= ${lower}`);
+      else if (upper.length > 0) rangeFilters.push(`simulation time of event <= ${upper}`);
+    }
     filters.push(combine('OR', rangeFilters));
   }
 

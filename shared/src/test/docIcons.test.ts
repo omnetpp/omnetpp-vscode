@@ -1,8 +1,9 @@
 import { test } from 'bun:test';
 import assert from 'node:assert';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { createNodeIconProvider, sniffImageSize } from '../node/docIcons';
+import { createNodeIconProvider, listIconIds, sniffImageSize } from '../node/docIcons';
 
 // Exercises the Node icon provider against the real bundled icon snapshot
 // (resources/icons/), the same files dist/icons ships.
@@ -81,4 +82,49 @@ test('docIcons: sniffImageSize parses PNG and GIF headers', () => {
   // minimal GIF header: GIF89a, 7x9 logical screen
   const gif = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 7, 0, 9, 0, 0]);
   assert.deepEqual(sniffImageSize(gif), [7, 9]);
+});
+
+test('listIconIds: enumerates the real bundled snapshot, including subdirectory-prefixed ids', () => {
+  const ids = listIconIds([iconsDir]);
+  assert.ok(ids.includes('device/pc'), 'expected a subdirectory-prefixed id, got none matching device/pc');
+  assert.ok(ids.includes('maps/world'), 'expected maps/world (maps/ category used by bgi= restriction)');
+  assert.deepEqual(ids, [...ids].sort(), 'result must be sorted');
+  assert.equal(new Set(ids).size, ids.length, 'result must be deduped');
+  // _internal/* are this module's own fallback icons (e.g. _internal/unknown),
+  // not real OMNeT++ icons a user would reference — must not leak into completion.
+  assert.ok(!ids.some((id) => id.startsWith('_internal')), '_internal/* must be excluded');
+});
+
+test('listIconIds: basic enumeration + .gif recognized alongside .png, using a fixture dir', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'docicons-'));
+  try {
+    mkdirSync(join(dir, 'maps'), { recursive: true });
+    writeFileSync(join(dir, 'alpha.png'), 'x');
+    writeFileSync(join(dir, 'beta.gif'), 'x');
+    writeFileSync(join(dir, 'notanicon.txt'), 'x');
+    writeFileSync(join(dir, 'maps', 'city.png'), 'x');
+    assert.deepEqual(listIconIds([dir]), ['alpha', 'beta', 'maps/city']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('listIconIds: dedup by search-root precedence — first root shadows later ones with the same id', () => {
+  const projectDir = mkdtempSync(join(tmpdir(), 'docicons-project-'));
+  const bundledDir = mkdtempSync(join(tmpdir(), 'docicons-bundled-'));
+  try {
+    writeFileSync(join(projectDir, 'device_pc.png'), 'project-version');
+    writeFileSync(join(bundledDir, 'device_pc.png'), 'bundled-version');
+    writeFileSync(join(bundledDir, 'only_bundled.png'), 'x');
+    // projectDir listed first: its id list wins for shared ids, but ids unique
+    // to a later root are still included.
+    assert.deepEqual(listIconIds([projectDir, bundledDir]), ['device_pc', 'only_bundled']);
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true });
+    rmSync(bundledDir, { recursive: true, force: true });
+  }
+});
+
+test('listIconIds: nonexistent root is skipped without throwing', () => {
+  assert.deepEqual(listIconIds([join(iconsDir, 'no-such-dir')]), []);
 });

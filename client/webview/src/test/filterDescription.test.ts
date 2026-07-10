@@ -26,6 +26,46 @@ test('buildFilterDescription: event number range, upper bound only', () => {
   assert.equal(buildFilterDescription(s), 'Filter for events where event number <= 20');
 });
 
+test('buildFilterDescription: simulation time range, both bounds', () => {
+  const s = state({ enabled: { rangeSimulationTime: true }, lowerSimulationTimeLimit: '1.5', upperSimulationTimeLimit: '3' });
+  assert.equal(buildFilterDescription(s), 'Filter for events where 1.5 <= simulation time of event <= 3');
+});
+
+test('buildFilterDescription: simulation time range, lower bound only', () => {
+  const s = state({ enabled: { rangeSimulationTime: true }, lowerSimulationTimeLimit: '1.5', upperSimulationTimeLimit: '' });
+  assert.equal(buildFilterDescription(s), 'Filter for events where simulation time of event >= 1.5');
+});
+
+test('buildFilterDescription: simulation time range, upper bound only', () => {
+  const s = state({ enabled: { rangeSimulationTime: true }, lowerSimulationTimeLimit: '', upperSimulationTimeLimit: '3' });
+  assert.equal(buildFilterDescription(s), 'Filter for events where simulation time of event <= 3');
+});
+
+test('buildFilterDescription: event number range and simulation time range both enabled -> ONE combined OR-group (Java: single "Range filter" tree node)', () => {
+  const s = state({
+    enabled: { rangeEventNumbers: true, rangeSimulationTime: true },
+    firstConsideredEventNumber: 10,
+    lastConsideredEventNumber: 20,
+    lowerSimulationTimeLimit: '1',
+    upperSimulationTimeLimit: '2',
+  });
+  assert.equal(buildFilterDescription(s), 'Filter for events where (10 <= event number <= 20) OR (1 <= simulation time of event <= 2)');
+});
+
+test('buildFilterDescription: trace delta limits are NOT included in the text (matches Java\'s own toString(), which comments them out)', () => {
+  const s = state({
+    enabled: { trace: true },
+    tracedEventNumber: 100,
+    traceCauses: true,
+    traceConsequences: true,
+    causeEventNumberDelta: 5,
+    consequenceEventNumberDelta: 5,
+    causeSimulationTimeDelta: '1',
+    consequenceSimulationTimeDelta: '1',
+  });
+  assert.equal(buildFilterDescription(s), 'Filter for events where it is the cause or consequence of the event with event number 100');
+});
+
 test('buildFilterDescription: excluded event numbers, single value -> "prefix = v"', () => {
   const s = state({ enabled: { excludedEventNumbers: true }, excludedEventNumbers: [42] });
   assert.equal(buildFilterDescription(s), 'Filter for events where NOT event number = 42');

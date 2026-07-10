@@ -20,6 +20,9 @@ export interface IndexContext {
   /** Resolve an ini URI to its freshest parsed document (open buffer first, then
    *  the on-disk index) — used to follow `include` directives. */
   getIniDoc: (uri: string) => IniDocument | undefined;
+  /** All available icon ids (workspace `images/` → installDir → bundled snapshot,
+   *  deduped by precedence), for display-string `i=`/`i2=`/`bgi=` completion. */
+  iconIds: string[];
 }
 
 export function lineAt(text: string, line: number): string {

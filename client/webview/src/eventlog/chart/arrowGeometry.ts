@@ -393,34 +393,47 @@ export function computeTransmissionParallelogram(
 }
 
 // ---------------------------------------------------------------------------------
-// Filtered-dependency zigzag sign -- SequenceChart.java:4984-5023 (decoration only,
-// not separately hit-tested -- Java draws it ON TOP of the already-hit-testable line/
-// ellipse, never as its own collectVisibleObjectsAtPosition entry).
+// Filtered/collapsed-dependency marker (decoration only, not separately hit-tested --
+// Java draws its version ON TOP of the already-hit-testable line/ellipse, never as its
+// own collectVisibleObjectsAtPosition entry; this port preserves that property).
+//
+// Eclipse's `drawFilteredMessageDependencySign` (SequenceChart.java:4984-5023) draws a
+// double "Z"-shaped zigzag. Per EXPLICIT USER REQUEST this is a deliberate DEPARTURE
+// from that shape, not a fidelity port: instead it draws `count` short straight line
+// segments, each running PARALLEL to the arrow direction and stacked side-by-side
+// perpendicular to it -- the "‖" / "|||" cartographic convention for "multiple/
+// aggregated connections", read as an intentional replacement for Eclipse's zigzag.
+//
+// The anchor/rotation approach IS still Eclipse-derived and unchanged: `tf()` maps a
+// local (px, py) point into world space by rotating by `anchor.angle` (so local px runs
+// ALONG the arrow direction, local py runs PERPENDICULAR to it) and translating to
+// `anchor.x/y`, exactly as the original zigzag did.
 // ---------------------------------------------------------------------------------
 
+/**
+ * `count = 2` (matching the old zigzag's `count`): this marker is drawn ON TOP of the
+ * arrow's own already-drawn line (see the header note above), and with an ODD count
+ * the middle stroke's perpendicular offset is exactly 0 -- i.e. it would sit directly
+ * on top of that arrow line, a redundant/invisible stroke. An even count keeps every
+ * stroke symmetric and off-center, so all of them render as distinct visible lines:
+ * with `count = 2` the marker's two strokes flank the arrow (one on each side), which
+ * together with the arrow itself reads as the "‖"/"|||" multiple-parallel-lines glyph
+ * with no wasted geometry. `size`/`spacing` keep the same rough scale (~5px/~4px) as
+ * the old zigzag so the marker's footprint next to the arrow doesn't suddenly grow or
+ * shrink.
+ */
 export function buildFilteredSignSegments(anchor: SignAnchor, size = 5, spacing = 4, count = 2): LineSegment[] {
   const { x, y, angle } = anchor;
-  const halfSize = size / 2;
-  const halfSpacing = spacing / 2;
-  const yy1 = -size - halfSize;
-  const yy2 = yy1 + size;
-  const yy3 = yy2 + size;
-  const yy4 = yy3 + size;
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
   const tf = (px: number, py: number): [number, number] => [x + px * cos - py * sin, y + px * sin + py * cos];
 
   const segments: LineSegment[] = [];
   for (let i = 0; i < count; i++) {
-    const xx1 = -halfSize - halfSpacing + i * spacing;
-    const xx2 = xx1 + size;
-    const [x1a, y1a] = tf(xx1, yy1);
-    const [x2a, y2a] = tf(xx2, yy2);
-    const [x3a, y3a] = tf(xx1, yy3);
-    const [x4a, y4a] = tf(xx2, yy4);
+    const py = (i - (count - 1) / 2) * spacing;
+    const [x1a, y1a] = tf(-size, py);
+    const [x2a, y2a] = tf(size, py);
     segments.push({ x1: x1a, y1: y1a, x2: x2a, y2: y2a, dashed: false });
-    segments.push({ x1: x2a, y1: y2a, x2: x3a, y2: y3a, dashed: false });
-    segments.push({ x1: x3a, y1: y3a, x2: x4a, y2: y4a, dashed: false });
   }
   return segments;
 }

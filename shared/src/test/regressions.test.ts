@@ -1,13 +1,13 @@
 import { test } from 'bun:test';
 import assert from 'node:assert';
-import { getParsers } from './helpers';
+import { getParsers, posOf } from './helpers';
 import { parseExpression } from '../expr/exprParser';
 import { nedValueDiagnostics } from '../ned/nedValueChecks';
 import { formatBraceIndent } from '../features/format';
 import { MsgResourceCache } from '../msg/msgResourceCache';
 import { BUILTIN_NED_TEXT, BUILTIN_URI, NedResourceCache } from '../ned/nedResourceCache';
 import { nedRename } from '../ned/nedRename';
-import { nedDefinition, paramRefAt, connectionRefAt } from '../ned/nedNavigation';
+import { nedDefinition, nedHover, paramRefAt, connectionRefAt } from '../ned/nedNavigation';
 import { parseIni } from '../ini/iniDocument';
 import { leadingDocComment } from '../ned/nedAst';
 import { treeFoldingRanges } from '../features/folding';
@@ -118,6 +118,127 @@ test('param override resolves to the inherited declaration', async () => {
   assert.equal(ref!.ownerFq, 'Base');
   assert.equal(ref!.type, 'int');
   assert.equal(ref!.decl.range.start.line, 0);
+});
+
+// N1: deep/dotted parameter-assignment path navigation (NedTextUtils.java's
+// resolveDeepParamDeclaration), e.g. `ipv4.arp.proxyArpInterfaces = default(...)`
+// where the grammar parses the whole dotted key as a `pattern` node.
+const DEEP_PARAM_SRC = `simple Leaf {
+  parameters:
+    int leafParam = 1;
+}
+module Arp {
+  parameters:
+    bool proxyArpInterfaces = default(false);
+  submodules:
+    leaf: Leaf;
+}
+module Ipv4Module {
+  submodules:
+    arp: Arp;
+}
+module Wlan {
+  parameters:
+    int mgmtParam = 2;
+}
+module Foo {
+  parameters:
+    ipv4.arp.proxyArpInterfaces = default(true);
+    ipv4.arp.leaf.leafParam = 9;
+    wlan[*].mgmt.paramName = 5;
+    **.mac.address = default("");
+    typoSub.arp.proxyArpInterfaces = default(true);
+  submodules:
+    ipv4: Ipv4Module;
+    wlan[3]: Wlan;
+}`;
+
+test('deep param path (two segments) resolves to the declaration on the innermost type', async () => {
+  const svc = await getParsers();
+  const cache = new NedResourceCache();
+  cache.addFile('file:///deep.ned', svc.parse('ned', DEEP_PARAM_SRC), '');
+  const f = cache.getFile('file:///deep.ned')!;
+  const finalPos = posOf(DEEP_PARAM_SRC, 'proxyArpInterfaces = default(true)');
+
+  // cursor on the final segment -> resolves to Arp's own declaration
+  const ref = paramRefAt(cache, f, f.tree, finalPos);
+  assert.ok(ref, 'deep param ref resolved');
+  assert.equal(ref!.ownerFq, 'Arp');
+  assert.equal(ref!.type, 'bool');
+  assert.equal(ref!.decl.range.start.line, 6); // `bool proxyArpInterfaces = default(false);`
+
+  // also reachable via nedDefinition/nedHover, which fall back to paramRefAt
+  const def = nedDefinition(cache, f, f.tree, finalPos);
+  assert.ok(def && def.range.start.line === 6, 'nedDefinition resolves the deep path too');
+
+  // cursor on an INTERMEDIATE segment ("arp") -> no target, matching Eclipse
+  // (only the final segment of a deep-assignment path is a hyperlink there)
+  const midPos = posOf(DEEP_PARAM_SRC, 'arp.proxyArpInterfaces = default(true)');
+  const midRef = paramRefAt(cache, f, f.tree, midPos);
+  assert.equal(midRef, null, 'intermediate segment is not independently navigable');
+});
+
+test('deep param path (three segments) resolves through two submodule hops', async () => {
+  const svc = await getParsers();
+  const cache = new NedResourceCache();
+  cache.addFile('file:///deep.ned', svc.parse('ned', DEEP_PARAM_SRC), '');
+  const f = cache.getFile('file:///deep.ned')!;
+  const finalPos = posOf(DEEP_PARAM_SRC, 'leafParam = 9');
+
+  const ref = paramRefAt(cache, f, f.tree, finalPos);
+  assert.ok(ref, 'three-level deep param ref resolved');
+  assert.equal(ref!.ownerFq, 'Leaf');
+  assert.equal(ref!.type, 'int');
+  assert.equal(ref!.decl.range.start.line, 2); // `int leafParam = 1;`
+});
+
+test('deep param path with a wildcard array-index segment yields no target', async () => {
+  const svc = await getParsers();
+  const cache = new NedResourceCache();
+  cache.addFile('file:///deep.ned', svc.parse('ned', DEEP_PARAM_SRC), '');
+  const f = cache.getFile('file:///deep.ned')!;
+  const finalPos = posOf(DEEP_PARAM_SRC, 'paramName = 5');
+
+  assert.doesNotThrow(() => paramRefAt(cache, f, f.tree, finalPos));
+  const ref = paramRefAt(cache, f, f.tree, finalPos);
+  assert.equal(ref, null, 'a [*] index segment aborts resolution, matching Eclipse wildcard handling');
+});
+
+test('deep param path with a bare "**" recursive-wildcard segment yields no target', async () => {
+  const svc = await getParsers();
+  const cache = new NedResourceCache();
+  cache.addFile('file:///deep.ned', svc.parse('ned', DEEP_PARAM_SRC), '');
+  const f = cache.getFile('file:///deep.ned')!;
+  const finalPos = posOf(DEEP_PARAM_SRC, 'address = default("")');
+
+  assert.doesNotThrow(() => paramRefAt(cache, f, f.tree, finalPos));
+  const ref = paramRefAt(cache, f, f.tree, finalPos);
+  assert.equal(ref, null, 'a bare ** segment aborts resolution, matching Eclipse wildcard handling');
+});
+
+test('deep param path with an unresolvable (typo) intermediate segment yields no target', async () => {
+  const svc = await getParsers();
+  const cache = new NedResourceCache();
+  cache.addFile('file:///deep.ned', svc.parse('ned', DEEP_PARAM_SRC), '');
+  const f = cache.getFile('file:///deep.ned')!;
+  const finalPos = posOf(DEEP_PARAM_SRC, 'typoSub.arp.proxyArpInterfaces', 'typoSub.arp.'.length);
+
+  assert.doesNotThrow(() => paramRefAt(cache, f, f.tree, finalPos));
+  const ref = paramRefAt(cache, f, f.tree, finalPos);
+  assert.equal(ref, null, 'an unknown submodule name aborts resolution without crashing');
+});
+
+test('hover on a deep param path shows the resolved declaration', async () => {
+  const svc = await getParsers();
+  const cache = new NedResourceCache();
+  cache.addFile('file:///deep.ned', svc.parse('ned', DEEP_PARAM_SRC), '');
+  const f = cache.getFile('file:///deep.ned')!;
+  const finalPos = posOf(DEEP_PARAM_SRC, 'proxyArpInterfaces = default(true)');
+
+  const hov = nedHover(cache, f, f.tree, finalPos);
+  assert.ok(hov, 'hover resolved on the deep path');
+  assert.match(hov!.markdown, /bool proxyArpInterfaces/);
+  assert.match(hov!.markdown, /declared in `Arp`/);
 });
 
 // review fix: ini value range excludes trailing comment/whitespace

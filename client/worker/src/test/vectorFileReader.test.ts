@@ -90,10 +90,10 @@ test('vectorValueIndex: enum/int + whole doubles bucket by value; fractional dou
   assert.strictEqual(vectorValueIndex(4.2, { type: 'double' }, 5), 5); // fractional -> sample index
 });
 
-test('vectorValueText: enum name when known, else integer or raw double', () => {
+test('vectorValueText: enum name when known, else integer or raw double; enum-miss is a blank label (Eclipse EnumType::nameOf() parity, no numeric fallback)', () => {
   const info = { enum: new Map([[1, 'BUSY']]) };
   assert.strictEqual(vectorValueText(1, info), 'BUSY');
-  assert.strictEqual(vectorValueText(2, info), '2'); // enum but value not a member -> number
+  assert.strictEqual(vectorValueText(2, info), ''); // enum but value not a member -> no label (not "2")
   assert.strictEqual(vectorValueText(3, { enum: null }), '3');
   assert.strictEqual(vectorValueText(3.5, { enum: null }), '3.5');
 });

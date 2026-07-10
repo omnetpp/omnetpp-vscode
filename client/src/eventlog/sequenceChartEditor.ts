@@ -4,6 +4,7 @@ import type { LanguageClient } from 'vscode-languageclient/node';
 import type { EventLogUiSettings, HostToWebviewMessage, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
 import { ElogMethods, type ScListVectorsResult, type VectorIdentity } from '@omnetpp/shared/elog-protocol';
 import { OmnetppMethods } from '@omnetpp/shared/protocol';
+import { coerceStyleRuleSettings } from '@omnetpp/shared/style-rules';
 import { handleRemoveBookmarkMessage, handleToggleBookmarkMessage, handleUpdateBookmarkMessage } from './bookmarks';
 import type { EventLogController } from './eventLogController';
 import type { EventLogSession } from './eventLogSession';
@@ -149,6 +150,7 @@ export class SequenceChartEditorProvider implements vscode.CustomReadonlyEditorP
           selection: session.getSelection(),
           bookmarks: this.controller.getBookmarkStore(document.uri).list(),
           filterParams: session.getCurrentFilterParams(),
+          pinned: false, // Table popup Pin entry gap-closure -- the Sequence Chart editor has no pin concept
         });
         // Phase U7: "if no chart editor visible, open one" -- `openFilterPanelForSession()`
         // set this flag because no chart webview was attached yet to `sendCommand()` to;
@@ -209,6 +211,18 @@ export class SequenceChartEditorProvider implements vscode.CustomReadonlyEditorP
         void autoAttachAxisVectorsFlow(this.languageClient, session, sink, document.uri, message.candidates);
         return;
       }
+      // Configure Style dialog gap-closure: needs `vscode.workspace.getConfiguration()`,
+      // which the chart/table-shared `handleWebviewMessage()` below has no reason to
+      // depend on -- same "intercept before the shared function" pattern as every other
+      // host-API-needing message above. Persisted GLOBALLY (a preference like
+      // `fontSize`/`defaultTimelineMode`, not per-file state -- see `uiProtocol.ts`'s
+      // `setStyleRules` doc for why other already-open chart tabs aren't live-updated
+      // by this).
+      if (message.type === 'setStyleRules') {
+        void vscode.workspace.getConfiguration('omnetpp').update('sequenceChart.styleRules', message.styleRules, vscode.ConfigurationTarget.Global);
+        sink.postMessage({ type: 'styleRulesChanged', styleRules: message.styleRules });
+        return;
+      }
       void handleWebviewMessage(session, sink, document.uri, message);
     });
   }
@@ -230,8 +244,10 @@ async function loadVectorIntoWorker(session: EventLogSession, moduleId: number, 
 
 /**
  * "Attach Vector to Axis": native `.vec` file dialog → run/vector QuickPicks (pre-filtered to
- * the axis module, mirroring Eclipse's chained choosers) → load the vector into the worker →
- * tell the webview so it renders + persists. Any cancellation aborts silently.
+ * the axis module, mirroring Eclipse's chained choosers), with a Cancel/OK confirmation if the
+ * chosen run's id doesn't match the eventlog's own → load the vector into the worker → tell the
+ * webview so it renders + persists. Any cancellation (including a "Cancel" on the run-id
+ * mismatch warning) aborts silently.
  */
 async function attachAxisVectorFlow(session: EventLogSession, sink: VectorSink, docUri: vscode.Uri, moduleId: number, moduleFullPath: string): Promise<void> {
   // Default the dialog to a sibling `.vec` next to the .elog (Eclipse guesses the same).
@@ -257,6 +273,20 @@ async function attachAxisVectorFlow(session: EventLogSession, sink: VectorSink, 
     const chosen = await vscode.window.showQuickPick(listing.runs, { title: 'Select run' });
     if (chosen === undefined) return;
     run = chosen;
+  }
+  // Run-id mismatch guard (Eclipse `SequenceChartContributor.java:1962-1971`): the chosen
+  // `.vec` run may belong to a different simulation run than the eventlog itself -- Eclipse
+  // warns with a Cancel/OK confirmation rather than silently attaching mismatched data.
+  // Skipped when either id is unknown (empty eventlog, or a `.vec` file with no `run` line
+  // at all -- see `VectorIdentity.run`'s doc comment) since there is then nothing to compare.
+  const eventlogRunId = session.summary?.runId;
+  if (eventlogRunId && run && eventlogRunId !== run) {
+    const choice = await vscode.window.showWarningMessage(
+      `Run ID mismatch: the eventlog run ID "${eventlogRunId}" and the vector file run ID "${run}" do not match. Do you want to continue?`,
+      { modal: true },
+      'Continue',
+    );
+    if (choice !== 'Continue') return;
   }
   // Vector: list "module:name"; float the axis module's own vectors to the top (pre-filter).
   const items = listing.vectors
@@ -387,6 +417,7 @@ export async function handleWebviewMessage(
         selection: session.getSelection(),
         bookmarks: [],
         filterParams: session.getCurrentFilterParams(),
+        pinned: false, // Table popup Pin entry gap-closure -- dead-code fallback (see comment above), no pin concept here either
       };
       sink.postMessage(init);
       break;
@@ -457,6 +488,24 @@ export async function handleWebviewMessage(
       // pump (needs the LanguageClient this shared function has no access to, same as
       // 'nedTypeQuery' above) -- present for switch completeness only.
       break;
+    case 'tableFocusChanged':
+      // Table find parity gap-closure: only ever sent by the Event Log table webview,
+      // always intercepted in `eventLogTableView.ts`'s own pump (needs to update that
+      // provider's own focus-tracking field) -- present for switch completeness only.
+      break;
+    case 'togglePin':
+      // Table popup Pin entry gap-closure: only ever sent by the Event Log table
+      // webview, always intercepted in `eventLogTableView.ts`'s own pump (needs to
+      // flip that provider's own `pinned` field and re-broadcast `pinnedChanged`) --
+      // present for switch completeness only.
+      break;
+    case 'setStyleRules':
+      // Configure Style dialog gap-closure: only ever sent by the Sequence Chart
+      // webview, always intercepted in `SequenceChartEditorProvider`'s own pump (needs
+      // `vscode.workspace.getConfiguration()`, which this shared function -- also used
+      // by `eventLogTableView.ts` -- has no dedicated need for) -- present for switch
+      // completeness only.
+      break;
   }
 }
 
@@ -477,6 +526,11 @@ function readEventLogUiSettings(): EventLogUiSettings {
     sequenceChart: {
       defaultTimelineMode: config.get<string>('sequenceChart.defaultTimelineMode', 'SIMULATION_TIME'),
       fontSize: config.get<number>('sequenceChart.fontSize', 0) || undefined,
+      // Configure Style dialog gap-closure -- `coerceStyleRuleSettings()` defensively
+      // sanitizes whatever's actually stored (including this setting's own PRE-this-
+      // phase `[]` array default, still possibly cached in an existing settings.json)
+      // into a valid `StyleRuleSettings`, never trusting raw configuration JSON as-is.
+      styleRules: coerceStyleRuleSettings(config.get('sequenceChart.styleRules')),
     },
     eventlog: {
       followEndOnAppend: config.get<boolean>('eventlog.followEndOnAppend', true),

@@ -25,6 +25,7 @@ import {
   type ViewportParams,
 } from '@omnetpp/shared/elog-protocol';
 import type { Bookmark, BookmarkCandidate, EventLogUiSettings, HostToWebviewMessage, RevealTarget, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
+import { coerceStyleRuleSettings, StyleRuleResolver } from '@omnetpp/shared/style-rules';
 import { EngineRpc, RequestCancelledError } from '../common/rpc';
 import { loadPersistedBlob, withVersion } from '../common/persistedState';
 import { buildToolbar, type ToolbarHandle } from '../common/toolbar';
@@ -54,6 +55,7 @@ import {
   collapseOpenAxisModule,
   collapseOpenAxisModuleSubmodules,
   collectActiveModuleIds,
+  computeAxisInfoText,
   computeVisibleAxisModuleIds,
   defaultOpenAxisModules,
   expandOpenAxisModule,
@@ -75,6 +77,8 @@ import { packNotes, type NoteLayoutCandidate } from './bookmarkNotesLayout';
 import { renderMiniMarkdown } from './miniMarkdown';
 import { openSelectModulesDialog } from './selectModulesDialog';
 import { openListReorderDialog } from './reorderDialog';
+import { openCustomNonlinearOptionsDialog } from './customNonlinearDialog';
+import { openConfigureStyleDialog } from './configureStyleDialog';
 import { calculateTicks, formatMouseTime, formatTickLabel, formatTickTime } from './ticks';
 import { ANTIALIAS_TURN_OFF_AT_MSEC, ANTIALIAS_TURN_ON_AT_MSEC, createCanvasStack, DEFAULT_CHART_FONT_SIZE_PX, renderPrimitivesToCanvas, type CanvasStackHandle } from './canvasStack';
 import { openExportRangeDialog, type ExportDialogResult } from './exportDialog';
@@ -208,10 +212,61 @@ function currentChartFontSizePx(): number {
   const configured = uiSettings?.sequenceChart?.fontSize;
   return configured && configured > 0 ? configured : DEFAULT_CHART_FONT_SIZE_PX;
 }
+
+/**
+ * Configure Style dialog (`shared/src/eventlog/styleRules.ts`) -- a precompiled
+ * resolver over `uiSettings.sequenceChart.styleRules`, rebuilt whenever that changes
+ * (a fresh `init`, or the dialog's own `styleRulesChanged` reply -- see
+ * `rebuildStyleRuleResolver()`). `undefined` only before the first `init` (same
+ * lifetime as `uiSettings` itself); `buildDrawList()`'s every color site treats an
+ * `undefined` resolver as "no overrides", so this stays a pure additive feature.
+ */
+let styleRuleResolver: StyleRuleResolver | undefined;
+function rebuildStyleRuleResolver(): void {
+  styleRuleResolver = new StyleRuleResolver(coerceStyleRuleSettings(uiSettings?.sequenceChart?.styleRules));
+}
+
+/**
+ * Resolves a module id to the two identity strings `styleRules.ts`'s six categories
+ * need (see that file's header for why they differ: axes/axis-headers match the LOCAL
+ * module name, events/self-events the FULL dotted path) -- `null` if the module tree
+ * hasn't loaded yet or doesn't (yet) know this id, same graceful-degradation shape as
+ * every other module-tree-dependent lookup in this file (`findModuleFullPath`/
+ * `findModuleNode` themselves return `null`/`undefined` in that case).
+ */
+function resolveModuleIdentity(moduleId: number): { localName: string; fullPath: string } | null {
+  const node = findModuleNode(moduleId, moduleTree);
+  if (!node) return null;
+  return { localName: node.fullName, fullPath: findModuleFullPath(moduleId, moduleTree) ?? node.fullName };
+}
+
+/** "Configure Style..." -- opens the six-table rule editor seeded with the current settings; on OK, persists via `setStyleRules` (host writes the `omnetpp.sequenceChart.styleRules` setting) and applies immediately by rebuilding the resolver + redrawing (see `uiProtocol.ts`'s `setStyleRules`/`styleRulesChanged` docs for why this doesn't wait for a host round trip to feel live). */
+function showConfigureStyleDialog(): void {
+  const current = coerceStyleRuleSettings(uiSettings?.sequenceChart?.styleRules);
+  openConfigureStyleDialog(current, (styleRules) => {
+    uiSettings = { ...uiSettings, sequenceChart: { ...uiSettings?.sequenceChart, styleRules } };
+    rebuildStyleRuleResolver();
+    vscode.postMessage({ type: 'setStyleRules', styleRules });
+    scheduleRender();
+  });
+}
 /** Phase U9 -- the shared error/canceled/out-of-sync overlay (`common/notificationOverlay.ts`), mounted once `body`'s DOM exists (below). */
 let notificationOverlay: NotificationOverlayHandle;
 
 let currentTimelineMode: TimelineMode = (state.timelineMode as TimelineMode) ?? TimelineMode.SIMULATION_TIME;
+/**
+ * The engine's current `SequenceChartFacade.nonLinearFocus`/`nonLinearMinimumTimelineCoordinateDelta`
+ * (only meaningful in `TimelineMode.NONLINEAR`, but the engine tracks -- and reports via
+ * every `ScState` -- them regardless of the active mode). `null` until the first
+ * `ScState` response arrives (there is no client-side default worth guessing; the
+ * engine's own default, `calculateNonLinearFocus()`, depends on the loaded log). Kept
+ * in sync by `syncScState()`, the single funnel every `elog/sc/setTimelineMode`/
+ * `elog/sc/relocateOrigin` response goes through -- see that function's doc. Read by
+ * the Custom Nonlinear dialog (`showCustomNonlinearOptionsDialog()`) to seed its
+ * sliders with the CURRENT values, not a placeholder.
+ */
+let currentNonLinearFocus: number | null = null;
+let currentNonLinearMinimumTimelineCoordinateDelta: number | null = null;
 /** The "Time Accuracy" selection (max fractional-seconds digits, or `null` = full). Applied globally to `decimalTime`'s formatters so every displayed time rounds to it. */
 let timeAccuracy: number | null = state.timeAccuracy ?? null;
 setTimeDisplayAccuracy(timeAccuracy);
@@ -775,6 +830,22 @@ function setDisplayFlags(next: ChartDisplayFlags): void {
 }
 
 /**
+ * The single funnel every `ScState` response (`elog/sc/setTimelineMode` and
+ * `elog/sc/relocateOrigin` both return one) goes through to refresh the client-side
+ * mirrors of engine state: `currentTimelineMode` and the two Custom-Nonlinear-dialog
+ * fields (`currentNonLinearFocus`/`currentNonLinearMinimumTimelineCoordinateDelta`).
+ * `relocateOrigin` never actually changes the nonlinear params, but re-syncing from its
+ * response too is cheap and keeps every call site uniform (no risk of a call site that
+ * forgets to update them, which would otherwise seed the Custom Nonlinear dialog with
+ * stale values the next time it opens).
+ */
+function syncScState(scState: ScState): void {
+  currentTimelineMode = scState.timelineMode;
+  currentNonLinearFocus = scState.nonLinearFocus;
+  currentNonLinearMinimumTimelineCoordinateDelta = scState.nonLinearMinimumTimelineCoordinateDelta;
+}
+
+/**
  * Re-applies the current timeline mode with the current `showComponentMethodCalls` as the
  * engine's `separateEventLogEntries`, then invalidates the render cache so events refetch
  * with their new widths. Keeps the SAME origin (so the view neither jumps nor rescales --
@@ -785,6 +856,7 @@ async function resyncSeparateEntries(): Promise<void> {
   if (!summary || summary.isEmpty) return;
   try {
     const scState = await rpc.request<ScState>(ElogMethods.scSetTimelineMode, { timelineMode: currentTimelineMode, separateEventLogEntries: displayFlags.showComponentMethodCalls });
+    syncScState(scState);
     coordinateSystemOriginEventNumber = scState.originEventNumber ?? coordinateSystemOriginEventNumber;
     renderModelCache.bumpGeneration();
     renderModelCache.invalidateAll();
@@ -794,6 +866,100 @@ async function resyncSeparateEntries(): Promise<void> {
   } catch {
     // ignore -- a failed re-sync just leaves the previous (correct-for-old-flag) widths
   }
+}
+
+/**
+ * Applies new nonlinear-timeline params (Custom Nonlinear dialog: live slider ticks AND
+ * the final Cancel-revert both funnel through here) while keeping the SAME visible
+ * SIMULATION-TIME window (`preserveSim`) -- port of Java's `CustomNonlinearOptionsDialog.
+ * redrawSequenceChart()`, which restores `oldLeftRightSimulationTimeRange` after every
+ * `relocateTimelineCoordinateSystem()` triggered by a param change. Unlike
+ * `applyTimelineMode()` (a user-initiated mode SWITCH, which re-anchors on the viewport
+ * CENTER event and picks a fresh data-driven zoom), this never changes the origin event
+ * or the zoom level -- only the nonlinear curve's shape changes, so the coordinate
+ * VALUES shift under the same origin and must be compensated by re-deriving `leftTc`/
+ * `pixelsPerTc` for the same `[preserveSim.left, preserveSim.right)` simulation-time
+ * span. Best-effort, matching every other live engine round trip in this file (a failed
+ * call just leaves the chart at its previous, still-consistent state).
+ */
+async function applyNonLinearTimelineParams(params: ScSetTimelineModeParams, preserveSim: { left: number | null; right: number | null }): Promise<void> {
+  if (!summary || summary.isEmpty) return;
+  try {
+    const scState = await rpc.request<ScState>(ElogMethods.scSetTimelineMode, params);
+    syncScState(scState);
+    toolbar.setDropdownValue('timelineMode', scState.timelineMode);
+    renderModelCache.bumpGeneration();
+    renderModelCache.invalidateAll();
+    lastModel = null;
+    viewport = { ...viewport, coordinateSystemVersion: scState.coordinateSystemVersion };
+    if (preserveSim.left !== null && preserveSim.right !== null) {
+      const [left, right] = await Promise.all([
+        rpc.request<MapCoordsResult>(ElogMethods.scMapCoords, { kind: 'simTimeToTc', simulationTime: String(preserveSim.left) }),
+        rpc.request<MapCoordsResult>(ElogMethods.scMapCoords, { kind: 'simTimeToTc', simulationTime: String(preserveSim.right) }),
+      ]);
+      if (left.tc !== null && right.tc !== null && right.tc > left.tc) {
+        viewport = { ...viewport, leftTc: left.tc, pixelsPerTc: contentWidth(viewport) / (right.tc - left.tc) };
+      }
+    }
+    await refreshEndpointsTc();
+    scheduleRender();
+  } catch (err) {
+    if (!(err instanceof RequestCancelledError)) {
+      // best-effort -- matches every other engine round trip in this file
+    }
+  }
+}
+
+/**
+ * "Custom nonlinear..." (Timeline Mode submenu) -- port of `CustomNonlinearOptionsDialog`
+ * (`SequenceChartContributor.java:2487-2617`). Snapshots the mode+params+visible
+ * simulation-time window in effect BEFORE the dialog opens (Java's `oldNonLinearFocus`/
+ * `oldNonLinearMinimumTimelineCoordinateDelta`/`oldLeftRightSimulationTimeRange`), then
+ * forces Timeline Mode to Nonlinear so the sliders have a visible effect immediately --
+ * see `ChartMenuActions.openCustomNonlinearDialog`'s doc for why this deliberately
+ * deviates from Java, which leaves the mode untouched. Every slider tick is debounced
+ * (~80ms; Java has no need to, since its redraw is a synchronous in-process repaint, not
+ * an engine-worker round trip) and applied via `applyNonLinearTimelineParams()`; Cancel/
+ * Escape/outside-click cancels any pending debounced tick and restores the EXACT
+ * snapshot (mode, params, AND visible window) -- OK just leaves the last-applied tick in
+ * effect (matching Java's `okPressed()`, which re-applies once more and closes).
+ */
+function showCustomNonlinearOptionsDialog(): void {
+  if (!summary || summary.isEmpty) return;
+  const beforeMode = currentTimelineMode;
+  const beforeFocus = currentNonLinearFocus ?? 1;
+  const beforeMinDelta = currentNonLinearMinimumTimelineCoordinateDelta ?? 0.1;
+  const range = visibleTcRange(viewport);
+  const preserveSim = { left: simTimeAt(viewport.leftTc), right: simTimeAt(range.rightTc) };
+
+  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  const cancelPendingTick = (): void => {
+    if (debounceTimer !== undefined) {
+      clearTimeout(debounceTimer);
+      debounceTimer = undefined;
+    }
+  };
+
+  openCustomNonlinearOptionsDialog(
+    { nonLinearFocus: beforeFocus, nonLinearMinimumTimelineCoordinateDelta: beforeMinDelta },
+    (values) => {
+      cancelPendingTick();
+      debounceTimer = setTimeout(() => {
+        debounceTimer = undefined;
+        void applyNonLinearTimelineParams(
+          { timelineMode: TimelineMode.NONLINEAR, separateEventLogEntries: displayFlags.showComponentMethodCalls, nonLinearFocus: values.nonLinearFocus, nonLinearMinimumTimelineCoordinateDelta: values.nonLinearMinimumTimelineCoordinateDelta },
+          preserveSim,
+        );
+      }, 80);
+    },
+    () => {
+      cancelPendingTick();
+      void applyNonLinearTimelineParams(
+        { timelineMode: beforeMode, separateEventLogEntries: displayFlags.showComponentMethodCalls, nonLinearFocus: beforeFocus, nonLinearMinimumTimelineCoordinateDelta: beforeMinDelta },
+        preserveSim,
+      );
+    },
+  );
 }
 
 const TIMELINE_MODE_OPTIONS = [
@@ -1031,6 +1197,11 @@ function renderFrame(): void {
   const treeNodeMap = axisManagementLive ? buildNodeMap(moduleTree) : undefined;
   const axisGlyphs = axisManagementLive ? new Map(axesLayout.axes.map((a) => [a.moduleId, moduleGlyphInfo(a.moduleId, openAxisModuleIds!, moduleTree, treeNodeMap)])) : undefined;
   const headerGlyphs = axisManagementLive ? buildHeaderGlyphs(axisHeaderRoot, treeNodeMap) : undefined;
+  // "Axis Info" readout (Java `drawAxisInfo()`) -- see `openAxisModules.ts`'s
+  // `computeAxisInfoText()` header for why this is a static closed/invisible-axis count,
+  // not a hover readout. `treeNodeMap.size` === Java's `moduleTreeRoot.getModuleCount()`
+  // (both count every node in the tree, root included).
+  const axisInfo = axisManagementLive ? computeAxisInfoText(treeNodeMap!.size, openAxisModuleIds!.length, axesLayout.axes.length) : undefined;
 
   const t0 = performance.now();
   const primitives = buildDrawList({
@@ -1059,11 +1230,13 @@ function renderFrame(): void {
     bookmarkNoteConnectors,
     displayFlags,
     axisHeaderRoot,
-    infoPanelText: computeInfoPanelText(),
+    infoPanelText: computeInfoPanelText(axisInfo),
     skipLabelsForPerf: !antialiasEnabled,
     moduleIdToAxisModuleId,
     axisGlyphs,
     headerGlyphs,
+    styleRuleResolver,
+    resolveModuleIdentity,
   });
   lastPrimitives = primitives;
   canvasStack.render(primitives, antialiasEnabled, currentChartFontSizePx());
@@ -1090,9 +1263,9 @@ function buildHeaderGlyphs(axisHeaderRoot: AxisHeaderNode | null, nodeMap?: Map<
   return result;
 }
 
-/** Phase U5 -- `showPositionAndRange`/`showEventLogInfo` panel text (`drawList.ts`'s `InfoPanelText`). Port of `drawPositionAndRange()`/`drawEventLogInfo()` (`SequenceChart.java:3338-3403`), approximated from `LogSummary` + the currently-loaded viewport model rather than the live parse-progress counters Java's second `eventLogInfo` line reads (`getNumParsedEvents()`/`FileReader.getNumReadLines/Bytes()` have no protocol exposure yet) -- documented simplification. */
-function computeInfoPanelText(): InfoPanelText | undefined {
-  if (!summary || summary.isEmpty) return undefined;
+/** Phase U5 -- `showPositionAndRange`/`showEventLogInfo` panel text (`drawList.ts`'s `InfoPanelText`). Port of `drawPositionAndRange()`/`drawEventLogInfo()` (`SequenceChart.java:3338-3403`), approximated from `LogSummary` + the currently-loaded viewport model rather than the live parse-progress counters Java's second `eventLogInfo` line reads (`getNumParsedEvents()`/`FileReader.getNumReadLines/Bytes()` have no protocol exposure yet) -- documented simplification. `axisInfo` is precomputed by the caller (needs the live open-module model, which this function otherwise doesn't touch) and merged straight through -- unlike the other two fields it doesn't depend on `summary` being loaded (Java's `drawAxisInfo()` has no such dependency either). */
+function computeInfoPanelText(axisInfo: [string, string] | undefined): InfoPanelText | undefined {
+  if (!summary || summary.isEmpty) return axisInfo ? { axisInfo } : undefined;
   const range = visibleTcRange(viewport);
   const visible = (lastModel?.events ?? []).filter((e) => e.tcBegin >= viewport.leftTc && e.tcBegin <= range.rightTc);
   const startEventNumber = visible.length > 0 ? Math.min(...visible.map((e) => e.eventNumber)) : summary.firstEventNumber;
@@ -1109,7 +1282,7 @@ function computeInfoPanelText(): InfoPanelText | undefined {
     // the protocol -- documented simplification, shows the coordinate-system version.
     `Coordinate system version: ${summary.coordinateSystemVersion}${summary.filtered ? ' (filtered)' : ''}`,
   ];
-  return { positionAndRange, eventLogInfo };
+  return { positionAndRange, eventLogInfo, axisInfo };
 }
 
 /**
@@ -1249,6 +1422,7 @@ async function goToBegin(): Promise<void> {
  */
 async function relocateAndCenter(eventNumber: number, center = true): Promise<void> {
   const scState = await rpc.request<ScState>(ElogMethods.scRelocateOrigin, { eventNumber });
+  syncScState(scState);
   coordinateSystemOriginEventNumber = scState.originEventNumber ?? eventNumber;
   renderModelCache.bumpGeneration();
   renderModelCache.invalidateAll();
@@ -1346,7 +1520,7 @@ async function applyTimelineMode(mode: string, isInitial: boolean, restoreViewpo
     // the engine always returns `tcEnd === tcBegin` and every event draws as a dot.
     const params: ScSetTimelineModeParams = { timelineMode: mode as TimelineMode, separateEventLogEntries: displayFlags.showComponentMethodCalls };
     const scState = await rpc.request<ScState>(ElogMethods.scSetTimelineMode, params);
-    currentTimelineMode = scState.timelineMode;
+    syncScState(scState);
     toolbar.setDropdownValue('timelineMode', scState.timelineMode);
 
     if (summary && !summary.isEmpty) {
@@ -1520,6 +1694,8 @@ async function performExportSvg(result: ExportDialogResult, ctxBase: ExportRange
       tickPrefixLabel: tickResult.tickPrefix !== 0 ? '+ ' + formatTickTime(tickResult.tickPrefix) : undefined,
       skipLabelsForPerf: false,
       moduleIdToAxisModuleId,
+      styleRuleResolver,
+      resolveModuleIdentity,
     });
     const fontFamily = getComputedStyle(document.body).fontFamily || 'sans-serif';
     const svg = buildChartSvg({ primitives, widthPx: exportViewport.canvasWidth, heightPx: exportViewport.canvasHeight, backgroundColor: palette.background, fontFamily });
@@ -2231,6 +2407,8 @@ function openChartContextMenu(clientX: number, clientY: number, hits: HitObject[
     spacingIncrease: spacingActions.increase,
     spacingDecrease: spacingActions.decrease,
     setTimelineMode: (mode) => void applyTimelineMode(mode, false),
+    openCustomNonlinearDialog: showCustomNonlinearOptionsDialog,
+    openConfigureStyleDialog: showConfigureStyleDialog,
     setTimeAccuracy: (fractionDigits) => {
       timeAccuracy = fractionDigits;
       setTimeDisplayAccuracy(fractionDigits);
@@ -2712,6 +2890,7 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
       summary = message.summary;
       bookmarks = message.bookmarks;
       uiSettings = message.settings; // Phase U10 -- see this file's `uiSettings` doc comment
+      rebuildStyleRuleResolver();
       recomputeBookmarkIndexes();
       refreshPositionBookmarkTcs();
       if (message.selection.eventNumbers.length > 0) {
@@ -2887,6 +3066,18 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
         pendingNedQueries.delete(message.id);
         resolve(message.properties);
       }
+      break;
+    }
+    case 'styleRulesChanged': {
+      // Reply to this webview's own `setStyleRules` (see `showConfigureStyleDialog()`) --
+      // `uiSettings`/`styleRuleResolver` were already updated optimistically there, so
+      // this is mostly a no-op unless another source updated them meanwhile; kept
+      // idempotent (re-applying the same value is harmless) rather than skipped, so a
+      // FUTURE sender (e.g. a live-push from `onDidChangeConfiguration`, not wired yet
+      // -- see `uiProtocol.ts`'s `setStyleRules` doc) needs no further chartMain.ts change.
+      uiSettings = { ...uiSettings, sequenceChart: { ...uiSettings?.sequenceChart, styleRules: message.styleRules } };
+      rebuildStyleRuleResolver();
+      scheduleRender();
       break;
     }
     case 'axisVectorAttachmentChanged': {

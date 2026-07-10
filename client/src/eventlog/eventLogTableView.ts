@@ -1,3 +1,4 @@
+import * as fs from 'node:fs';
 import * as vscode from 'vscode';
 import type { LanguageClient } from 'vscode-languageclient/node';
 import type { EventLogUiSettings, WebviewToHostMessage } from '@omnetpp/shared/ui-protocol';
@@ -46,6 +47,31 @@ function readEventLogUiSettingsForTable(): EventLogUiSettings {
 }
 
 /**
+ * Row-icon map (Event Log table icons, see `RenderedTableRow.iconId`/`uiProtocol.ts`'s
+ * `iconMap` doc comment): resolves every `dist/icons/_internal/eventlog/*.png` bundled by
+ * `scripts/gen-icons.mjs` to a webview URI, keyed by icon id (e.g. `"ModuleCreated"`).
+ * Computed once per `webviewView.webview` (an `asWebviewUri()` result is only valid for
+ * the webview instance it was resolved against) rather than per request -- this set is
+ * small (~32 entries) and entirely static, unlike the NED preview's dynamic
+ * display-string icon ids (`nedPreviewPanel.ts`'s `resolveIcons()`). Returns an empty map
+ * (table degrades to no row icons) if the directory is missing, e.g.
+ * `scripts/gen-icons.mjs` was never run against an OMNeT++ source tree.
+ */
+function buildEventLogTableIconMap(webview: vscode.Webview, extensionUri: vscode.Uri): Record<string, string> {
+  const dirUri = vscode.Uri.joinPath(extensionUri, 'dist', 'icons', '_internal', 'eventlog');
+  const map: Record<string, string> = {};
+  try {
+    for (const entry of fs.readdirSync(dirUri.fsPath)) {
+      if (!entry.endsWith('.png')) continue;
+      map[entry.slice(0, -'.png'.length)] = webview.asWebviewUri(vscode.Uri.joinPath(dirUri, entry)).toString();
+    }
+  } catch {
+    // dist/icons/_internal/eventlog missing -- degrade gracefully, no row icons.
+  }
+  return map;
+}
+
+/**
  * The "OMNeT++ Event Log" panel's table webview view. Per the port plan: "binds
  * to the active session unless pinned" -- when unpinned it follows
  * `EventLogController.onDidChangeActiveSession`; `pin()`/`unpin()` (the
@@ -61,6 +87,20 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
   private boundUri: vscode.Uri | undefined;
   private pinned = false;
+  /**
+   * Table find parity gap-closure -- mirrors `sequenceChartEditor.ts`'s
+   * `webviewPanel.active` tracking, but `vscode.WebviewView` (this view's host) has no
+   * built-in focus/active event the way `vscode.WebviewPanel.onDidChangeViewState`
+   * does, so the webview reports its own DOM focus state explicitly via the
+   * `tableFocusChanged` message (see `uiProtocol.ts`'s doc comment on that message and
+   * `tableView.ts`'s `root`-level `focusin`/`focusout` delegation). Read by
+   * `eventLogDialogs.ts`'s `findTextCommand`/`findNextCommand` to decide whether
+   * `omnetpp.eventlog.findText`/`.findNext` should route into this view's own inline
+   * find bar instead of the Sequence Chart's dialog.
+   */
+  private focused = false;
+  /** Row-icon id -> webview URI map for the currently-resolved `view`; see `buildEventLogTableIconMap()`. Recomputed each time `resolveWebviewView()` runs (a fresh webview instance needs its own `asWebviewUri()` resolution). Empty until the view is first resolved. */
+  private iconMap: Record<string, string> = {};
 
   constructor(
     private readonly extensionUri: vscode.Uri,
@@ -97,9 +137,10 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
     this.view = webviewView;
     webviewView.webview.options = {
       enableScripts: true,
-      localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview')],
+      localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview'), vscode.Uri.joinPath(this.extensionUri, 'dist', 'icons')],
     };
     webviewView.webview.html = buildEventLogWebviewHtml(webviewView.webview, this.extensionUri, 'eventLogTable.js', 'OMNeT++ Event Log');
+    this.iconMap = buildEventLogTableIconMap(webviewView.webview, this.extensionUri);
 
     webviewView.webview.onDidReceiveMessage((message: WebviewToHostMessage) => {
       // Phase U2: 'copyText' (Ctrl+C) and 'stateChanged' (mode-dropdown persistence)
@@ -112,6 +153,20 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
       }
       if (message.type === 'stateChanged') {
         if (this.boundUri) void this.setPersistedState(this.boundUri.toString(), message.state);
+        return;
+      }
+      // Table find parity gap-closure -- see `focused`'s own doc comment above.
+      if (message.type === 'tableFocusChanged') {
+        this.focused = message.focused;
+        return;
+      }
+      // Table popup Pin entry gap-closure -- the webview's own context menu's
+      // "Pin"/"Unpin" item; reuses the exact same `togglePin()` the native
+      // `omnetpp.eventlog.pinEventLogTable`/`.unpinEventLogTable` commands already call
+      // (see that method's own doc comment for why a single toggle, not a pin/unpin
+      // pair).
+      if (message.type === 'togglePin') {
+        this.togglePin();
         return;
       }
       if (message.type === 'ready') {
@@ -131,6 +186,8 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
           selection: session?.getSelection() ?? { eventNumbers: [] },
           bookmarks: this.boundUri ? this.controller.getBookmarkStore(this.boundUri).list() : [],
           filterParams: session?.getCurrentFilterParams() ?? null,
+          pinned: this.pinned,
+          iconMap: this.iconMap,
         });
         return;
       }
@@ -171,6 +228,15 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
     webviewView.onDidDispose(() => {
       if (this.boundUri) this.currentSession()?.detach('table', webviewView.webview);
       this.view = undefined;
+      this.focused = false; // Table find parity gap-closure -- a disposed view can't be focused
+    });
+    // Table find parity gap-closure -- safety net alongside the webview's own
+    // `tableFocusChanged` message: if the panel is hidden (e.g. the user switched to a
+    // different sidebar view) it cannot possibly have DOM focus either, even on the
+    // off chance the webview's own focusout never fires (e.g. hidden while a dialog/
+    // devtools had stolen focus).
+    webviewView.onDidChangeVisibility(() => {
+      if (!webviewView.visible) this.focused = false;
     });
   }
 
@@ -187,6 +253,11 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
     return this.currentSession();
   }
 
+  /** Table find parity gap-closure -- see `focused`'s own doc comment; used by `eventLogDialogs.ts`'s `findTextCommand`/`findNextCommand` to decide whether to route into this view's inline find bar instead of the Sequence Chart's dialog. */
+  hasFocus(): boolean {
+    return this.focused;
+  }
+
   /** Detach from the old session (if any) and attach to `uri`'s session (if any); pushes a fresh `init` so the view re-renders immediately with the new summary. */
   private rebind(uri: vscode.Uri | undefined): void {
     if (this.boundUri?.toString() === uri?.toString()) return;
@@ -196,7 +267,7 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
     else if (this.view) {
       // No active session anymore (e.g. all chart editors closed while unpinned) --
       // let the webview fall back to its own empty state.
-      void this.view.webview.postMessage({ type: 'init', fileUri: '', persistedState: undefined, settings: readEventLogUiSettingsForTable(), summary: null, selection: { eventNumbers: [] }, bookmarks: [], filterParams: null });
+      void this.view.webview.postMessage({ type: 'init', fileUri: '', persistedState: undefined, settings: readEventLogUiSettingsForTable(), summary: null, selection: { eventNumbers: [] }, bookmarks: [], filterParams: null, pinned: this.pinned, iconMap: this.iconMap });
     }
   }
 
@@ -214,6 +285,8 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
       selection: session.getSelection(),
       bookmarks: this.controller.getBookmarkStore(this.boundUri).list(),
       filterParams: session.getCurrentFilterParams(),
+      pinned: this.pinned,
+      iconMap: this.iconMap,
     });
   }
 
@@ -226,6 +299,12 @@ export class EventLogTableViewProvider implements vscode.WebviewViewProvider {
   togglePin(): void {
     this.pinned = !this.pinned;
     void vscode.commands.executeCommand('setContext', CONTEXT_TABLE_PINNED, this.pinned);
+    // Table popup Pin entry gap-closure -- keep the webview's own context-menu
+    // checkmark/label in sync whether the toggle came from the native view-title
+    // commands or the webview's own menu item (which already knows locally, but this
+    // keeps a single source of truth rather than the webview optimistically flipping
+    // its own state before the host confirms).
+    if (this.view) void this.view.webview.postMessage({ type: 'pinnedChanged', pinned: this.pinned });
     if (!this.pinned) this.rebind(this.controller.getActiveSession() ? this.boundUriFor(this.controller.getActiveSession()!) : undefined);
   }
 

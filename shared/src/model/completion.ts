@@ -25,12 +25,27 @@ export enum InsertTextFormat {
   Snippet = 2,
 }
 
+// Mirrors lsp MarkupContent (vscode-languageserver-types), the rich-text shape
+// `documentation` can carry alongside the plain-string form.
+export interface MarkupContent {
+  kind: 'plaintext' | 'markdown';
+  value: string;
+}
+
 export interface CompletionItem {
   label: string;
   kind: CompletionItemKind;
   detail?: string;
-  documentation?: string;
+  documentation?: string | MarkupContent;
   insertText?: string;
   insertTextFormat?: InsertTextFormat;
   sortText?: string;
+  /**
+   * Opaque payload round-tripped through the LSP `completionItem/resolve`
+   * request (mirrors lsp `CompletionItem.data`): a cheap tag set at
+   * `textDocument/completion` time, read back by the server's
+   * `onCompletionResolve` handler to lazily compute something expensive (e.g.
+   * an icon preview) only for the single item the user is highlighting.
+   */
+  data?: unknown;
 }

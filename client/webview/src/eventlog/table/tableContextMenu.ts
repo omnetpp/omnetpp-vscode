@@ -48,6 +48,14 @@ export interface TableMenuActions {
   openFilter(): void;
   /** ADDITIVE (phase U10): "Go to NED Declaration" for the focused row's module (see `uiProtocol.ts`'s `gotoNedDeclaration` message doc); only ever invoked when `TableMenuBuildParams.focusedRowNedTypeName` is non-null (the item disables itself otherwise). */
   gotoNedDeclaration(): void;
+  /**
+   * Table popup Pin entry gap-closure -- `pinAction`, ported from
+   * `EventLogTableContributor.java`'s popup menu (`createPinAction()`, `Action.AS_CHECK_BOX`).
+   * Sends `uiProtocol.ts`'s `togglePin` message; the host owns the actual pinned/unpinned
+   * state (same `togglePin()` the native `omnetpp.eventlog.pinEventLogTable`/`.unpinEventLogTable`
+   * view-title commands already call) and echoes it back via `pinnedChanged`/`init`.
+   */
+  togglePin(): void;
   /** Phase U10 (cheap gap) -- `lineFilterModeAction`; same setter the toolbar's Line Filter dropdown calls (`tableView.ts`). */
   setLineFilterMode(mode: EventLogTableFilterMode): void;
   /** Phase U10 (cheap gap) -- `typeModeAction`; same setter the toolbar's Type Mode dropdown calls. */
@@ -75,6 +83,8 @@ export interface TableMenuBuildParams {
   currentFilterMode: EventLogTableFilterMode;
   /** Phase U10 (cheap gap) -- current Name/Type/Display render modes, for the three radio submenus' checkmarks. */
   currentModes: TableRenderModes;
+  /** Table popup Pin entry gap-closure -- current pinned state, for the "Pin"/"Unpin" item's label and checkmark. */
+  pinned: boolean;
   actions: TableMenuActions;
 }
 
@@ -104,7 +114,7 @@ const DISPLAY_MODE_LABELS: [TableDisplayMode, string][] = [
 ];
 
 export function buildTableContextMenu(params: TableMenuBuildParams): MenuEntry[] {
-  const { hasFocus, hasSelection, focusedRowNedTypeName, currentFilterMode, currentModes, actions } = params;
+  const { hasFocus, hasSelection, focusedRowNedTypeName, currentFilterMode, currentModes, pinned, actions } = params;
   const entries: MenuEntry[] = [
     { id: 'gotoCause', label: 'Go to Event Cause', disabled: !hasFocus, onSelect: actions.gotoCause },
     { id: 'gotoArrival', label: 'Go to Message Arrival', disabled: !hasFocus, onSelect: actions.gotoArrival },
@@ -145,6 +155,13 @@ export function buildTableContextMenu(params: TableMenuBuildParams): MenuEntry[]
       submenu: DISPLAY_MODE_LABELS.map(([mode, label]): MenuEntry => ({ id: `displayMode-${mode}`, label, checked: mode === currentModes.displayMode, onSelect: () => actions.setDisplayMode(mode) })),
     },
     { separator: true },
+    // Table popup Pin entry gap-closure -- Java places `pinAction` immediately before
+    // `createRefreshCommandContributionItem()`, both after the same separator that
+    // follows `toggleBookmarkAction` (`EventLogTableContributor.java`'s
+    // `contributeToPopupMenu()`); this port's `toggleBookmark` item already lives
+    // earlier in the menu (grouped with the "Go To" family), so Pin is placed here,
+    // directly ahead of Refresh, matching the two items' *relative* order.
+    { id: 'pin', label: pinned ? 'Unpin' : 'Pin', checked: pinned, onSelect: actions.togglePin },
     { id: 'refresh', label: 'Refresh', icon: 'refresh', onSelect: actions.refresh },
   ];
   return entries;

@@ -5,6 +5,7 @@ import {
   collapseOpenAxisModule,
   collapseOpenAxisModuleSubmodules,
   collectActiveModuleIds,
+  computeAxisInfoText,
   computeVisibleAxisModuleIds,
   defaultOpenAxisModules,
   expandOpenAxisModule,
@@ -283,4 +284,29 @@ test('collectActiveModuleIds: method calls credit source+target only when showCo
   const initCall = [{ eventNumber: 0, tc: 0, sourceModuleId: 90, targetModuleId: 91, methodName: 'initialize()' }];
   const initHidden = collectActiveModuleIds({ events: [], dependencies: [], methodCalls: initCall }, { ...DEFAULT_DISPLAY_FLAGS, showComponentMethodCalls: true, showInitializationEvent: false });
   assert.deepStrictEqual([...initHidden], []);
+});
+
+// ---------------------------------------------------------------------------------
+// "Axis Info" readout (Java `drawAxisInfo()`, SequenceChart.java:4361-4390)
+// ---------------------------------------------------------------------------------
+
+test('computeAxisInfoText: nothing to report (everything open and visible) -> undefined', () => {
+  assert.strictEqual(computeAxisInfoText(7, 7, 7), undefined);
+});
+
+test('computeAxisInfoText: closed axes only (modules exist but are not open)', () => {
+  assert.deepStrictEqual(computeAxisInfoText(7, 5, 5), ['Closed: 2 axes', 'Invisible: 0 axes']);
+});
+
+test('computeAxisInfoText: invisible axes only (open but not currently laid out, e.g. Empty Axes off and no activity)', () => {
+  assert.deepStrictEqual(computeAxisInfoText(7, 7, 4), ['Closed: 0 axes', 'Invisible: 3 axes']);
+});
+
+test('computeAxisInfoText: both closed and invisible axes at once', () => {
+  assert.deepStrictEqual(computeAxisInfoText(10, 6, 2), ['Closed: 4 axes', 'Invisible: 4 axes']);
+});
+
+test('computeAxisInfoText: singular "axis" wording exactly at count 1 (Java\'s ternary), plural otherwise including zero', () => {
+  assert.deepStrictEqual(computeAxisInfoText(2, 1, 1), ['Closed: 1 axis', 'Invisible: 0 axes']);
+  assert.deepStrictEqual(computeAxisInfoText(1, 0, 0), ['Closed: 1 axis', 'Invisible: 0 axes']);
 });

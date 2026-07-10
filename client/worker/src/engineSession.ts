@@ -29,6 +29,7 @@
 import {
   BeginSendEntry,
   BigDecimal,
+  buildEntryTypeSchema,
   buildFilterHints,
   buildModuleTree,
   EventLog,
@@ -57,6 +58,7 @@ import type {
   CheckChangesResult,
   ElogModule,
   ElogOpenOptions,
+  EntryTypeSchema,
   EventDetail,
   EventDetailParams,
   FilterHints,
@@ -352,6 +354,7 @@ export class EngineSession {
       approximateNumberOfEvents: log.getApproximateNumberOfEvents(),
       coordinateSystemVersion: this.logVersion,
       filtered: this.filteredEventLog !== null,
+      runId: log.getSimulationBeginEntry()?.runId ?? null,
     };
   }
 
@@ -393,6 +396,11 @@ export class EngineSession {
     return buildFilterHints(this.log);
   }
 
+  /** ADDITIVE (phase U10): Event Log Table content-assist schema -- see `entryTypeSchema.ts`'s header. Static (independent of `this.log`'s content), so this never needs `runJob()`/progress either. */
+  getEntryTypeSchema(): EntryTypeSchema {
+    return buildEntryTypeSchema();
+  }
+
   // ---- elog/setFilter ------------------------------------------------------------------
 
   setFilter(params: FilterParams | null): LogSummary {
@@ -423,10 +431,20 @@ export class EngineSession {
 
   scSetTimelineMode(params: ScSetTimelineModeParams): ScState {
     const facade = this.sc;
-    facade.setTimelineMode(params.timelineMode);
-    if (params.separateEventLogEntries !== undefined) facade.setSeparateEventLogEntries(params.separateEventLogEntries);
+    // The nonlinear params must be set BEFORE `setTimelineMode()` -- that call itself
+    // triggers `relocateTimelineCoordinateSystem()` when an origin is already
+    // established, which immediately caches a coordinate for the origin event using
+    // whatever `nonLinearFocus`/`nonLinearMinimumTimelineCoordinateDelta` are current
+    // at that moment. Setting the params first (matching Eclipse's
+    // `CustomNonlinearOptionsDialog.apply()`: set fields, THEN
+    // `relocateTimelineCoordinateSystem()`) ensures a same-mode "refresh" call (the
+    // Custom Nonlinear dialog's live-drag redraw, which always passes the CURRENT
+    // `timelineMode` alongside new nonlinear params) picks up the new values right
+    // away instead of leaving the origin's own cached coordinate stale by one call.
     if (params.nonLinearMinimumTimelineCoordinateDelta !== undefined) facade.setNonLinearMinimumTimelineCoordinateDelta(params.nonLinearMinimumTimelineCoordinateDelta);
     if (params.nonLinearFocus !== undefined) facade.setNonLinearFocus(params.nonLinearFocus);
+    facade.setTimelineMode(params.timelineMode);
+    if (params.separateEventLogEntries !== undefined) facade.setSeparateEventLogEntries(params.separateEventLogEntries);
     return this.getScState();
   }
 
@@ -1210,8 +1228,12 @@ function toTableRow(entry: EventLogEntry): TableRow {
 }
 
 function applyFilterParams(filtered: FilteredEventLog, params: FilterParams): void {
-  if (params.firstConsideredEventNumber !== undefined) filtered.setFirstConsideredEventNumber(params.firstConsideredEventNumber);
-  if (params.lastConsideredEventNumber !== undefined) filtered.setLastConsideredEventNumber(params.lastConsideredEventNumber);
+  // Combines the explicit event-number range, the explicit simulation-time range, and
+  // the trace filter's delta limits into one considered window -- see
+  // `resolveConsideredEventNumberRange()`'s doc comment (filteredEventLog.ts) for the
+  // exact most-restrictive-wins rule. `params` structurally satisfies
+  // `ConsideredEventNumberRangeInput` (a superset of fields).
+  filtered.applyConsideredEventNumberRange(params);
   if (params.excludedEventNumbers !== undefined) filtered.setExcludedEventNumbers(params.excludedEventNumbers);
   if (params.collectMessageReuses !== undefined) filtered.setCollectMessageReuses(params.collectMessageReuses);
 

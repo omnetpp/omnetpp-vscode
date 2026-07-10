@@ -10,7 +10,9 @@
  * arrows with `arrowGeometry.ts`'s ported shapes — see that file's header for the
  * exact Java line references and per-shape fidelity notes (self-message half-ellipses,
  * long-arrow ellipses, split offscreen arrows, transmission-duration parallelograms,
- * filtered zigzag signs). This file's own job is purely the PER-DEPENDENCY WIRING:
+ * filtered/collapsed-dependency markers -- drawn as parallel lines, a deliberate
+ * departure from Eclipse's own zigzag glyph, see `buildFilteredSignSegments()`).
+ * This file's own job is purely the PER-DEPENDENCY WIRING:
  * resolving pixel endpoints/axis rows, gating by `ChartDisplayFlags`, and turning
  * `arrowGeometry.ts`'s geometry description into `DrawPrimitive`s.
  *
@@ -36,6 +38,8 @@
  */
 
 import { TimelineMode, type AxisVectorStrip, type RenderDependency, type RenderMethodCall, type TimelineEvent } from '@omnetpp/shared/elog-protocol';
+import { axisMatchable, eventMatchable, messageSendMatchable, methodCallMatchable, type StyleRuleResolver } from '@omnetpp/shared/style-rules';
+import { getGoodLightColor } from '@omnetpp/shared/preview';
 import {
   adjustEndpointsForEventRadius,
   ARROWHEAD_LENGTH,
@@ -97,8 +101,8 @@ export type DrawPrimitive =
   | { kind: 'zigzag'; segments: LineSegment[]; color: string }
   | { kind: 'label'; x: number; y: number; text: string; color: string; align?: 'left' | 'center' | 'right'; rotateDeg?: number }
   | { kind: 'timeDifferenceLabel'; x: number; y: number; text: string; color: string }
-  /** Phase U11 — the position/range (top) and eventlog-info (bottom) overlay boxes, right-aligned. Sized to its measured text at draw time (Java measures `getTextExtent`), so `rightX`/`anchorY`/`edge` describe placement and the renderer computes the box. */
-  | { kind: 'infoPanel'; lines: string[]; rightX: number; anchorY: number; edge: 'top' | 'bottom'; background: string; color: string }
+  /** Phase U11 — the position/range (top-right), eventlog-info (bottom-right), and axis-info (top-left) overlay boxes. Sized to its measured text at draw time (Java measures `getTextExtent`), so `anchorX`/`anchorY`/`edge`/`align` describe placement and the renderer computes the box. `align` picks which side of `anchorX` the box grows from ('right' = box's right edge at `anchorX`, i.e. `anchorX` is normally `viewport.canvasWidth`; 'left' = box's left edge at `anchorX`, used only by axis-info at `anchorX = 0`, matching Java's `drawAxisInfo()` never x-translating). */
+  | { kind: 'infoPanel'; lines: string[]; anchorX: number; anchorY: number; edge: 'top' | 'bottom'; align: 'left' | 'right'; background: string; color: string }
   /** Phase U4 — a selection ring around a selected event; a stadium outline (not a circle) when the event has a nonzero timeline width (`xEnd > x`), matching the pill event mark and Java's `drawEventMark()`. */
   | { kind: 'selectionMark'; x: number; xEnd: number; y: number; radius: number; color: string }
   /** Phase U11 — a selected timeline coordinate (a background click): a vertical line spanning the content height (Java `drawTimelineMark()`). */
@@ -141,12 +145,14 @@ export const BOOKMARK_FLAG_WIDTH = 6;
  * Eclipse `ColorFactory.getGoodLightColor(i)` — the "reversed Tableau-20 light half" palette
  * (`ColorFactory.java`), cycled by index. Used to color axis vector-strip segments by value
  * (equal values → same color). Fixed light colors regardless of theme, matching Java's strip.
+ *
+ * The literal palette now lives in `shared/src/graphics/colors.ts` (`GOOD_LIGHT_COLORS`/
+ * `GOOD_DARK_COLORS`) since the Configure Style rule model (`shared/src/eventlog/
+ * styleRules.ts`) needs the exact same two arrays for its "light"/"dark" color-list
+ * tokens — re-exported here so this file's existing call sites/imports elsewhere
+ * (`getGoodLightColor`) don't need to change.
  */
-const GOOD_LIGHT_COLORS = ['#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5', '#c49c94', '#f7b6d2', '#c7c7c7', '#dbdb8d', '#9edae9'];
-export function getGoodLightColor(index: number): string {
-  const n = GOOD_LIGHT_COLORS.length;
-  return GOOD_LIGHT_COLORS[(((index % n) + n) % n) | 0];
-}
+export { getGoodLightColor };
 
 /** Colors this module needs beyond `EventLogPalette` (reuse/filtered-dependency dash colors, the "long" arrowhead color) — derived locally from the imported palette rather than editing `common/theme.ts` (out of this phase's file ownership). */
 export function deriveArrowColors(theme: EventLogPalette): Record<ArrowKind, string> {
@@ -286,6 +292,8 @@ export function dependencyEmphasisKey(dep: RenderDependency): string {
 export interface InfoPanelText {
   positionAndRange?: [string, string];
   eventLogInfo?: [string, string];
+  /** Phase U-axis-info — `openAxisModules.ts`'s `computeAxisInfoText()` (Java `drawAxisInfo()`); `undefined` when there's nothing to report (no closed/invisible axes), same "flag has nothing to show yet" convention as the other two fields. */
+  axisInfo?: [string, string];
 }
 
 export interface BuildDrawListParams {
@@ -347,10 +355,31 @@ export interface BuildDrawListParams {
   axisGlyphs?: ReadonlyMap<number, { expand: boolean; collapse: boolean }>;
   /** Phase U8 — per-header glyphs, keyed by the header's `fullPath` (`DrawableAxisHeader.fullPath`); a header whose path resolves to no real module has no entry and draws no glyphs. */
   headerGlyphs?: ReadonlyMap<string, { moduleId: number; expand: boolean; collapse: boolean }>;
+  /**
+   * Configure Style dialog (`shared/src/eventlog/styleRules.ts`) — a precompiled
+   * resolver over the user's six pattern->color rule tables. Omitted (the default in
+   * every existing call site/test) means every category resolves to `null` for every
+   * lookup, i.e. every color below falls through to its pre-existing default
+   * expression UNCHANGED -- this is what guarantees the no-rules-configured path stays
+   * byte-identical to this feature's addition (non-regression, verified by the
+   * existing `drawList.test.ts`/`canvasStack`/`svgExport` suites passing unchanged).
+   */
+  styleRuleResolver?: StyleRuleResolver;
+  /**
+   * Resolves a module id to the two identity strings the style-rule categories need
+   * (see `styleRules.ts`'s header for why they differ: axes/axis-headers match the
+   * LOCAL module name, events/self-events match the FULL dotted path) — precomputed by
+   * the caller (`chartMain.ts`, which already owns the module tree) rather than this
+   * pure module reaching into tree-walking machinery of its own. `null`/omitted for a
+   * module id the tree doesn't (yet) know about -- style rules simply don't apply to
+   * it (same as every other module-tree-dependent feature here degrading gracefully
+   * before the tree loads).
+   */
+  resolveModuleIdentity?: (moduleId: number) => { localName: string; fullPath: string } | null;
 }
 
 export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
-  const { viewport, events, dependencies, methodCalls, axesLayout, ticks, theme, selectedEventNumbers, selectedDependencyKeys, selectedAxisModuleIds, selectedMethodCallKeys, selectedTimelineCoords, hovered, bookmarkedEventNumbers, bookmarkedModuleIds, bookmarkedDependencyKeys, bookmarkedMethodCallKeys, positionBookmarks, axisHeaderRoot, infoPanelText, skipLabelsForPerf } = params;
+  const { viewport, events, dependencies, methodCalls, axesLayout, ticks, theme, selectedEventNumbers, selectedDependencyKeys, selectedAxisModuleIds, selectedMethodCallKeys, selectedTimelineCoords, hovered, bookmarkedEventNumbers, bookmarkedModuleIds, bookmarkedDependencyKeys, bookmarkedMethodCallKeys, positionBookmarks, axisHeaderRoot, infoPanelText, skipLabelsForPerf, styleRuleResolver, resolveModuleIdentity } = params;
   const flags = params.displayFlags ?? DEFAULT_DISPLAY_FLAGS;
   const primitives: DrawPrimitive[] = [];
   // Phase U11 — selection/hover emphasis (thicker arrows, axis brackets, bold-red hovered
@@ -462,7 +491,14 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       // segment" would misrepresent an unknown value as held forever). Uses the traditional
       // compound(3px)/simple(1px) thickness, NOT `axis.lineHeight` (which is the taller
       // strip row-height reservation for layout purposes when a strip is shown).
-      primitives.push({ kind: 'axisLine', moduleId: axis.moduleId, x1: 0, x2: viewport.canvasWidth, y, lineHeight: axis.compound ? 3 : 1, color: theme.foreground });
+      // Configure Style ("Axes" category, `SequenceChartStyleProvider.getAxisColor()`/
+      // `getAxisLabelColor()` -- both delegate to the SAME `axesColorFallback`, so the
+      // line and the label share one resolved color): matched against the axis's LOCAL
+      // module name (`axis.label`, see `styleRules.ts`'s header) -- `null` (no rule
+      // configured/matched) falls through to the pre-existing `theme.foreground` default
+      // unchanged.
+      const axisStyleColor = styleRuleResolver?.resolve('axes', axisMatchable(axis.label)) ?? theme.foreground;
+      primitives.push({ kind: 'axisLine', moduleId: axis.moduleId, x1: 0, x2: viewport.canvasWidth, y, lineHeight: axis.compound ? 3 : 1, color: axisStyleColor });
       const strip = stripByModuleId.get(axis.moduleId);
       if (strip) {
         // Multi-color step bar centered on the axis line, drawn on top. Segments are culled
@@ -495,7 +531,7 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       const bookmarkX = glyphX + glyphSlot;
       const labelX = bookmarkX + bookmarkSlot;
       // Hover only makes the label BOLD (same color); selection turns it red.
-      if (flags.showAxisLabels) primitives.push({ kind: 'axisLabel', moduleId: axis.moduleId, x: labelX, y, text: axis.label, color: axisSelected ? emphasisColor : theme.foreground, bold: axisHovered });
+      if (flags.showAxisLabels) primitives.push({ kind: 'axisLabel', moduleId: axis.moduleId, x: labelX, y, text: axis.label, color: axisSelected ? emphasisColor : axisStyleColor, bold: axisHovered });
       // Phase U11 -- selected axis: two thin red lines just above/below the axis line,
       // running the full canvas width so they're visible under the left module hierarchy band.
       if (axisSelected) emphasis.push({ kind: 'axisSelectionMark', x1: 0, x2: viewport.canvasWidth, y, lineHeight: axis.lineHeight, color: emphasisColor });
@@ -528,7 +564,16 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       // The compound-module band keeps an OPAQUE background (only the leaf-label strip and
       // the rest of the left column are transparent) -- `color` is the fill, `textColor` the
       // rotated name.
-      primitives.push({ kind: 'axisHeaderBox', x, y0, y1, label: header.label, color: theme.isDark ? '#2f5060' : '#d7f2f2', textColor: theme.isDark ? '#e0f0f0' : '#000000' });
+      // Configure Style ("Axis headers" category, `getAxisHeaderColor()`): matched
+      // against the header's compound module's LOCAL name, same convention as "Axes"
+      // (`ModuleTreeItem.getAsString()` for both -- see `styleRules.ts`'s header). A
+      // header without its own resolvable module (a merged multi-component path
+      // fragment, `header.moduleId === null`) falls back to `header.label` as the best
+      // available identity string -- a documented approximation, not the exact Java
+      // identity, since Java's headers are always real `ModuleTreeItem`s.
+      const headerLocalName = header.moduleId !== null ? (resolveModuleIdentity?.(header.moduleId)?.localName ?? header.label) : header.label;
+      const headerStyleColor = styleRuleResolver?.resolve('axisHeaders', axisMatchable(headerLocalName)) ?? (theme.isDark ? '#2f5060' : '#d7f2f2');
+      primitives.push({ kind: 'axisHeaderBox', x, y0, y1, label: header.label, color: headerStyleColor, textColor: theme.isDark ? '#e0f0f0' : '#000000' });
       // Expand/collapse glyph pinned at the TOP of the band -- "before" the vertically-
       // written name, mirroring the axis row's glyph-before-name placement. A header can
       // exist WITHOUT a matching axis row of its own (its children are open but the
@@ -584,7 +629,15 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
 
       if (col.count <= MAX_EVENT_MARKS_PER_COLUMN) {
         const markKind = event.isSelfMessageProcessingEvent ? 'selfEventMark' : 'eventMark';
-        const baseMarkColor = event.isSelfMessageProcessingEvent ? (theme.isDark ? '#6fcf6f' : '#00ee00') : theme.eventColor;
+        const defaultMarkColor = event.isSelfMessageProcessingEvent ? (theme.isDark ? '#6fcf6f' : '#00ee00') : theme.eventColor;
+        // Configure Style ("Events"/"Self events" categories, `getEventFillColor()`):
+        // matched against the event's owning module's FULL dotted path (see
+        // `styleRules.ts`'s header -- `Event.getAsString()`, unlike the axis
+        // categories, which match the LOCAL name only). No module-tree identity yet
+        // (`resolveModuleIdentity` omitted/misses) -- falls through to the default
+        // color unchanged, same as every other module-tree-dependent feature here.
+        const identity = resolveModuleIdentity?.(event.moduleId);
+        const baseMarkColor = identity ? (styleRuleResolver?.resolve(event.isSelfMessageProcessingEvent ? 'selfEvents' : 'events', eventMatchable(identity.fullPath)) ?? defaultMarkColor) : defaultMarkColor;
         primitives.push({ kind: markKind, eventNumber: event.eventNumber, moduleId: event.moduleId, x, xEnd, y, radius: EVENT_RADIUS, color: baseMarkColor });
         if (flags.showEventNumbers && showLabels) primitives.push({ kind: 'label', x: x + 2, y: y + 10, text: `#${event.eventNumber}`, color: theme.descriptionForeground, align: 'left' });
         const evSelected = selectedEventNumbers?.has(event.eventNumber) ?? false;
@@ -606,7 +659,7 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
   // ---- message dependencies (arrows / self-message ellipses) ----
   const vlineBuffer = new VLineBuffer();
   const axisSpacing = Math.max(axesLayout.spacing, 1);
-  const depCtx = { axisByModuleId, viewport, theme, arrowColors, flags, axisSpacing, vlineBuffer, showLabels, bookmarkedDependencyKeys };
+  const depCtx = { axisByModuleId, viewport, theme, arrowColors, flags, axisSpacing, vlineBuffer, showLabels, bookmarkedDependencyKeys, styleRuleResolver };
   for (const dep of dependencies) {
     pushDependency(primitives, dep, depCtx);
   }
@@ -639,7 +692,9 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
     let y1 = axisRowY(sourceAxis.y, viewport);
     let y2 = axisRowY(targetAxis.y, viewport);
     [y1, y2] = adjustEndpointsForEventRadius(y1, y2, EVENT_RADIUS, flags.showEventMarks);
-    const color = arrowColors.method;
+    // Configure Style ("Method calls" category, `getComponentMethodCallColor()`):
+    // matched against the method name (`styleRules.ts`'s `methodCallMatchable`).
+    const color = styleRuleResolver?.resolve('methodCalls', methodCallMatchable(call.methodName)) ?? arrowColors.method;
     const callRef: ArrowRef = { kind: 'methodCall', eventNumber: call.eventNumber, sourceModuleId: call.sourceModuleId, targetModuleId: call.targetModuleId, tc: call.tc, entryIndex: call.entryIndex, methodName: call.methodName };
     const hasWidth = xEnd > xBegin + 0.5;
     const methodCallBookmarkId = bookmarkedMethodCallKeys?.get(bookmarkMethodCallKey(call.eventNumber, call.entryIndex));
@@ -718,10 +773,17 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
 
   // ---- info panels (overlay) ----
   if (flags.showPositionAndRange && infoPanelText?.positionAndRange) {
-    pushInfoPanel(primitives, theme, infoPanelText.positionAndRange, viewport.canvasWidth, GUTTER_TOP_HEIGHT, 'top');
+    pushInfoPanel(primitives, theme, infoPanelText.positionAndRange, viewport.canvasWidth, GUTTER_TOP_HEIGHT, 'top', 'right');
   }
   if (flags.showEventLogInfo && infoPanelText?.eventLogInfo) {
-    pushInfoPanel(primitives, theme, infoPanelText.eventLogInfo, viewport.canvasWidth, viewport.canvasHeight, 'bottom');
+    pushInfoPanel(primitives, theme, infoPanelText.eventLogInfo, viewport.canvasWidth, viewport.canvasHeight, 'bottom', 'right');
+  }
+  // Java draws this at the absolute LEFT edge (x=0, no gutter offset -- `drawAxisInfo()`
+  // never translates horizontally, unlike the two panels above which anchor to
+  // `getViewportWidth()`), so it's the one info panel that overlaps the left axis-label
+  // gutter's top-left corner rather than sitting beside it -- faithful to Java, not a bug.
+  if (flags.showAxisInfo && infoPanelText?.axisInfo) {
+    pushInfoPanel(primitives, theme, infoPanelText.axisInfo, 0, GUTTER_TOP_HEIGHT, 'top', 'left');
   }
 
   // "Bookmark Info" callout connectors -- a barely-visible dotted line from each visible note
@@ -749,8 +811,8 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
   return primitives;
 }
 
-function pushInfoPanel(primitives: DrawPrimitive[], theme: EventLogPalette, lines: [string, string], canvasWidth: number, anchorY: number, edge: 'top' | 'bottom'): void {
-  primitives.push({ kind: 'infoPanel', lines: [lines[0], lines[1]], rightX: canvasWidth, anchorY, edge, background: theme.isDark ? '#264f4f' : '#e0ffff', color: theme.isDark ? theme.foreground : '#000000' });
+function pushInfoPanel(primitives: DrawPrimitive[], theme: EventLogPalette, lines: [string, string], anchorX: number, anchorY: number, edge: 'top' | 'bottom', align: 'left' | 'right'): void {
+  primitives.push({ kind: 'infoPanel', lines: [lines[0], lines[1]], anchorX, anchorY, edge, align, background: theme.isDark ? '#264f4f' : '#e0ffff', color: theme.isDark ? theme.foreground : '#000000' });
 }
 
 interface DependencyDrawContext {
@@ -766,6 +828,8 @@ interface DependencyDrawContext {
   bookmarkedDependencyKeys?: ReadonlyMap<string, string>;
   /** Phase U11 -- the selection/hover emphasis pass. Hover keeps the dependency's own color but draws it WIDER; selection recolors it to `emphasisColor` (red). Either way it's solid (no message dash) and drawn on top of the base scene. */
   override?: { emphasisColor: string; selected: boolean; hovered: boolean };
+  /** Configure Style ("Message sends" category) -- see `pushDependency()`'s own comment for why this only ever applies to plain (non-reuse, non-filtered) sends. */
+  styleRuleResolver?: StyleRuleResolver;
 }
 
 /**
@@ -803,7 +867,7 @@ export function dependencyPassesDisplayFlags(dep: Pick<RenderDependency, 'kind' 
 }
 
 function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx: DependencyDrawContext): void {
-  const { axisByModuleId, viewport, theme, arrowColors, flags, axisSpacing, vlineBuffer, showLabels, bookmarkedDependencyKeys, override } = ctx;
+  const { axisByModuleId, viewport, theme, arrowColors, flags, axisSpacing, vlineBuffer, showLabels, bookmarkedDependencyKeys, override, styleRuleResolver } = ctx;
   if (!dependencyPassesDisplayFlags(dep, flags)) return;
   const dependencyBookmarkId = bookmarkedDependencyKeys?.get(bookmarkDependencyKey(dep.causeEventNumber, dep.consequenceEventNumber, dep.messageId));
   if (dep.causeModuleId === null && dep.consequenceModuleId === null) return;
@@ -820,6 +884,15 @@ function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx:
 
   const arrowKind: ArrowKind = dep.kind === 'send' ? 'send' : dep.kind === 'reuse' ? 'reuse' : 'filtered';
   let { color, dash } = isFiltered ? filteredColorAndDash(arrowColors, dep.filteredKind) : { color: arrowColors[arrowKind], dash: arrowKind === 'reuse' ? [2, 2] : undefined };
+  // Configure Style ("Message sends" category, `getMessageDependencyColor()`): Java's
+  // `messageSendColorFallback` is consulted ONLY for a plain send (not a
+  // `MessageReuseDependency`, not a `FilteredMessageDependency` of any kind) -- ported
+  // exactly via the `arrowKind === 'send'` guard, matched against the message name/
+  // class name (`styleRules.ts`'s `messageSendMatchable`).
+  if (arrowKind === 'send' && styleRuleResolver) {
+    const resolved = styleRuleResolver.resolve('messageSends', messageSendMatchable(dep.messageName ?? '', dep.messageClassName));
+    if (resolved !== null) color = resolved;
+  }
   // Hover = same color, wider (3px); selection = red, Eclipse's 1.5px selection width.
   const arrowWidth = override ? (override.hovered ? 3 : 1.5) : undefined;
   if (override) {

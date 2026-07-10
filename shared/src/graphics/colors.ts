@@ -269,3 +269,34 @@ export function parseColor(text: string): string | undefined {
 
   return NAMED_COLORS[text.toLowerCase()];
 }
+
+/**
+ * `ColorFactory.getGoodDarkColors()`/`getGoodLightColors()` — the "good color" palette
+ * used both for the axis-vector-strip segment coloring (`AxisVectorBarRenderer`, already
+ * ported as `GOOD_LIGHT_COLORS` in `client/webview/src/eventlog/chart/drawList.ts` before
+ * this file grew its own copy — see that file for the refactor note) and for
+ * `SequenceChartStyleProvider`'s style-rule "light"/"dark" color-list tokens
+ * (`MatchExpressionFallback`'s `getColorFallback()`: a rule's Colors cell may name
+ * literal colors, or the tokens `"light"`/`"dark"`, which expand to one of these two
+ * fixed 10-color arrays — see `shared/src/eventlog/styleRules.ts`). `ColorFactory.java`'s
+ * static initializer reassigns these arrays several times (older/commented-out palette
+ * variants); the block that's actually LIVE (not commented out) is "half of the Tableau
+ * 20 palette, in reverse order" — verified by reading the source, not guessed — which is
+ * what's transcribed below (dark = the odd/blue-first half, light = the even/orange-first
+ * half, both in the exact declared order so `getGoodLightColor(i)`/`getGoodDarkColor(i)`
+ * index identically to Java's `Color[i % length]`).
+ */
+export const GOOD_DARK_COLORS: readonly string[] = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf'];
+export const GOOD_LIGHT_COLORS: readonly string[] = ['#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5', '#c49c94', '#f7b6d2', '#c7c7c7', '#dbdb8d', '#9edae9'];
+
+/** `ColorFactory.getGoodLightColor(long i)`: `goodLightColors[(int)(i % goodLightColors.length)]` — note Java's `%` on a non-negative `i` (the only way callers ever use it, an index/hash already reduced to a small or absolute value) never needs the "negative modulo" fixup this file's own `Math.abs`-guarded callers already apply before calling in. */
+export function getGoodLightColor(index: number): string {
+  const n = GOOD_LIGHT_COLORS.length;
+  return GOOD_LIGHT_COLORS[(((index % n) + n) % n) | 0];
+}
+
+/** `ColorFactory.getGoodDarkColor(int i)`: `goodDarkColors[i % goodDarkColors.length]`. */
+export function getGoodDarkColor(index: number): string {
+  const n = GOOD_DARK_COLORS.length;
+  return GOOD_DARK_COLORS[(((index % n) + n) % n) | 0];
+}

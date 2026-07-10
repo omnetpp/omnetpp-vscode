@@ -262,8 +262,11 @@ function capModuleTree(root: ElogModule | null, maxDepth: number, maxNodes: numb
 
 /** Applies a (partial) FilterParams DTO (elogProtocol.ts) to a fresh FilteredEventLog -- every field maps 1:1 to one FilteredEventLog setter; an omitted field leaves the engine's own default untouched. */
 function applyFilterParams(f: FilteredEventLog, p: FilterParams): void {
-  if (p.firstConsideredEventNumber !== undefined) f.setFirstConsideredEventNumber(p.firstConsideredEventNumber);
-  if (p.lastConsideredEventNumber !== undefined) f.setLastConsideredEventNumber(p.lastConsideredEventNumber);
+  // Combines the explicit event-number range, the explicit simulation-time range, and
+  // the trace filter's delta limits into one considered window -- see
+  // `resolveConsideredEventNumberRange()`'s doc comment (filteredEventLog.ts) for the
+  // exact most-restrictive-wins rule.
+  f.applyConsideredEventNumberRange(p);
   if (p.excludedEventNumbers) f.setExcludedEventNumbers(p.excludedEventNumbers);
   if (p.collectMessageReuses !== undefined) f.setCollectMessageReuses(p.collectMessageReuses);
 

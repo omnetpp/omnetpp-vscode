@@ -211,14 +211,16 @@ export function vectorValueIndex(value: number, info: Pick<VecVectorInfo, 'type'
 
 /**
  * Display text for a sample value (Eclipse `getValueText`): an enum's symbolic name when the
- * vector is an enum and the value is a known member; otherwise the integer (for whole
- * numbers) or the raw double.
+ * vector is an enum and the value is a known member. When the vector IS an enum but the value
+ * has no matching member, Eclipse's native `EnumType::nameOf()` (`enumtype.cc:51-54`) returns
+ * null and `AxisVectorBarRenderer.drawAxis()` (`AxisVectorBarRenderer.java:176-177`) skips the
+ * label entirely (a colored segment with no text) -- NOT a numeric fallback, so that case
+ * returns `''` here too (the render path already treats an empty `valueText` as "draw
+ * nothing"). Non-enum vectors are unaffected: the integer (for whole numbers) or the raw
+ * double.
  */
 export function vectorValueText(value: number, info: Pick<VecVectorInfo, 'enum'>): string {
-  if (info.enum) {
-    const name = info.enum.get(Math.floor(value));
-    if (name !== undefined) return name;
-  }
+  if (info.enum) return info.enum.get(Math.floor(value)) ?? '';
   return value === Math.floor(value) ? String(Math.floor(value)) : String(value);
 }
 
