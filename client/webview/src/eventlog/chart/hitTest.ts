@@ -42,7 +42,7 @@ export type HitObject =
   | { kind: 'moduleAction'; action: 'expand' | 'collapse' | 'close'; moduleId: number; scope: 'axis' | 'header' }
   | { kind: 'event'; eventNumber: number; moduleId: number }
   | { kind: 'dependency'; dependencyKind: 'send' | 'reuse' | 'filtered'; causeEventNumber: number; consequenceEventNumber: number; causeTc: number; consequenceTc: number }
-  | { kind: 'methodCall'; eventNumber: number; sourceModuleId: number; targetModuleId: number; tc: number }
+  | { kind: 'methodCall'; eventNumber: number; sourceModuleId: number; targetModuleId: number; tc: number; entryIndex: number; methodName: string }
   | { kind: 'axis'; moduleId: number }
   | { kind: 'timestamp'; tc: number };
 
@@ -130,7 +130,7 @@ export function halfEllipseContainsPoint(quarter: number, x1: number, x2: number
 function arrowRefToHit(ref: ArrowRef): HitObject {
   return ref.kind === 'dependency'
     ? { kind: 'dependency', dependencyKind: ref.dependencyKind, causeEventNumber: ref.causeEventNumber, consequenceEventNumber: ref.consequenceEventNumber, causeTc: ref.causeTc, consequenceTc: ref.consequenceTc }
-    : { kind: 'methodCall', eventNumber: ref.eventNumber, sourceModuleId: ref.sourceModuleId, targetModuleId: ref.targetModuleId, tc: ref.tc };
+    : { kind: 'methodCall', eventNumber: ref.eventNumber, sourceModuleId: ref.sourceModuleId, targetModuleId: ref.targetModuleId, tc: ref.tc, entryIndex: ref.entryIndex, methodName: ref.methodName };
 }
 
 function hitKey(hit: HitObject): string {

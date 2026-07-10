@@ -120,11 +120,11 @@ test('hitTest: arrow without a ref (defensive -- should not happen in practice) 
   assert.equal(hits.length, 0);
 });
 
-test('hitTest: method-call arrow hit reports a methodCall hit', () => {
-  const ref: ArrowRef = { kind: 'methodCall', eventNumber: 9, sourceModuleId: 1, targetModuleId: 2, tc: 42 };
+test('hitTest: method-call arrow hit reports a methodCall hit, threading entryIndex/methodName through (needed to build a ComponentMethodCall bookmark candidate)', () => {
+  const ref: ArrowRef = { kind: 'methodCall', eventNumber: 9, sourceModuleId: 1, targetModuleId: 2, tc: 42, entryIndex: 5, methodName: 'sendPacket' };
   const primitives: DrawPrimitive[] = [{ kind: 'arrow', arrowKind: 'method', x1: 30, y1: 0, x2: 30, y2: 50, color: '#000', ref }];
   const hits = hitTest({ primitives, px: 30, py: 25, pointerTc: null });
-  assert.deepEqual(hits, [{ kind: 'methodCall', eventNumber: 9, sourceModuleId: 1, targetModuleId: 2, tc: 42 }]);
+  assert.deepEqual(hits, [{ kind: 'methodCall', eventNumber: 9, sourceModuleId: 1, targetModuleId: 2, tc: 42, entryIndex: 5, methodName: 'sendPacket' }]);
 });
 
 // ---------------------------------------------------------------------------------

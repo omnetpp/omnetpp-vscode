@@ -74,7 +74,7 @@ export type ArrowKind = 'send' | 'reuse' | 'filtered' | 'method';
  */
 export type ArrowRef =
   | { kind: 'dependency'; dependencyKind: ArrowKind & ('send' | 'reuse' | 'filtered'); causeEventNumber: number; consequenceEventNumber: number; causeTc: number; consequenceTc: number }
-  | { kind: 'methodCall'; eventNumber: number; sourceModuleId: number; targetModuleId: number; tc: number };
+  | { kind: 'methodCall'; eventNumber: number; sourceModuleId: number; targetModuleId: number; tc: number; entryIndex: number; methodName: string };
 
 export type DrawPrimitive =
   | { kind: 'gutter'; part: 'top' | 'left'; x: number; y: number; w: number; h: number; color: string }
@@ -257,6 +257,16 @@ export function bookmarkDependencyKey(eventNumber: number, consequenceEventNumbe
   return `${eventNumber}:${consequenceEventNumber ?? -1}:${messageId ?? -1}`;
 }
 
+/**
+ * Identity key for a `ComponentMethodCall`-kind bookmark, matching `bookmarkStore.ts`'s
+ * `bookmarkMatches()` field set exactly `(eventNumber, entryIndex)` -- see
+ * `bookmarkDependencyKey()` above for why this is exported (one definition, used both by
+ * `chartMain.ts`'s toggle-candidate builder and this module's `bookmarkedMethodCallKeys`).
+ */
+export function bookmarkMethodCallKey(eventNumber: number, entryIndex: number): string {
+  return `${eventNumber}:${entryIndex}`;
+}
+
 /** Identity key for a rendered dependency, matching `selection.ts`'s `dependencyKey()` (`kind:cause:consequence`), so `buildDrawList` can test a dependency against the selected/hovered key sets the reducer produced. */
 export function dependencyEmphasisKey(dep: RenderDependency): string {
   const arrowKind = dep.kind === 'send' ? 'send' : dep.kind === 'reuse' ? 'reuse' : 'filtered';
@@ -301,6 +311,8 @@ export interface BuildDrawListParams {
   bookmarkedModuleIds?: ReadonlySet<number>;
   /** Phase U6 — `MessageDependency`-kind bookmark identity keys (`${causeEventNumber}:${consequenceEventNumber}:${messageId}` -- see `chartMain.ts`'s `bookmarkDepKey()`, which both this and the toggle-candidate builder use so the two stay in sync); a matching dependency gets a `'bookmarkMark'` at its arrow's midpoint. */
   bookmarkedDependencyKeys?: ReadonlySet<string>;
+  /** `'ComponentMethodCall'`-kind bookmark identity keys (`bookmarkMethodCallKey()` above); a matching method call gets a `'bookmarkMark'` at its begin edge. */
+  bookmarkedMethodCallKeys?: ReadonlySet<string>;
   /** `'Position'`-kind bookmarks' resolved timeline coordinates (`chartMain.ts`'s `refreshPositionBookmarkTcs()`); each gets a `'bookmarkMark'` near the top ruler at its tc. */
   positionBookmarkTcs?: readonly number[];
   /** Phase U5 — the ~25 Show/Hide toggles (`displayFlags.ts`); defaults to `DEFAULT_DISPLAY_FLAGS` when omitted. */
@@ -326,7 +338,7 @@ export interface BuildDrawListParams {
 }
 
 export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
-  const { viewport, events, dependencies, methodCalls, axesLayout, ticks, theme, selectedEventNumbers, selectedDependencyKeys, selectedAxisModuleIds, selectedMethodCallKeys, selectedTimelineCoords, hovered, bookmarkedEventNumbers, bookmarkedModuleIds, bookmarkedDependencyKeys, positionBookmarkTcs, axisHeaderRoot, infoPanelText, skipLabelsForPerf } = params;
+  const { viewport, events, dependencies, methodCalls, axesLayout, ticks, theme, selectedEventNumbers, selectedDependencyKeys, selectedAxisModuleIds, selectedMethodCallKeys, selectedTimelineCoords, hovered, bookmarkedEventNumbers, bookmarkedModuleIds, bookmarkedDependencyKeys, bookmarkedMethodCallKeys, positionBookmarkTcs, axisHeaderRoot, infoPanelText, skipLabelsForPerf } = params;
   const flags = params.displayFlags ?? DEFAULT_DISPLAY_FLAGS;
   const primitives: DrawPrimitive[] = [];
   // Phase U11 — selection/hover emphasis (thicker arrows, axis brackets, bold-red hovered
@@ -611,8 +623,9 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
     let y2 = axisRowY(targetAxis.y, viewport);
     [y1, y2] = adjustEndpointsForEventRadius(y1, y2, EVENT_RADIUS, flags.showEventMarks);
     const color = arrowColors.method;
-    const callRef: ArrowRef = { kind: 'methodCall', eventNumber: call.eventNumber, sourceModuleId: call.sourceModuleId, targetModuleId: call.targetModuleId, tc: call.tc };
+    const callRef: ArrowRef = { kind: 'methodCall', eventNumber: call.eventNumber, sourceModuleId: call.sourceModuleId, targetModuleId: call.targetModuleId, tc: call.tc, entryIndex: call.entryIndex, methodName: call.methodName };
     const hasWidth = xEnd > xBegin + 0.5;
+    if (bookmarkedMethodCallKeys?.has(bookmarkMethodCallKey(call.eventNumber, call.entryIndex))) primitives.push({ kind: 'bookmarkMark', x: xBegin, y: y1, color: bookmarkMarkColor(theme) });
     // faint bar over the call's duration (Java's alpha-24 fillRectangle)
     if (hasWidth && y1 !== y2) primitives.push({ kind: 'parallelogram', points: [[xBegin, y1], [xEnd, y1], [xEnd, y2], [xBegin, y2]], color });
     // solid call line at xBegin (deduped against other near-vertical geometry)

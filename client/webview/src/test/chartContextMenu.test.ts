@@ -38,6 +38,7 @@ function fakeActions(): ChartMenuActions & Record<string, unknown> {
     toggleEventBookmark: record('toggleEventBookmark'),
     toggleDependencyBookmark: record('toggleDependencyBookmark'),
     toggleAxisBookmark: record('toggleAxisBookmark'),
+    toggleMethodCallBookmark: record('toggleMethodCallBookmark'),
     toggleTimestampBookmark: record('toggleTimestampBookmark'),
     centerOnAxis: record('centerOnAxis'),
     filterCausesConsequences: record('filterCausesConsequences'),
@@ -274,11 +275,16 @@ test('buildChartContextMenu: axis vector data -- "Attach" when none, "Detach"+"Z
   assert.deepEqual(yesVec.calls.zoomToAxisVectorValue, [7]);
 });
 
-test('buildChartContextMenu: methodCall hits do not get a dedicated section (matches Java -- verified no such submenu in SequenceChartContributor)', () => {
+test('buildChartContextMenu: methodCall hit -- a section scoped to just Toggle Bookmark (Java has no general per-method-call submenu, but its "Toggle bookmark" action does support ComponentMethodCall markers)', () => {
   const actions = fakeActions();
-  const hits: HitObject[] = [{ kind: 'methodCall', eventNumber: 1, sourceModuleId: 1, targetModuleId: 2, tc: 5 }];
+  const hits: HitObject[] = [{ kind: 'methodCall', eventNumber: 1, sourceModuleId: 1, targetModuleId: 2, tc: 5, entryIndex: 3, methodName: 'sendPacket' }];
   const entries = buildChartContextMenu(makeParams(actions, { hits }));
-  assert.ok(!entries.some((e) => 'id' in e && e.id.startsWith('call-')));
+  const callEntry = findEntry(entries, 'call-1-3')! as { label: string };
+  assert.equal(callEntry.label, 'sendPacket');
+  const sub = submenuOf(entries, 'call-1-3');
+  assert.equal(sub.length, 1, 'only Toggle Bookmark -- no Select/Center/etc, matching Java');
+  (findEntry(sub, 'toggleBookmark') as { onSelect: () => void }).onSelect();
+  assert.deepEqual(actions.calls.toggleMethodCallBookmark, [hits[0]]);
 });
 
 test('buildChartContextMenu: Timeline Mode submenu has a checked radio matching currentTimelineMode', () => {

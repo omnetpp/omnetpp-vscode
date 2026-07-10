@@ -539,6 +539,7 @@ export class EngineSession {
           sourceModuleId: entry.sourceComponentId,
           targetModuleId: entry.targetComponentId,
           methodName: entry.methodName,
+          entryIndex: entry.getEntryIndex(),
         });
         moduleIds.add(entry.sourceComponentId);
         moduleIds.add(entry.targetComponentId);

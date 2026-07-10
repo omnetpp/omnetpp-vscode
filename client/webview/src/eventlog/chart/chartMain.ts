@@ -70,7 +70,7 @@ import {
 import { buildChartContextMenu, buildShowHideEntries, type AxisModuleMenuInfo, type ChartMenuActions, type PresetConfiguration } from './chartContextMenu';
 import { buildSampleTable, pixelToTc, tcToSimTimeApprox, type TcSimSample } from './coords';
 import { mergeDisplayFlags, presetDefaultFlags, presetNetworkCommunicationFlags, showAllFlags, toggleFlag, type ChartDisplayFlags } from './displayFlags';
-import { bookmarkDependencyKey, buildDrawList, type DrawPrimitive, type InfoPanelText } from './drawList';
+import { bookmarkDependencyKey, bookmarkMethodCallKey, buildDrawList, type DrawPrimitive, type InfoPanelText } from './drawList';
 import { openSelectModulesDialog } from './selectModulesDialog';
 import { openListReorderDialog } from './reorderDialog';
 import { calculateTicks, formatMouseTime, formatTickLabel, formatTickTime } from './ticks';
@@ -263,10 +263,11 @@ let antialiasEnabled = true;
 let findTextState: FindTextState = DEFAULT_FIND_TEXT_STATE;
 /** Anchor row of the last successful find, so "Find Next" continues from there instead of restarting at the beginning/end. `null` before any search (or after the file changes underneath it). */
 let lastFindRef: RowRef | null = null;
-/** Phase U6 -- the session's current bookmark list (`init`/`bookmarksChanged`); `recomputeBookmarkIndexes()` derives the three render-ready sets below from it (+ `moduleTree`, for Axis bookmarks' `modulePath` -> `moduleId` resolution). */
+/** Phase U6 -- the session's current bookmark list (`init`/`bookmarksChanged`); `recomputeBookmarkIndexes()` derives the four render-ready sets below from it (+ `moduleTree`, for Axis bookmarks' `modulePath` -> `moduleId` resolution). */
 let bookmarks: Bookmark[] = [];
 let bookmarkedEventNumbers = new Set<number>();
 let bookmarkedDependencyKeys = new Set<string>();
+let bookmarkedMethodCallKeys = new Set<string>();
 let bookmarkedModuleIds = new Set<number>();
 /** Phase U6+ -- `'Position'`-kind bookmarks' resolved timeline coordinates, keyed by `simulationTime` (the bookmark's identity). Unlike the three sets above, this needs an engine round trip per bookmark (`elog/sc/mapCoords`, `simTimeToTc`) to resolve, so it's refreshed asynchronously by `refreshPositionBookmarkTcs()` rather than synchronously in `recomputeBookmarkIndexes()`. */
 let positionBookmarkTcs = new Map<string, number>();
@@ -488,10 +489,11 @@ function initializeOpenAxisModules(): void {
   openAxisModuleIds = resolved.length === 0 ? defaultOpenAxisModules(moduleTree) : resolved;
 }
 
-/** Re-derives the three render-ready bookmark index sets `drawList.ts` consumes from `bookmarks`/`moduleTree` -- call after either changes (a fresh `init`/`bookmarksChanged`, or the module tree finishing its first `elog/getModuleTree` load). Does NOT itself schedule a render (callers already do, alongside whatever else they're updating). */
+/** Re-derives the four render-ready bookmark index sets `drawList.ts` consumes from `bookmarks`/`moduleTree` -- call after either changes (a fresh `init`/`bookmarksChanged`, or the module tree finishing its first `elog/getModuleTree` load). Does NOT itself schedule a render (callers already do, alongside whatever else they're updating). */
 function recomputeBookmarkIndexes(): void {
   bookmarkedEventNumbers = new Set(bookmarks.filter((b) => b.kind === 'Event').map((b) => b.eventNumber!));
   bookmarkedDependencyKeys = new Set(bookmarks.filter((b) => b.kind === 'MessageDependency').map((b) => bookmarkDependencyKey(b.eventNumber!, b.consequenceEventNumber, b.messageId)));
+  bookmarkedMethodCallKeys = new Set(bookmarks.filter((b) => b.kind === 'ComponentMethodCall').map((b) => bookmarkMethodCallKey(b.eventNumber!, b.entryIndex!)));
   bookmarkedModuleIds = new Set(
     bookmarks
       .filter((b) => b.kind === 'Axis' && b.modulePath)
@@ -834,6 +836,7 @@ function renderFrame(): void {
     bookmarkedEventNumbers,
     bookmarkedModuleIds,
     bookmarkedDependencyKeys,
+    bookmarkedMethodCallKeys,
     positionBookmarkTcs: [...positionBookmarkTcs.values()],
     displayFlags,
     axisHeaderRoot,
@@ -1289,6 +1292,7 @@ async function performExportSvg(result: ExportDialogResult, ctxBase: ExportRange
       bookmarkedEventNumbers,
       bookmarkedModuleIds,
       bookmarkedDependencyKeys,
+      bookmarkedMethodCallKeys,
       positionBookmarkTcs: [...positionBookmarkTcs.values()],
       displayFlags,
       axisHeaderRoot,
@@ -1403,6 +1407,10 @@ function toggleDependencyBookmark(dep: RenderDependency): void {
   postToggleBookmark({ kind: 'MessageDependency', eventNumber: dep.causeEventNumber, consequenceEventNumber: dep.consequenceEventNumber, messageId: dep.messageId ?? undefined });
 }
 
+function toggleMethodCallBookmark(call: RenderMethodCall): void {
+  postToggleBookmark({ kind: 'ComponentMethodCall', eventNumber: call.eventNumber, entryIndex: call.entryIndex, methodName: call.methodName });
+}
+
 /**
  * `'Position'` kind -- a bare timeline position, no event/module (Java: toggling with a
  * `BigDecimal` simulation time in the selection, which arises from clicking empty chart
@@ -1422,21 +1430,19 @@ async function toggleTimestampBookmark(tc: number): Promise<void> {
 
 /**
  * Ctrl/Cmd+D (`interactions.ts`'s `onToggleBookmark`) -- toggles a bookmark for every
- * currently selected event/dependency/axis/timeline-position (port of
+ * currently selected event/dependency/method-call/axis/timeline-position (port of
  * `SequenceChartContributor.java`'s "Toggle bookmark" action operating on the whole
- * `IEventLogSelection`, one marker per selected item). Method-call selections are NOT
- * included: `RenderMethodCall` (the viewport DTO) has no `entryIndex`/
- * `EventLogEntryIndex` field the way Java's `ComponentMethodBeginEntry` does, so this
- * port cannot build a well-formed `ComponentMethodCall` bookmark candidate from
- * client-side data alone -- a documented gap (the data MODEL/store fully supports the
- * kind; only this one creation path is missing, tracked as a follow-up rather than
- * blocking the other 4 kinds).
+ * `IEventLogSelection`, one marker per selected item).
  */
 function toggleBookmarkForSelection(): void {
   for (const eventNumber of selection.events) toggleEventBookmark(eventNumber);
   for (const key of selection.dependencies) {
     const dep = dependencyForKey(key);
     if (dep) toggleDependencyBookmark(dep);
+  }
+  for (const key of selection.methodCalls) {
+    const call = methodCallForKey(key);
+    if (call) toggleMethodCallBookmark(call);
   }
   for (const moduleId of selection.axes) toggleAxisBookmark(moduleId);
   for (const tc of selection.timelineCoords) void toggleTimestampBookmark(tc);
@@ -1456,10 +1462,14 @@ function findDependency(hit: Extract<HitObject, { kind: 'dependency' }>): Render
   return dependencyForKey(dependencyKey(hit));
 }
 
-function findMethodCall(hit: Extract<HitObject, { kind: 'methodCall' }>): RenderMethodCall | null {
+/** Looks up a loaded `RenderMethodCall` by its `methodCallKey()`-shaped identity string -- shared by `findMethodCall()` (from a hit-test result) and the bookmark toggle path (from a `selection.methodCalls` set member, which only carries the key, not the object; mirrors `dependencyForKey()`). */
+function methodCallForKey(key: string): RenderMethodCall | null {
   if (!lastModel) return null;
-  const key = methodCallKey(hit);
   return lastModel.methodCalls.find((c) => methodCallKey(c) === key) ?? null;
+}
+
+function findMethodCall(hit: Extract<HitObject, { kind: 'methodCall' }>): RenderMethodCall | null {
+  return methodCallForKey(methodCallKey(hit));
 }
 
 /** The `RenderDependency` whose consequence is `eventNumber` (the "causing message" clause in `buildEventTooltip()`) -- looked up from the currently-loaded viewport model only (no extra round trip; a documented approximation, same class as `onGotoConsequence`/`onSameModuleNeighbor` below). */
@@ -1949,6 +1959,10 @@ function openChartContextMenu(clientX: number, clientY: number, hits: HitObject[
       if (dep) toggleDependencyBookmark(dep);
     },
     toggleAxisBookmark,
+    toggleMethodCallBookmark: (hit) => {
+      const call = findMethodCall(hit);
+      if (call) toggleMethodCallBookmark(call);
+    },
     toggleTimestampBookmark: (tc) => void toggleTimestampBookmark(tc),
     centerOnAxis,
     // Phase U10 -- "Go to NED Declaration": re-resolves the module node rather than

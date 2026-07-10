@@ -440,6 +440,8 @@ export interface RenderMethodCall {
   sourceModuleId: number;
   targetModuleId: number;
   methodName: string;
+  /** `EventLogEntry.getEntryIndex()` of the ComponentMethodBegin entry -- Java's `ComponentMethodBeginEntry.getEntryIndex()`, the precise identity a `'ComponentMethodCall'` bookmark needs (`Bookmark.entryIndex` in `ui-protocol.ts`). */
+  entryIndex: number;
 }
 
 export interface ViewportModel {

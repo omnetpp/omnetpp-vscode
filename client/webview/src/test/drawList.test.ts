@@ -5,7 +5,7 @@ import type { EventLogPalette } from '../eventlog/common/theme';
 import { AUTO_AXIS_SPACING, AXIS_VECTOR_STRIP_HEIGHT, deriveAxes, layoutAxes } from '../eventlog/chart/axes';
 import { calculateAxisHeaders } from '../eventlog/chart/axisHeaders';
 import { DEFAULT_DISPLAY_FLAGS } from '../eventlog/chart/displayFlags';
-import { BOOKMARK_MARK_COLOR, bookmarkDependencyKey, buildDrawList, MAX_EVENT_MARKS_PER_COLUMN, SELECTION_MARK_COLOR } from '../eventlog/chart/drawList';
+import { BOOKMARK_MARK_COLOR, bookmarkDependencyKey, bookmarkMethodCallKey, buildDrawList, MAX_EVENT_MARKS_PER_COLUMN, SELECTION_MARK_COLOR } from '../eventlog/chart/drawList';
 import { GUTTER_LEFT_WIDTH, GUTTER_TOP_HEIGHT, createViewportState, resize } from '../eventlog/chart/viewportState';
 
 const theme: EventLogPalette = {
@@ -414,6 +414,23 @@ test('bookmarkedDependencyKeys: a non-matching key produces no bookmarkMark', ()
   const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
   const dep = dep_({ causeEventNumber: 1, consequenceEventNumber: 2, causeModuleId: 1, causeTc: 0, consequenceModuleId: 2, consequenceTc: 10, messageId: 7 });
   const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: events3, dependencies: [dep], methodCalls: [], axesLayout, ticks: [], theme, bookmarkedDependencyKeys: new Set([bookmarkDependencyKey(1, 2, 8)]) });
+  assert.strictEqual(primitives.filter((p) => p.kind === 'bookmarkMark').length, 0);
+});
+
+test('bookmarkedMethodCallKeys: a call matching bookmarkMethodCallKey(eventNumber, entryIndex) gets a bookmarkMark', () => {
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const call: RenderMethodCall = { eventNumber: 1, tc: 5, sourceModuleId: 1, targetModuleId: 2, methodName: 'sendPacket', entryIndex: 3 };
+  const key = bookmarkMethodCallKey(1, 3);
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: events3, dependencies: [], methodCalls: [call], axesLayout, ticks: [], theme, bookmarkedMethodCallKeys: new Set([key]) });
+  assert.strictEqual(primitives.filter((p) => p.kind === 'bookmarkMark').length, 1);
+});
+
+test('bookmarkedMethodCallKeys: a non-matching key produces no bookmarkMark', () => {
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const call: RenderMethodCall = { eventNumber: 1, tc: 5, sourceModuleId: 1, targetModuleId: 2, methodName: 'sendPacket', entryIndex: 3 };
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: events3, dependencies: [], methodCalls: [call], axesLayout, ticks: [], theme, bookmarkedMethodCallKeys: new Set([bookmarkMethodCallKey(1, 4)]) });
   assert.strictEqual(primitives.filter((p) => p.kind === 'bookmarkMark').length, 0);
 });
 

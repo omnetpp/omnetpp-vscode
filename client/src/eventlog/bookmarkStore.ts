@@ -9,7 +9,7 @@
  * so the part of this subsystem the task explicitly calls out for "pure store logic
  * tests" needs to live somewhere importable standalone.
  *
- * Port of the 4 `IMarker` kinds Eclipse's `SequenceChartContributor.java`/
+ * Port of the 5 `IMarker` kinds Eclipse's `SequenceChartContributor.java`/
  * `EventLogTableContributor.java` create for their own "Toggle bookmark(s)" actions
  * (verified by reading both sources) -- see `Bookmark`'s doc comment in
  * `@omnetpp/shared/ui-protocol` for the exact per-kind field mapping this store carries

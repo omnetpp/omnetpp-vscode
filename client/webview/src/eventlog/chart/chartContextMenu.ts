@@ -31,8 +31,11 @@
  *    vector data); both are omitted rather than shown disabled.
  *  - Method calls: Java's own `contributeToPopupMenu()` has NO per-method-call
  *    section (verified — only Event/MessageDependency/ModuleTreeItem get dynamic
- *    submenus), so this port doesn't add one either, even though method calls DO
- *    participate in click/hover priority (`hitTest.ts`).
+ *    submenus there), but Java's separate "Toggle bookmark" action DOES support
+ *    creating a `ComponentMethodCall` marker from a selected method call
+ *    (`SequenceChartContributor.java:2081-2090,2159-2166`) — this port's
+ *    `methodCallSection()` below is scoped to exactly that one action (Toggle
+ *    Bookmark), not a general method-call submenu.
  *  - Static tail: Timeline Mode (4 real radios + a disabled "Custom nonlinear..."),
  *    Zoom (Default Zoom/Zoom to Fit/Zoom In/Zoom Out — all wired), Find Text.../Find
  *    Next, Go to (Event.../Simulation Time.../Begin/End), Refresh.
@@ -92,10 +95,11 @@ export interface ChartMenuActions {
   goToCauseEvent(eventNumber: number): void;
   goToConsequenceEvent(eventNumber: number): void;
   zoomToDependency(causeTc: number, consequenceTc: number): void;
-  /** Phase U6 -- "Toggle Bookmark" per object kind (Event/MessageDependency/Axis -- see `bookmarks.ts`'s header for why ComponentMethodCall has no per-object menu entry). */
+  /** Phase U6 -- "Toggle Bookmark" per object kind (Event/MessageDependency/Axis/ComponentMethodCall/Position). */
   toggleEventBookmark(eventNumber: number): void;
   toggleDependencyBookmark(hit: Extract<HitObject, { kind: 'dependency' }>): void;
   toggleAxisBookmark(moduleId: number): void;
+  toggleMethodCallBookmark(hit: Extract<HitObject, { kind: 'methodCall' }>): void;
   /** "Toggle Bookmark" for a bare timeline position (`'Position'` kind, Java's `BigDecimal`-in-selection case). */
   toggleTimestampBookmark(tc: number): void;
   centerOnAxis(moduleId: number): void;
@@ -232,6 +236,14 @@ function dependencySection(hit: Extract<HitObject, { kind: 'dependency' }>, labe
   };
 }
 
+function methodCallSection(hit: Extract<HitObject, { kind: 'methodCall' }>, actions: ChartMenuActions): MenuEntry {
+  return {
+    id: `call-${hit.eventNumber}-${hit.entryIndex}`,
+    label: hit.methodName,
+    submenu: [{ id: 'toggleBookmark', label: 'Toggle Bookmark', onSelect: () => actions.toggleMethodCallBookmark(hit) }],
+  };
+}
+
 /** A bare timeline position under the cursor -- Java's `BigDecimal`-in-selection "Toggle bookmark" case has no other action, so this is a single flat item (no submenu), unlike the other per-object sections. */
 function timestampSection(hit: Extract<HitObject, { kind: 'timestamp' }>, actions: ChartMenuActions): MenuEntry {
   return { id: `ts-${hit.tc}`, label: 'Toggle Bookmark at Position', onSelect: () => actions.toggleTimestampBookmark(hit.tc) };
@@ -342,6 +354,7 @@ export function buildChartContextMenu(params: ChartMenuBuildParams): MenuEntry[]
 
   const events = hits.filter((h): h is Extract<HitObject, { kind: 'event' }> => h.kind === 'event');
   const dependencies = hits.filter((h): h is Extract<HitObject, { kind: 'dependency' }> => h.kind === 'dependency');
+  const methodCalls = hits.filter((h): h is Extract<HitObject, { kind: 'methodCall' }> => h.kind === 'methodCall');
   const axes = hits.filter((h): h is Extract<HitObject, { kind: 'axis' }> => h.kind === 'axis');
 
   for (const hit of events) entries.push(eventSection(hit, actions));
@@ -349,6 +362,9 @@ export function buildChartContextMenu(params: ChartMenuBuildParams): MenuEntry[]
 
   for (const hit of dependencies) entries.push(dependencySection(hit, resolveDependencyLabel(hit) ?? '(message)', resolveDependencyMessageId(hit), actions));
   if (dependencies.length > 0) entries.push({ separator: true });
+
+  for (const hit of methodCalls) entries.push(methodCallSection(hit, actions));
+  if (methodCalls.length > 0) entries.push({ separator: true });
 
   for (const hit of axes) entries.push(axisSection(hit, resolveAxisInfo(hit.moduleId), actions));
   if (axes.length > 0) entries.push({ separator: true });
