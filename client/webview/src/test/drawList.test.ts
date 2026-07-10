@@ -5,7 +5,7 @@ import type { EventLogPalette } from '../eventlog/common/theme';
 import { AUTO_AXIS_SPACING, AXIS_VECTOR_STRIP_HEIGHT, deriveAxes, layoutAxes } from '../eventlog/chart/axes';
 import { calculateAxisHeaders } from '../eventlog/chart/axisHeaders';
 import { DEFAULT_DISPLAY_FLAGS } from '../eventlog/chart/displayFlags';
-import { bookmarkDependencyKey, bookmarkMethodCallKey, buildDrawList, MAX_EVENT_MARKS_PER_COLUMN, SELECTION_MARK_COLOR } from '../eventlog/chart/drawList';
+import { BOOKMARK_FLAG_WIDTH, bookmarkDependencyKey, bookmarkMethodCallKey, buildDrawList, MAX_EVENT_MARKS_PER_COLUMN, SELECTION_MARK_COLOR } from '../eventlog/chart/drawList';
 import { GUTTER_LEFT_WIDTH, GUTTER_TOP_HEIGHT, createViewportState, resize } from '../eventlog/chart/viewportState';
 
 const theme: EventLogPalette = {
@@ -399,6 +399,17 @@ test('bookmarkedModuleIds: a bookmarked axis gets a bookmarkMark at its axis lin
   const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
   const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, bookmarkedModuleIds: new Set([2]) });
   assert.strictEqual(primitives.filter((p) => p.kind === 'bookmarkMark').length, 1);
+});
+
+test('bookmarkedModuleIds: the flag sits in its own reserved slot immediately before the axis label, not at a fixed gutter-edge x', () => {
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, bookmarkedModuleIds: new Set([2]) });
+  const mark = primitives.find((p) => p.kind === 'bookmarkMark') as { x: number; y: number };
+  const label = primitives.find((p): p is Extract<typeof p, { kind: 'axisLabel' }> => p.kind === 'axisLabel' && p.moduleId === 2)!;
+  assert.strictEqual(mark.y, label.y, 'flag sits on the same row as the label');
+  assert.ok(mark.x < label.x, 'flag sits to the LEFT of the label');
+  assert.strictEqual(label.x - (mark.x + BOOKMARK_FLAG_WIDTH), 3, 'flag right edge sits exactly 3px before the label, mirroring the moduleAction glyph slot gap');
 });
 
 test('bookmarkedDependencyKeys: a dependency matching bookmarkDependencyKey(causeEventNumber, consequenceEventNumber, messageId) gets a bookmarkMark', () => {

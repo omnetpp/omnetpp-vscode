@@ -30,7 +30,7 @@
  * eventually drive).
  */
 
-import type { DrawPrimitive } from './drawList';
+import { BOOKMARK_FLAG_HEIGHT, BOOKMARK_FLAG_WIDTH, type DrawPrimitive } from './drawList';
 import { GUTTER_TOP_HEIGHT } from './viewportState';
 
 export const TILE_WIDTH_PX = 1024;
@@ -581,8 +581,8 @@ export function drawPrimitiveToCanvas(ctx: CanvasRenderingContext2D, p: DrawPrim
       // A small filled "flag" glyph (a vertical pole + a triangular pennant) -- see
       // `drawList.ts`'s `DrawPrimitive` doc for why this stands in for Eclipse's
       // actual bookmark ruler icon.
-      const poleHeight = 8;
-      const flagWidth = 6;
+      const poleHeight = BOOKMARK_FLAG_HEIGHT;
+      const flagWidth = BOOKMARK_FLAG_WIDTH;
       ctx.fillStyle = p.color;
       ctx.strokeStyle = p.color;
       ctx.lineWidth = 1;

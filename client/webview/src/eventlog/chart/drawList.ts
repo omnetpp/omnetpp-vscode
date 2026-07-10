@@ -132,6 +132,10 @@ export type DrawPrimitive =
 /** Phase U8 — glyph box edge length (Java uses the 16px `expand.png`/`collapse.png`/`close.png` images; a slightly smaller vector glyph fits this port's tighter axis labels). */
 export const MODULE_ACTION_SIZE = 11;
 
+/** The `'bookmarkMark'` flag glyph's drawn size (pole height / pennant width) -- exported so both `canvasStack.ts`'s renderer and this file's axis-label slot-reservation math (see the axis loop's `bookmarkSlot`) share one source of truth instead of the renderer hardcoding its own copy. */
+export const BOOKMARK_FLAG_HEIGHT = 8;
+export const BOOKMARK_FLAG_WIDTH = 6;
+
 /**
  * Eclipse `ColorFactory.getGoodLightColor(i)` — the "reversed Tableau-20 light half" palette
  * (`ColorFactory.java`), cycled by index. Used to color axis vector-strip segments by value
@@ -477,19 +481,22 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       }
       const axisHovered = hovered?.axisModuleIds?.has(axis.moduleId) ?? false;
       const axisSelected = selectedAxisModuleIds?.has(axis.moduleId) ?? false;
-      // The expand/collapse glyph sits immediately BEFORE the module name (a reserved slot
-      // just left of the label) rather than right-aligned across the gutter, so a
-      // collapsible module reads as "[−] name". The slot is reserved for every axis so all
-      // names stay left-aligned; leaf axes (no glyph) just leave it blank.
+      // The expand/collapse glyph and the bookmark flag each sit in their own reserved slot
+      // immediately BEFORE the module name (glyph, then bookmark flag, then the label) rather
+      // than right-aligned across the gutter, so a collapsible+bookmarked module reads as
+      // "[−][flag] name". Both slots are reserved for EVERY axis, whether or not that axis
+      // actually has a glyph/bookmark, so all names stay left-aligned in a column regardless.
       const glyphSlot = MODULE_ACTION_SIZE + 3;
+      const bookmarkSlot = BOOKMARK_FLAG_WIDTH + 3;
       const glyphX = 4 + labelIndent;
-      const labelX = glyphX + glyphSlot;
+      const bookmarkX = glyphX + glyphSlot;
+      const labelX = bookmarkX + bookmarkSlot;
       // Hover only makes the label BOLD (same color); selection turns it red.
       if (flags.showAxisLabels) primitives.push({ kind: 'axisLabel', moduleId: axis.moduleId, x: labelX, y, text: axis.label, color: axisSelected ? emphasisColor : theme.foreground, bold: axisHovered });
       // Phase U11 -- selected axis: two thin red lines just above/below the axis line,
       // running the full canvas width so they're visible under the left module hierarchy band.
       if (axisSelected) emphasis.push({ kind: 'axisSelectionMark', x1: 0, x2: viewport.canvasWidth, y, lineHeight: axis.lineHeight, color: emphasisColor });
-      if (bookmarkedModuleIds?.has(axis.moduleId)) primitives.push({ kind: 'bookmarkMark', x: GUTTER_LEFT_WIDTH - 6, y, color: bookmarkMarkColor(theme) });
+      if (bookmarkedModuleIds?.has(axis.moduleId)) primitives.push({ kind: 'bookmarkMark', x: bookmarkX, y, color: bookmarkMarkColor(theme) });
       // Expand/collapse glyph in the reserved slot before the name (the "close"/remove-X is
       // intentionally omitted -- filtering / Select Modules removes axes). A module offers
       // at most one of the two in practice; prefer collapse if somehow both.
