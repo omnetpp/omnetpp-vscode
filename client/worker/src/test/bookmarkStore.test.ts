@@ -99,9 +99,14 @@ test('isStaleBookmark: Position bookmarks (no eventNumber) are never reported st
 // bookmarkTitle
 // ---------------------------------------------------------------------------------
 
-test('bookmarkTitle: Position bookmarks show their simulation time', () => {
+test('bookmarkTitle: Position bookmarks show their simulation time, SI-unit formatted', () => {
   const b: Bookmark = { id: '1', kind: 'Position', label: 'x', simulationTime: '1.5' };
-  assert.strictEqual(bookmarkTitle(b), 'Position: t = 1.5s');
+  assert.strictEqual(bookmarkTitle(b), 'Position: t = 1s 500ms');
+});
+
+test('bookmarkTitle: Position bookmarks below 1s use the appropriate smaller SI unit', () => {
+  const b: Bookmark = { id: '1', kind: 'Position', label: 'x', simulationTime: '0.000123' };
+  assert.strictEqual(bookmarkTitle(b), 'Position: t = 123us');
 });
 
 // ---------------------------------------------------------------------------------

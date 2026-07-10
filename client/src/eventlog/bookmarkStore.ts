@@ -94,6 +94,42 @@ export function migrateBookmarksBlob(raw: unknown): Bookmark[] {
   return [];
 }
 
+/**
+ * Port of `TimeUtils.secondsToTimeString(BigDecimal)`, operating on the protocol's raw
+ * decimal-seconds string directly (exact, no `BigDecimal` class needed). Duplicated here
+ * rather than imported from `@omnetpp/shared/eventlog` (which already has this exact
+ * algorithm, as `secondsToTimeString`) because that subpath pulls in the WHOLE eventlog
+ * parsing/indexing/facade engine into the extension-host bundle for one small formatting
+ * helper -- the same bundle-size concern that already motivated the webview's own
+ * `formatSimulationTime()` (`client/webview/src/eventlog/common/decimalTime.ts`) to
+ * duplicate this algorithm instead of importing `@omnetpp/shared`'s `BigDecimal`. This is
+ * a further-trimmed variant of that webview version (no display-accuracy rounding --
+ * there's no such per-user setting on the host side, and no other decimal-string
+ * arithmetic is needed here, only this one direction of formatting).
+ */
+function formatSimulationTimeSeconds(decimalString: string): string {
+  let str = decimalString.trim();
+  let negative = false;
+  if (str.startsWith('-')) {
+    negative = true;
+    str = str.slice(1);
+  } else if (str.startsWith('+')) {
+    str = str.slice(1);
+  }
+  const dot = str.indexOf('.');
+  let intPart = ((dot < 0 ? str : str.slice(0, dot)) || '0').replace(/^0+(?=\d)/, '');
+  let frac = dot < 0 ? '' : str.slice(dot + 1);
+  let out = '';
+  for (const unit of ['s ', 'ms ', 'us ', 'ns ', 'ps ', 'fs ', 'as ']) {
+    if (intPart !== '0') out += `${BigInt(intPart)}${unit}`;
+    const chunk = (frac + '000').slice(0, 3);
+    frac = frac.length > 3 ? frac.slice(3) : '';
+    intPart = chunk.replace(/^0+(?=\d)/, '') || '0';
+  }
+  if (out.length === 0) out = '0s';
+  return (negative ? '-' : '') + out.trim();
+}
+
 /** Human-readable title for a QuickPick entry / chart marker tooltip. */
 export function bookmarkTitle(b: Bookmark): string {
   switch (b.kind) {
@@ -106,7 +142,10 @@ export function bookmarkTitle(b: Bookmark): string {
     case 'ComponentMethodCall':
       return `${b.methodName ?? 'Method call'} (event #${b.eventNumber})`;
     case 'Position':
-      return `Position: t = ${b.simulationTime}s`;
+      // SI-unit formatted (e.g. "130ms", "1s 500ms"), not the raw decimal-seconds string --
+      // matches how every other simulation-time display in this port (ruler, hairline,
+      // tooltips) formats a `Bookmark.simulationTime`-shaped decimal string.
+      return `Position: t = ${formatSimulationTimeSeconds(b.simulationTime ?? '0')}`;
   }
 }
 
