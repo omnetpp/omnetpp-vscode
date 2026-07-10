@@ -83,13 +83,13 @@ export type RevealTarget =
   | { kind: 'simTime'; simulationTime: string; ref: RowRef | null };
 
 // ---------------------------------------------------------------------------------
-// Bookmarks (phase U6) -- port of the Eclipse plugins' 4 `IMarker` kinds. See
+// Bookmarks (phase U6, +Position) -- port of the Eclipse plugins' 5 `IMarker` kinds. See
 // `client/src/eventlog/bookmarks.ts`'s header for the storage/toggle logic; this file
 // only carries the wire shape both webviews and the host agree on.
 // ---------------------------------------------------------------------------------
 
 /**
- * Port of the 4 marker kinds `SequenceChartContributor.java`'s "Toggle bookmark" action
+ * Port of the 5 marker kinds `SequenceChartContributor.java`'s "Toggle bookmark" action
  * creates (verified by reading the source), unified into one flat, optional-field shape
  * (rather than Eclipse's `IMarker` generic attribute bag) since every field is a plain
  * JSON value already. Which optional fields are populated depends on `kind`:
@@ -104,11 +104,14 @@ export type RevealTarget =
  *    `dependencyKey()`-shaped matching against a loaded `RenderDependency` already
  *    needs anyway -- no separate index to keep in sync).
  *  - `'ComponentMethodCall'`: `eventNumber`, `entryIndex`, `methodName`.
+ *  - `'Position'`: `simulationTime` (a bare timeline position, no event/module -- Java's
+ *    `BigDecimal`-in-selection case, created by toggling with nothing but empty chart
+ *    background under the cursor).
  * `id` is a store-assigned stable identifier (not part of the Eclipse original, which
  * relies on `IMarker`'s own workspace-assigned id) -- lets `bookmarksChanged`/QuickPick
  * selection reference one bookmark unambiguously without repeating its full identity.
  */
-export type BookmarkKind = 'Event' | 'Axis' | 'MessageDependency' | 'ComponentMethodCall';
+export type BookmarkKind = 'Event' | 'Axis' | 'MessageDependency' | 'ComponentMethodCall' | 'Position';
 
 export interface Bookmark {
   id: string;
@@ -121,6 +124,8 @@ export interface Bookmark {
   consequenceEventNumber?: number;
   entryIndex?: number;
   methodName?: string;
+  /** `'Position'` kind only: exact decimal string from the engine's `tcToSimTime` (not the client's approximate `simTimeAt()`). */
+  simulationTime?: string;
 }
 
 /** A not-yet-labeled/identified bookmark candidate -- `id` is assigned by the store on add; `label` is filled in by the host's "Add Bookmark" input box (native UI, so the webview never carries it). */

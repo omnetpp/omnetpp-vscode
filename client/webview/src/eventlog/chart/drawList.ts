@@ -301,6 +301,8 @@ export interface BuildDrawListParams {
   bookmarkedModuleIds?: ReadonlySet<number>;
   /** Phase U6 — `MessageDependency`-kind bookmark identity keys (`${causeEventNumber}:${consequenceEventNumber}:${messageId}` -- see `chartMain.ts`'s `bookmarkDepKey()`, which both this and the toggle-candidate builder use so the two stay in sync); a matching dependency gets a `'bookmarkMark'` at its arrow's midpoint. */
   bookmarkedDependencyKeys?: ReadonlySet<string>;
+  /** `'Position'`-kind bookmarks' resolved timeline coordinates (`chartMain.ts`'s `refreshPositionBookmarkTcs()`); each gets a `'bookmarkMark'` near the top ruler at its tc. */
+  positionBookmarkTcs?: readonly number[];
   /** Phase U5 — the ~25 Show/Hide toggles (`displayFlags.ts`); defaults to `DEFAULT_DISPLAY_FLAGS` when omitted. */
   displayFlags?: ChartDisplayFlags;
   /** Phase U5 — merged axis-header tree (`axisHeaders.ts`'s `calculateAxisHeaders()`), or `null`/omitted for no headers (e.g. module tree not loaded yet). */
@@ -324,7 +326,7 @@ export interface BuildDrawListParams {
 }
 
 export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
-  const { viewport, events, dependencies, methodCalls, axesLayout, ticks, theme, selectedEventNumbers, selectedDependencyKeys, selectedAxisModuleIds, selectedMethodCallKeys, selectedTimelineCoords, hovered, bookmarkedEventNumbers, bookmarkedModuleIds, bookmarkedDependencyKeys, axisHeaderRoot, infoPanelText, skipLabelsForPerf } = params;
+  const { viewport, events, dependencies, methodCalls, axesLayout, ticks, theme, selectedEventNumbers, selectedDependencyKeys, selectedAxisModuleIds, selectedMethodCallKeys, selectedTimelineCoords, hovered, bookmarkedEventNumbers, bookmarkedModuleIds, bookmarkedDependencyKeys, positionBookmarkTcs, axisHeaderRoot, infoPanelText, skipLabelsForPerf } = params;
   const flags = params.displayFlags ?? DEFAULT_DISPLAY_FLAGS;
   const primitives: DrawPrimitive[] = [];
   // Phase U11 — selection/hover emphasis (thicker arrows, axis brackets, bold-red hovered
@@ -386,6 +388,16 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
     if (x < 0 || x > viewport.canvasWidth) continue;
     if (flags.showHairlines) primitives.push({ kind: 'tick', x, y0: GUTTER_TOP_HEIGHT, y1: viewport.canvasHeight, color: theme.border });
     primitives.push({ kind: 'label', x: x + 2, y: GUTTER_TOP_HEIGHT - 4, text: tick.label, color: theme.descriptionForeground, align: 'left' });
+  }
+
+  // ---- Position-kind bookmarks (bare timeline positions, no event/module) ----
+  // Placed just below the ruler (not overlapping its tick labels) -- `bookmarkMark` is
+  // always drawn in the top gutter-chrome overlay pass regardless of (x,y) (canvasStack.ts's
+  // `isGutterChrome()`), same as the other 3 bookmark kinds' marks.
+  for (const tc of positionBookmarkTcs ?? []) {
+    const x = contentX(tc, viewport);
+    if (x < 0 || x > viewport.canvasWidth) continue;
+    primitives.push({ kind: 'bookmarkMark', x, y: GUTTER_TOP_HEIGHT + 8, color: bookmarkMarkColor(theme) });
   }
 
   // ---- axis lines + pinned labels + merged headers ----

@@ -268,6 +268,8 @@ let bookmarks: Bookmark[] = [];
 let bookmarkedEventNumbers = new Set<number>();
 let bookmarkedDependencyKeys = new Set<string>();
 let bookmarkedModuleIds = new Set<number>();
+/** Phase U6+ -- `'Position'`-kind bookmarks' resolved timeline coordinates, keyed by `simulationTime` (the bookmark's identity). Unlike the three sets above, this needs an engine round trip per bookmark (`elog/sc/mapCoords`, `simTimeToTc`) to resolve, so it's refreshed asynchronously by `refreshPositionBookmarkTcs()` rather than synchronously in `recomputeBookmarkIndexes()`. */
+let positionBookmarkTcs = new Map<string, number>();
 /** Phase U7 -- the session's currently-applied filter (`null` = unfiltered), seeded from `init`'s `filterParams` and kept in sync by every successful `elog/setFilter` call THIS webview makes (the chart is always the sole initiator of filter changes -- see `applyFilterParamsAndReanchor()`'s own doc comment for why: `sequenceChartEditor.ts`'s `supportsMultipleEditorsPerDocument: false` guarantees at most one chart webview per session). Read by the Del-exclude merge (`mergeExcludedEventNumbers()`) so it can build on top of whatever is ALREADY active, even a filter this webview never itself applied (rehydrated from a previous session). */
 let currentFilterParams: FilterParams | null = null;
 let filterPanel: FilterPanelHandle;
@@ -497,6 +499,39 @@ function recomputeBookmarkIndexes(): void {
       .filter((id): id is number => id !== null),
   );
 }
+
+/**
+ * Resolves every `'Position'`-kind bookmark's `simulationTime` to a timeline coordinate
+ * for rendering (`positionBookmarkTcs`) -- unlike `recomputeBookmarkIndexes()`'s three
+ * sets, this needs one `elog/sc/mapCoords` (`simTimeToTc`) round trip per bookmark, so it
+ * is async and schedules its own render when done. Call alongside
+ * `recomputeBookmarkIndexes()` wherever `bookmarks` changes; harmless/no-op with zero
+ * Position bookmarks (the common case).
+ */
+function refreshPositionBookmarkTcs(): void {
+  const positionBookmarks = bookmarks.filter((b) => b.kind === 'Position' && b.simulationTime !== undefined);
+  if (positionBookmarks.length === 0) {
+    if (positionBookmarkTcs.size > 0) {
+      positionBookmarkTcs = new Map();
+      scheduleRender();
+    }
+    return;
+  }
+  void Promise.all(
+    positionBookmarks.map(async (b) => {
+      try {
+        const result = await rpc.request<MapCoordsResult>(ElogMethods.scMapCoords, { kind: 'simTimeToTc', simulationTime: b.simulationTime! });
+        return result.tc !== null ? ([b.simulationTime!, result.tc] as const) : null;
+      } catch {
+        return null; // engine busy/unresolvable -- best-effort, matches every other mapCoords call site
+      }
+    }),
+  ).then((resolved) => {
+    positionBookmarkTcs = new Map(resolved.filter((e): e is readonly [string, number] => e !== null));
+    scheduleRender();
+  });
+}
+
 /** Mutable view onto `moduleTree` for `labelProvider.ts`'s tooltip builders -- a getter (not a snapshot) so it always reflects the latest `elog/getModuleTree` result even though it's captured once by `attachTooltip()` below. */
 const labelProviderCtx: LabelProviderContext = {
   get moduleTree() {
@@ -799,6 +834,7 @@ function renderFrame(): void {
     bookmarkedEventNumbers,
     bookmarkedModuleIds,
     bookmarkedDependencyKeys,
+    positionBookmarkTcs: [...positionBookmarkTcs.values()],
     displayFlags,
     axisHeaderRoot,
     infoPanelText: computeInfoPanelText(),
@@ -1253,6 +1289,7 @@ async function performExportSvg(result: ExportDialogResult, ctxBase: ExportRange
       bookmarkedEventNumbers,
       bookmarkedModuleIds,
       bookmarkedDependencyKeys,
+      positionBookmarkTcs: [...positionBookmarkTcs.values()],
       displayFlags,
       axisHeaderRoot,
       // No live status/info overlays in a static export -- they're screen-only conveniences.
@@ -1367,15 +1404,33 @@ function toggleDependencyBookmark(dep: RenderDependency): void {
 }
 
 /**
+ * `'Position'` kind -- a bare timeline position, no event/module (Java: toggling with a
+ * `BigDecimal` simulation time in the selection, which arises from clicking empty chart
+ * background; this port's analogue is `selection.timelineCoords`/a `'timestamp'` hit).
+ * Resolves the EXACT simulation time via the engine (`tcToSimTime`), not the client-local
+ * approximate `simTimeAt()` used for the mouse-hairline label -- bookmark identity needs
+ * the same precision Java's own `BigDecimal` has.
+ */
+async function toggleTimestampBookmark(tc: number): Promise<void> {
+  try {
+    const result = await rpc.request<MapCoordsResult>(ElogMethods.scMapCoords, { kind: 'tcToSimTime', tc });
+    if (result.simulationTime !== null) postToggleBookmark({ kind: 'Position', simulationTime: result.simulationTime });
+  } catch {
+    // engine busy/unresolvable -- best-effort, matches every other mapCoords call site
+  }
+}
+
+/**
  * Ctrl/Cmd+D (`interactions.ts`'s `onToggleBookmark`) -- toggles a bookmark for every
- * currently selected event/dependency/axis (port of `SequenceChartContributor.java`'s
- * "Toggle bookmark" action operating on the whole `IEventLogSelection`, one marker per
- * selected item). Method-call selections are NOT included: `RenderMethodCall` (the
- * viewport DTO) has no `entryIndex`/`EventLogEntryIndex` field the way Java's
- * `ComponentMethodBeginEntry` does, so this port cannot build a well-formed
- * `ComponentMethodCall` bookmark candidate from client-side data alone -- a documented
- * gap (the data MODEL/store fully supports the kind; only this one creation path is
- * missing, tracked as a follow-up rather than blocking the other 3 kinds).
+ * currently selected event/dependency/axis/timeline-position (port of
+ * `SequenceChartContributor.java`'s "Toggle bookmark" action operating on the whole
+ * `IEventLogSelection`, one marker per selected item). Method-call selections are NOT
+ * included: `RenderMethodCall` (the viewport DTO) has no `entryIndex`/
+ * `EventLogEntryIndex` field the way Java's `ComponentMethodBeginEntry` does, so this
+ * port cannot build a well-formed `ComponentMethodCall` bookmark candidate from
+ * client-side data alone -- a documented gap (the data MODEL/store fully supports the
+ * kind; only this one creation path is missing, tracked as a follow-up rather than
+ * blocking the other 4 kinds).
  */
 function toggleBookmarkForSelection(): void {
   for (const eventNumber of selection.events) toggleEventBookmark(eventNumber);
@@ -1384,6 +1439,7 @@ function toggleBookmarkForSelection(): void {
     if (dep) toggleDependencyBookmark(dep);
   }
   for (const moduleId of selection.axes) toggleAxisBookmark(moduleId);
+  for (const tc of selection.timelineCoords) void toggleTimestampBookmark(tc);
 }
 
 function findEvent(eventNumber: number): TimelineEvent | null {
@@ -1531,6 +1587,19 @@ function centerOnEvent(eventNumber: number): void {
     centerOnAxis(event.moduleId); // also schedules the render
   } else {
     void relocateAndCenter(eventNumber, true).then(() => scheduleRender());
+  }
+}
+
+/** Reveal for a `'Position'`-kind bookmark ("Show Bookmarks" QuickPick pick) -- horizontally reveals its simulation time; no module/axis to center vertically on, unlike `centerOnEvent()`. */
+async function centerOnSimulationTime(simulationTime: string): Promise<void> {
+  try {
+    const result = await rpc.request<MapCoordsResult>(ElogMethods.scMapCoords, { kind: 'simTimeToTc', simulationTime });
+    if (result.tc !== null) {
+      viewport = revealAt(viewport, result.tc);
+      scheduleRender();
+    }
+  } catch {
+    // engine busy/unresolvable -- best-effort, matches every other mapCoords call site
   }
 }
 
@@ -1880,6 +1949,7 @@ function openChartContextMenu(clientX: number, clientY: number, hits: HitObject[
       if (dep) toggleDependencyBookmark(dep);
     },
     toggleAxisBookmark,
+    toggleTimestampBookmark: (tc) => void toggleTimestampBookmark(tc),
     centerOnAxis,
     // Phase U10 -- "Go to NED Declaration": re-resolves the module node rather than
     // threading a value through, since the menu item itself already disabled the entry
@@ -2409,6 +2479,7 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
       bookmarks = message.bookmarks;
       uiSettings = message.settings; // Phase U10 -- see this file's `uiSettings` doc comment
       recomputeBookmarkIndexes();
+      refreshPositionBookmarkTcs();
       if (message.selection.eventNumbers.length > 0) {
         // Phase U6: seed the session's current selection right away (repaints with the
         // right highlight even before data loads) -- a proper reveal (centering on it)
@@ -2522,6 +2593,7 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
               initializeOpenAxisModules();
               filterPanel.setModuleTree(tree);
               recomputeBookmarkIndexes();
+              refreshPositionBookmarkTcs(); // the coordinate system was reset -- old tc's are stale
               scheduleRender();
             });
           }
@@ -2568,6 +2640,7 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
     case 'bookmarksChanged':
       bookmarks = message.bookmarks;
       recomputeBookmarkIndexes();
+      refreshPositionBookmarkTcs();
       scheduleRender();
       break;
     case 'nedTypeQueryResult': {
@@ -2654,6 +2727,14 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
           const args = message.args as { modulePath?: string } | undefined;
           const moduleId = args?.modulePath ? findModuleIdByFullName(args.modulePath, moduleTree) : null;
           if (moduleId !== null) centerOnAxis(moduleId);
+          break;
+        }
+        case 'centerOnSimulationTimeBookmark': {
+          // "Show Bookmarks" QuickPick reveal for a Position-kind bookmark
+          // (`bookmarks.ts`'s `revealBookmark()`): no event/module to goto, so the host
+          // sends the stored `simulationTime` directly for this webview to resolve.
+          const args = message.args as { simulationTime?: string } | undefined;
+          if (args?.simulationTime !== undefined) void centerOnSimulationTime(args.simulationTime);
           break;
         }
       }

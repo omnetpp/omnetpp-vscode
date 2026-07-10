@@ -417,6 +417,29 @@ test('bookmarkedDependencyKeys: a non-matching key produces no bookmarkMark', ()
   assert.strictEqual(primitives.filter((p) => p.kind === 'bookmarkMark').length, 0);
 });
 
+test('positionBookmarkTcs: a Position bookmark gets a bookmarkMark near the top ruler at its resolved tc', () => {
+  const viewport = baseViewport(); // pixelsPerTc=10, leftTc=0 -> tc=5 maps to GUTTER_LEFT_WIDTH + 50px
+  const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, positionBookmarkTcs: [5] });
+  const marks = primitives.filter((p) => p.kind === 'bookmarkMark') as { x: number; y: number; color: string }[];
+  assert.strictEqual(marks.length, 1);
+  assert.strictEqual(marks[0].x, GUTTER_LEFT_WIDTH + 50);
+  assert.strictEqual(marks[0].y, GUTTER_TOP_HEIGHT + 8);
+  assert.strictEqual(marks[0].color, BOOKMARK_MARK_COLOR);
+});
+
+test('positionBookmarkTcs omitted/empty: no bookmarkMark primitives at all', () => {
+  const primitives = draw();
+  assert.strictEqual(primitives.filter((p) => p.kind === 'bookmarkMark').length, 0);
+});
+
+test('positionBookmarkTcs: a tc outside the visible canvas is culled', () => {
+  const viewport = baseViewport();
+  const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, positionBookmarkTcs: [-100000] });
+  assert.strictEqual(primitives.filter((p) => p.kind === 'bookmarkMark').length, 0);
+});
+
 // ---------------------------------------------------------------------------------
 // displayFlags gating (phase U5) -- each toggle flips expected primitive presence
 // ---------------------------------------------------------------------------------

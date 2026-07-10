@@ -10,7 +10,7 @@
 import { test } from 'bun:test';
 import assert from 'node:assert';
 import type { Bookmark, BookmarkCandidate } from '@omnetpp/shared/ui-protocol';
-import { BookmarkStore, bookmarkMatches, isStaleBookmark, migrateBookmarksBlob, toggleBookmarkInList, type MementoLike } from '../../../src/eventlog/bookmarkStore';
+import { BookmarkStore, bookmarkMatches, bookmarkTitle, isStaleBookmark, migrateBookmarksBlob, toggleBookmarkInList, type MementoLike } from '../../../src/eventlog/bookmarkStore';
 
 /** A minimal in-memory `MementoLike` fake -- `bookmarkStore.ts`'s header explains why this stands in for `vscode.Memento`. */
 function fakeMemento(initial: Record<string, unknown> = {}): MementoLike & { store: Record<string, unknown> } {
@@ -30,6 +30,7 @@ const eventCandidate: BookmarkCandidate = { kind: 'Event', eventNumber: 42 };
 const axisCandidate: BookmarkCandidate = { kind: 'Axis', modulePath: 'Net.host[0].app' };
 const depCandidate: BookmarkCandidate = { kind: 'MessageDependency', eventNumber: 3, consequenceEventNumber: 9, messageId: 7 };
 const methodCandidate: BookmarkCandidate = { kind: 'ComponentMethodCall', eventNumber: 5, entryIndex: 2, methodName: 'sendPacket' };
+const positionCandidate: BookmarkCandidate = { kind: 'Position', simulationTime: '1.5' };
 
 // ---------------------------------------------------------------------------------
 // bookmarkMatches -- per-kind identity
@@ -62,6 +63,12 @@ test('bookmarkMatches: ComponentMethodCall bookmarks match by (eventNumber, entr
   assert.ok(!bookmarkMatches({ ...methodCandidate, entryIndex: 3 }, b));
 });
 
+test('bookmarkMatches: Position bookmarks match by exact simulationTime string', () => {
+  const b: Bookmark = { id: '1', kind: 'Position', label: 'x', simulationTime: '1.5' };
+  assert.ok(bookmarkMatches(positionCandidate, b));
+  assert.ok(!bookmarkMatches({ kind: 'Position', simulationTime: '1.500000001' }, b));
+});
+
 test('bookmarkMatches: different kinds never match, even with overlapping fields', () => {
   const eventBookmark: Bookmark = { id: '1', kind: 'Event', label: 'x', eventNumber: 5 };
   assert.ok(!bookmarkMatches({ kind: 'ComponentMethodCall', eventNumber: 5, entryIndex: 0 }, eventBookmark));
@@ -81,6 +88,20 @@ test('isStaleBookmark: an eventNumber beyond the current last event is stale', (
 test('isStaleBookmark: Axis bookmarks (no eventNumber) are never reported stale', () => {
   const b: Bookmark = { id: '1', kind: 'Axis', label: 'x', modulePath: 'Net.host[0]' };
   assert.ok(!isStaleBookmark(b, 0));
+});
+
+test('isStaleBookmark: Position bookmarks (no eventNumber) are never reported stale', () => {
+  const b: Bookmark = { id: '1', kind: 'Position', label: 'x', simulationTime: '1.5' };
+  assert.ok(!isStaleBookmark(b, 0));
+});
+
+// ---------------------------------------------------------------------------------
+// bookmarkTitle
+// ---------------------------------------------------------------------------------
+
+test('bookmarkTitle: Position bookmarks show their simulation time', () => {
+  const b: Bookmark = { id: '1', kind: 'Position', label: 'x', simulationTime: '1.5' };
+  assert.strictEqual(bookmarkTitle(b), 'Position: t = 1.5s');
 });
 
 // ---------------------------------------------------------------------------------

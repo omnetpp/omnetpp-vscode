@@ -55,6 +55,8 @@ export function bookmarkMatches(candidate: BookmarkCandidate, b: Bookmark): bool
       return candidate.eventNumber === b.eventNumber && candidate.consequenceEventNumber === b.consequenceEventNumber && candidate.messageId === b.messageId;
     case 'ComponentMethodCall':
       return candidate.eventNumber === b.eventNumber && candidate.entryIndex === b.entryIndex;
+    case 'Position':
+      return candidate.simulationTime === b.simulationTime;
   }
 }
 
@@ -62,10 +64,11 @@ export function bookmarkMatches(candidate: BookmarkCandidate, b: Bookmark): bool
  * A bookmark is stale once its referenced event number no longer exists (an
  * OVERWRITTEN log whose new content is shorter, or simply different, than before --
  * port plan: "stale bookmarks (event number beyond last after overwrite) shown greyed
- * in the list and skipped for markers"). `Axis` bookmarks have no event number and are
- * never reported stale by this check (a documented simplification -- detecting "this
- * module no longer exists" would need an engine round trip this function deliberately
- * avoids, being a pure, engine-free predicate).
+ * in the list and skipped for markers"). `Axis`/`Position` bookmarks have no event
+ * number and are never reported stale by this check (a documented simplification --
+ * detecting "this module no longer exists"/"this simtime is out of range" would need an
+ * engine round trip this function deliberately avoids, being a pure, engine-free
+ * predicate).
  */
 export function isStaleBookmark(bookmark: Bookmark, lastEventNumber: number): boolean {
   return typeof bookmark.eventNumber === 'number' && bookmark.eventNumber > lastEventNumber;
@@ -102,6 +105,8 @@ export function bookmarkTitle(b: Bookmark): string {
       return `Message dependency (from event #${b.eventNumber})`;
     case 'ComponentMethodCall':
       return `${b.methodName ?? 'Method call'} (event #${b.eventNumber})`;
+    case 'Position':
+      return `Position: t = ${b.simulationTime}s`;
   }
 }
 

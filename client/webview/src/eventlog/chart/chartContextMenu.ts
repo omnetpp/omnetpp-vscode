@@ -96,6 +96,8 @@ export interface ChartMenuActions {
   toggleEventBookmark(eventNumber: number): void;
   toggleDependencyBookmark(hit: Extract<HitObject, { kind: 'dependency' }>): void;
   toggleAxisBookmark(moduleId: number): void;
+  /** "Toggle Bookmark" for a bare timeline position (`'Position'` kind, Java's `BigDecimal`-in-selection case). */
+  toggleTimestampBookmark(tc: number): void;
   centerOnAxis(moduleId: number): void;
   /** Phase U10 -- "Go to NED Declaration": opens the module's NED type declaration (see `uiProtocol.ts`'s `gotoNedDeclaration` message doc); the caller re-resolves the module's `nedTypeName` (already known not to be `null`, since the menu item disables itself otherwise -- see `axisSection()`). */
   gotoNedDeclaration(moduleId: number): void;
@@ -230,6 +232,11 @@ function dependencySection(hit: Extract<HitObject, { kind: 'dependency' }>, labe
   };
 }
 
+/** A bare timeline position under the cursor -- Java's `BigDecimal`-in-selection "Toggle bookmark" case has no other action, so this is a single flat item (no submenu), unlike the other per-object sections. */
+function timestampSection(hit: Extract<HitObject, { kind: 'timestamp' }>, actions: ChartMenuActions): MenuEntry {
+  return { id: `ts-${hit.tc}`, label: 'Toggle Bookmark at Position', onSelect: () => actions.toggleTimestampBookmark(hit.tc) };
+}
+
 function axisSection(hit: Extract<HitObject, { kind: 'axis' }>, info: AxisModuleMenuInfo | null, actions: ChartMenuActions): MenuEntry {
   const noTree = info === null;
   return {
@@ -345,6 +352,18 @@ export function buildChartContextMenu(params: ChartMenuBuildParams): MenuEntry[]
 
   for (const hit of axes) entries.push(axisSection(hit, resolveAxisInfo(hit.moduleId), actions));
   if (axes.length > 0) entries.push({ separator: true });
+
+  // A 'timestamp' hit is present at virtually every click (hitTest.ts's unconditional
+  // catch-all whenever pointerTc !== null) -- unlike the sections above, there's only
+  // ever one, and it's not gated on being the "only" hit: this port's context menu
+  // already shows a section per distinct hit kind, unfiltered by priority (e.g.
+  // right-clicking an event already shows both its Event section AND the underlying
+  // Axis section), so this is consistent with that established design.
+  const timestamp = hits.find((h): h is Extract<HitObject, { kind: 'timestamp' }> => h.kind === 'timestamp');
+  if (timestamp) {
+    entries.push(timestampSection(timestamp, actions));
+    entries.push({ separator: true });
+  }
 
   // ---- phase U8: axis-management static sections (contributor's menu order) ----
   entries.push({ id: 'selectModules', label: 'Select Modules...', icon: 'list-tree', onSelect: actions.openSelectModulesDialog });

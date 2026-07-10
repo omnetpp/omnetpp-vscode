@@ -20,6 +20,8 @@
  * revealing in both). Axis kind has no event at all -- it reveals by asking the chart
  * webview to center that axis (`sendCommand('centerOnAxisBookmark', ...)`); the table
  * has nothing meaningful to do for a module-only bookmark, so it is left untouched.
+ * Position kind (a bare timeline position, no event/module) similarly asks the chart to
+ * center on its simulation time (`sendCommand('centerOnSimulationTimeBookmark', ...)`).
  */
 
 import * as vscode from 'vscode';
@@ -59,13 +61,19 @@ function bookmarkKindDefaultPrompt(kind: BookmarkKind): string {
       return 'e.g. "the lost packet"';
     case 'ComponentMethodCall':
       return 'e.g. "the misbehaving call"';
+    case 'Position':
+      return 'e.g. "steady state reached"';
   }
 }
 
-/** Reveals `bookmark` in both attached webviews (Event/MessageDependency/ComponentMethodCall kinds) or centers the chart on its axis (Axis kind) -- see this file's header for the per-kind rationale. */
+/** Reveals `bookmark` in both attached webviews (Event/MessageDependency/ComponentMethodCall kinds), centers the chart on its axis (Axis kind), or centers the chart on its timeline position (Position kind) -- see this file's header for the per-kind rationale. */
 export async function revealBookmark(session: EventLogSession, bookmark: Bookmark): Promise<void> {
   if (bookmark.kind === 'Axis') {
     session.sendCommand('centerOnAxisBookmark', { modulePath: bookmark.modulePath });
+    return;
+  }
+  if (bookmark.kind === 'Position') {
+    session.sendCommand('centerOnSimulationTimeBookmark', { simulationTime: bookmark.simulationTime });
     return;
   }
   if (typeof bookmark.eventNumber !== 'number') return;

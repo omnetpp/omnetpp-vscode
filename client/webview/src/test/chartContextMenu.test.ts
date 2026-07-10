@@ -38,6 +38,7 @@ function fakeActions(): ChartMenuActions & Record<string, unknown> {
     toggleEventBookmark: record('toggleEventBookmark'),
     toggleDependencyBookmark: record('toggleDependencyBookmark'),
     toggleAxisBookmark: record('toggleAxisBookmark'),
+    toggleTimestampBookmark: record('toggleTimestampBookmark'),
     centerOnAxis: record('centerOnAxis'),
     filterCausesConsequences: record('filterCausesConsequences'),
     filterMessage: record('filterMessage'),
@@ -172,6 +173,25 @@ test('buildChartContextMenu: unresolvable dependency label falls back to a gener
   const entries = buildChartContextMenu(makeParams(actions, { hits }));
   const depEntry = findEntry(entries, 'dep-1-2')! as { label: string };
   assert.equal(depEntry.label, '(message)');
+});
+
+test('buildChartContextMenu: timestamp hit -- a single flat "Toggle Bookmark at Position" entry (no submenu, unlike the other kinds)', () => {
+  const actions = fakeActions();
+  const hits: HitObject[] = [{ kind: 'timestamp', tc: 42 }];
+  const entries = buildChartContextMenu(makeParams(actions, { hits }));
+  const entry = findEntry(entries, 'ts-42')! as { label: string; onSelect: () => void; submenu?: unknown };
+  assert.equal(entry.label, 'Toggle Bookmark at Position');
+  assert.equal(entry.submenu, undefined);
+  entry.onSelect();
+  assert.deepEqual(actions.calls.toggleTimestampBookmark, [42]);
+});
+
+test('buildChartContextMenu: timestamp hit coexists with other sections (unfiltered, per-kind design)', () => {
+  const actions = fakeActions();
+  const hits: HitObject[] = [{ kind: 'event', eventNumber: 1, moduleId: 0 }, { kind: 'timestamp', tc: 5 }];
+  const entries = buildChartContextMenu(makeParams(actions, { hits }));
+  assert.ok(findEntry(entries, 'event-1'));
+  assert.ok(findEntry(entries, 'ts-5'));
 });
 
 test('buildChartContextMenu: axis hit -- full U8 action set wired, enablement from resolveAxisInfo', () => {
