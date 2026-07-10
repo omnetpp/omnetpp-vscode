@@ -32,7 +32,7 @@ import { renderSummaryStrip } from '../common/summary';
 import { setTimeDisplayAccuracy } from '../common/decimalTime';
 import { readPalette, watchThemeChange, type EventLogPalette } from '../common/theme';
 import { showContextMenu } from '../common/contextMenu';
-import { DEFAULT_FIND_TEXT_STATE, openFindTextDialog, openGotoEventDialog, openGotoSimTimeDialog, type FindTextState } from '../common/dialogs';
+import { DEFAULT_FIND_TEXT_STATE, openEditBookmarkDialog, openFindTextDialog, openGotoEventDialog, openGotoSimTimeDialog, type FindTextState } from '../common/dialogs';
 import { classifyEngineError, mountNotificationOverlay, type NotificationOverlayHandle } from '../common/notificationOverlay';
 import { AUTO_AXIS_SPACING, clampAxisSpacing, DENSE_AXIS_SPACING, deriveAxes, findModuleFullPath, findModuleIdByFullName, findModuleIdByFullPath, findModuleNode, layoutAxes, maxVerticalScroll, type AxesLayout, type AxisSpacingSpec } from './axes';
 import { calculateAxisHeaders, flattenDrawableAxisHeaders, type AxisHeaderNode } from './axisHeaders';
@@ -71,6 +71,8 @@ import { buildChartContextMenu, buildShowHideEntries, type AxisModuleMenuInfo, t
 import { buildSampleTable, pixelToTc, tcToSimTimeApprox, type TcSimSample } from './coords';
 import { mergeDisplayFlags, presetDefaultFlags, presetNetworkCommunicationFlags, showAllFlags, toggleFlag, type ChartDisplayFlags } from './displayFlags';
 import { bookmarkDependencyKey, bookmarkMethodCallKey, buildDrawList, type DrawPrimitive, type InfoPanelText } from './drawList';
+import { packNotes, type NoteLayoutCandidate } from './bookmarkNotesLayout';
+import { renderMiniMarkdown } from './miniMarkdown';
 import { openSelectModulesDialog } from './selectModulesDialog';
 import { openListReorderDialog } from './reorderDialog';
 import { calculateTicks, formatMouseTime, formatTickLabel, formatTickTime } from './ticks';
@@ -94,6 +96,7 @@ import { applyClick, clearSelection, dependencyKey, EMPTY_CHART_SELECTION, focus
 import { attachTooltip } from './tooltip';
 import { RenderModelCache, type EngineViewportSource } from './renderModelCache';
 import {
+  BOOKMARK_NOTES_BAND_HEIGHT,
   contentHeight,
   contentWidth,
   createViewportState,
@@ -263,14 +266,25 @@ let antialiasEnabled = true;
 let findTextState: FindTextState = DEFAULT_FIND_TEXT_STATE;
 /** Anchor row of the last successful find, so "Find Next" continues from there instead of restarting at the beginning/end. `null` before any search (or after the file changes underneath it). */
 let lastFindRef: RowRef | null = null;
-/** Phase U6 -- the session's current bookmark list (`init`/`bookmarksChanged`); `recomputeBookmarkIndexes()` derives the four render-ready sets below from it (+ `moduleTree`, for Axis bookmarks' `modulePath` -> `moduleId` resolution). */
+/** Phase U6 -- the session's current bookmark list (`init`/`bookmarksChanged`); `recomputeBookmarkIndexes()` derives the four render-ready maps below from it (+ `moduleTree`, for Axis bookmarks' `modulePath` -> `moduleId` resolution). Each maps its kind's identity key to the OWNING bookmark's id (not just a presence `Set`) so `drawList.ts` can stamp `bookmarkId` on the emitted `bookmarkMark` primitive -- "Bookmark Info"'s note-box positioning (`resolveBookmarkAnchor()`) reads that back off `lastPrimitives` instead of duplicating this file's per-kind anchor math. */
 let bookmarks: Bookmark[] = [];
-let bookmarkedEventNumbers = new Set<number>();
-let bookmarkedDependencyKeys = new Set<string>();
-let bookmarkedMethodCallKeys = new Set<string>();
-let bookmarkedModuleIds = new Set<number>();
-/** Phase U6+ -- `'Position'`-kind bookmarks' resolved timeline coordinates, keyed by `simulationTime` (the bookmark's identity). Unlike the three sets above, this needs an engine round trip per bookmark (`elog/sc/mapCoords`, `simTimeToTc`) to resolve, so it's refreshed asynchronously by `refreshPositionBookmarkTcs()` rather than synchronously in `recomputeBookmarkIndexes()`. */
-let positionBookmarkTcs = new Map<string, number>();
+let bookmarkedEventNumbers = new Map<number, string>();
+let bookmarkedDependencyKeys = new Map<string, string>();
+let bookmarkedMethodCallKeys = new Map<string, string>();
+let bookmarkedModuleIds = new Map<number, string>();
+/** Phase U6+ -- `'Position'`-kind bookmarks' resolved timeline coordinates, keyed by bookmark id. Unlike the four maps above, this needs an engine round trip per bookmark (`elog/sc/mapCoords`, `simTimeToTc`) to resolve, so it's refreshed asynchronously by `refreshPositionBookmarkTcs()` rather than synchronously in `recomputeBookmarkIndexes()`. */
+let positionBookmarkTcs = new Map<string, { tc: number; simulationTime: string }>();
+/**
+ * "Bookmark Info" note boxes -- one `.elog-bookmark-note` div per bookmark, keyed by
+ * bookmark id, reused across renders (created/content-refreshed by
+ * `syncBookmarkNoteContent()` only when `bookmarks`/the flag change; repositioned+
+ * re-MEASURED fresh every render by `repositionBookmarkNotes()` -- a cached size measured
+ * once (e.g. right after creation, potentially before the webview's own layout had fully
+ * settled) can go stale relative to the note's true rendered size, which is exactly what
+ * let notes get packed closer together than their real width and visually overlap despite
+ * `packNotes()`'s own placement math being correct for whatever width it was handed).
+ */
+const noteEls = new Map<string, HTMLElement>();
 /** Phase U7 -- the session's currently-applied filter (`null` = unfiltered), seeded from `init`'s `filterParams` and kept in sync by every successful `elog/setFilter` call THIS webview makes (the chart is always the sole initiator of filter changes -- see `applyFilterParamsAndReanchor()`'s own doc comment for why: `sequenceChartEditor.ts`'s `supportsMultipleEditorsPerDocument: false` guarantees at most one chart webview per session). Read by the Del-exclude merge (`mergeExcludedEventNumbers()`) so it can build on top of whatever is ALREADY active, even a filter this webview never itself applied (rehydrated from a previous session). */
 let currentFilterParams: FilterParams | null = null;
 let filterPanel: FilterPanelHandle;
@@ -380,6 +394,18 @@ function strippedModuleIds(): ReadonlySet<number> | undefined {
   return new Set(lastModel.axisVectorStrips.map((s) => s.moduleId));
 }
 
+/**
+ * `contentHeight(viewport)`, minus the "Bookmark Info" notes band when that flag is on --
+ * every axis-layout/scroll computation in this file uses THIS instead of the raw
+ * `contentHeight()`, so the axis stack (and AUTO/"Balanced Axes" spacing's fill-the-content-
+ * area math) leaves room for the band, treating it like a third gutter alongside
+ * `GUTTER_LEFT_WIDTH`/`GUTTER_TOP_HEIGHT`. See `BOOKMARK_NOTES_BAND_HEIGHT`'s own doc comment
+ * for why the reservation is a fixed size, not dynamically measured.
+ */
+function notesAwareContentHeight(): number {
+  return contentHeight(viewport) - (displayFlags.showBookmarkInfo ? BOOKMARK_NOTES_BAND_HEIGHT : 0);
+}
+
 function currentAxesLayout(): AxesLayout {
   const spacing: AxisSpacingSpec = axisSpacingMode === 'manual' ? { mode: 'manual', manualSpacing: axisSpacingManual } : AUTO_AXIS_SPACING;
   const strips = strippedModuleIds();
@@ -391,11 +417,11 @@ function currentAxesLayout(): AxesLayout {
   // accumulated knownModuleIds only before any viewport has loaded.
   const activeIds = lastModel ? collectActiveModuleIds(lastModel, displayFlags) : knownModuleIds;
   if (moduleTree === null || openAxisModuleIds === null) {
-    if (spacing.mode === 'manual') return layoutAxes([...activeIds].sort((a, b) => a - b), moduleTree, contentHeight(viewport), spacing, strips);
-    return deriveAxes(activeIds, moduleTree, contentHeight(viewport), displayFlags.showEmptyAxes);
+    if (spacing.mode === 'manual') return layoutAxes([...activeIds].sort((a, b) => a - b), moduleTree, notesAwareContentHeight(), spacing, strips);
+    return deriveAxes(activeIds, moduleTree, notesAwareContentHeight(), displayFlags.showEmptyAxes);
   }
   const visible = computeVisibleAxisModuleIds(openAxisModuleIds, activeIds, moduleTree, displayFlags.showEmptyAxes);
-  return layoutAxes(orderVisibleAxes(visible), moduleTree, contentHeight(viewport), spacing, strips);
+  return layoutAxes(orderVisibleAxes(visible), moduleTree, notesAwareContentHeight(), spacing, strips);
 }
 
 /** REPLACE the open set (all mutation paths funnel through here -- Java's `setOpenAxisModules()` + invalidation), persisting as full paths. */
@@ -489,16 +515,19 @@ function initializeOpenAxisModules(): void {
   openAxisModuleIds = resolved.length === 0 ? defaultOpenAxisModules(moduleTree) : resolved;
 }
 
-/** Re-derives the four render-ready bookmark index sets `drawList.ts` consumes from `bookmarks`/`moduleTree` -- call after either changes (a fresh `init`/`bookmarksChanged`, or the module tree finishing its first `elog/getModuleTree` load). Does NOT itself schedule a render (callers already do, alongside whatever else they're updating). */
+/** Re-derives the four render-ready bookmark index maps `drawList.ts` consumes from `bookmarks`/`moduleTree` -- call after either changes (a fresh `init`/`bookmarksChanged`, or the module tree finishing its first `elog/getModuleTree` load). Does NOT itself schedule a render (callers already do, alongside whatever else they're updating). */
 function recomputeBookmarkIndexes(): void {
-  bookmarkedEventNumbers = new Set(bookmarks.filter((b) => b.kind === 'Event').map((b) => b.eventNumber!));
-  bookmarkedDependencyKeys = new Set(bookmarks.filter((b) => b.kind === 'MessageDependency').map((b) => bookmarkDependencyKey(b.eventNumber!, b.consequenceEventNumber, b.messageId)));
-  bookmarkedMethodCallKeys = new Set(bookmarks.filter((b) => b.kind === 'ComponentMethodCall').map((b) => bookmarkMethodCallKey(b.eventNumber!, b.entryIndex!)));
-  bookmarkedModuleIds = new Set(
+  bookmarkedEventNumbers = new Map(bookmarks.filter((b) => b.kind === 'Event').map((b) => [b.eventNumber!, b.id]));
+  bookmarkedDependencyKeys = new Map(bookmarks.filter((b) => b.kind === 'MessageDependency').map((b) => [bookmarkDependencyKey(b.eventNumber!, b.consequenceEventNumber, b.messageId), b.id]));
+  bookmarkedMethodCallKeys = new Map(bookmarks.filter((b) => b.kind === 'ComponentMethodCall').map((b) => [bookmarkMethodCallKey(b.eventNumber!, b.entryIndex!), b.id]));
+  bookmarkedModuleIds = new Map(
     bookmarks
       .filter((b) => b.kind === 'Axis' && b.modulePath)
-      .map((b) => findModuleIdByFullName(b.modulePath!, moduleTree))
-      .filter((id): id is number => id !== null),
+      .map((b): [number, string] | null => {
+        const moduleId = findModuleIdByFullName(b.modulePath!, moduleTree);
+        return moduleId === null ? null : [moduleId, b.id];
+      })
+      .filter((entry): entry is [number, string] => entry !== null),
   );
 }
 
@@ -511,8 +540,8 @@ function recomputeBookmarkIndexes(): void {
  * Position bookmarks (the common case).
  */
 function refreshPositionBookmarkTcs(): void {
-  const positionBookmarks = bookmarks.filter((b) => b.kind === 'Position' && b.simulationTime !== undefined);
-  if (positionBookmarks.length === 0) {
+  const positionKindBookmarks = bookmarks.filter((b) => b.kind === 'Position' && b.simulationTime !== undefined);
+  if (positionKindBookmarks.length === 0) {
     if (positionBookmarkTcs.size > 0) {
       positionBookmarkTcs = new Map();
       scheduleRender();
@@ -520,18 +549,162 @@ function refreshPositionBookmarkTcs(): void {
     return;
   }
   void Promise.all(
-    positionBookmarks.map(async (b) => {
+    positionKindBookmarks.map(async (b) => {
       try {
         const result = await rpc.request<MapCoordsResult>(ElogMethods.scMapCoords, { kind: 'simTimeToTc', simulationTime: b.simulationTime! });
-        return result.tc !== null ? ([b.simulationTime!, result.tc] as const) : null;
+        return result.tc !== null ? ([b.id, { tc: result.tc, simulationTime: b.simulationTime! }] as const) : null;
       } catch {
         return null; // engine busy/unresolvable -- best-effort, matches every other mapCoords call site
       }
     }),
   ).then((resolved) => {
-    positionBookmarkTcs = new Map(resolved.filter((e): e is readonly [string, number] => e !== null));
+    positionBookmarkTcs = new Map(resolved.filter((e): e is readonly [string, { tc: number; simulationTime: string }] => e !== null));
     scheduleRender();
   });
+}
+
+/**
+ * "Bookmark Info" note editing -- opened by a note box's double-click or its context
+ * menu's "Edit Bookmark...". No-op if the bookmark was removed by another webview
+ * mid-edit (the dialog just never opens; nothing left dangling since it isn't mounted yet).
+ */
+function openNoteEditDialog(bookmarkId: string): void {
+  const bookmark = bookmarks.find((b) => b.id === bookmarkId);
+  if (!bookmark) return;
+  openEditBookmarkDialog(bookmark.label, bookmark.note ?? '', (label, note) => {
+    vscode.postMessage({ type: 'updateBookmark', id: bookmarkId, label, note });
+  });
+}
+
+/**
+ * Rebuilds every "Bookmark Info" note box's DOM content (title + markdown-rendered notes)
+ * -- called only when `bookmarks` changes (alongside `recomputeBookmarkIndexes()`) or when
+ * `showBookmarkInfo` is toggled on, NOT every render frame (rebuilding `innerHTML` on every
+ * pan/zoom/scroll tick would be wasteful and pointless -- the CONTENT hasn't changed).
+ * Sizing is NOT cached here: `repositionBookmarkNotes()` measures each note's real,
+ * current size fresh every time it runs instead, so packing is never fed a stale width.
+ */
+function syncBookmarkNoteContent(): void {
+  if (!displayFlags.showBookmarkInfo) {
+    for (const el of noteEls.values()) el.remove();
+    noteEls.clear();
+    return;
+  }
+  const currentIds = new Set(bookmarks.map((b) => b.id));
+  for (const [id, el] of noteEls) {
+    if (currentIds.has(id)) continue;
+    el.remove();
+    noteEls.delete(id);
+  }
+  for (const bookmark of bookmarks) {
+    let el = noteEls.get(bookmark.id);
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'elog-bookmark-note';
+      el.style.visibility = 'hidden'; // shown by repositionBookmarkNotes() once its anchor/pack position is known
+      el.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        openNoteEditDialog(bookmark.id);
+      });
+      el.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showContextMenu((e as MouseEvent).clientX, (e as MouseEvent).clientY, [{ id: 'editBookmark', label: 'Edit Bookmark...', onSelect: () => openNoteEditDialog(bookmark.id) }]);
+      });
+      bookmarkNotesLayerEl.appendChild(el);
+      noteEls.set(bookmark.id, el);
+    }
+    const titleEl = document.createElement('div');
+    titleEl.className = 'elog-bookmark-note-title';
+    titleEl.textContent = bookmark.label;
+    const bodyEl = document.createElement('div');
+    bodyEl.className = 'elog-bookmark-note-body';
+    bodyEl.innerHTML = renderMiniMarkdown(bookmark.note ?? '');
+    el.replaceChildren(titleEl, bodyEl);
+  }
+}
+
+/**
+ * Every render frame (when `showBookmarkInfo` is on): resolves each bookmark's current
+ * on-screen anchor from `lastPrimitives` (the PREVIOUS frame's `bookmarkMark` primitives --
+ * a deliberate one-frame lag, imperceptible in practice, that avoids computing the whole
+ * draw list twice per frame just for this), MEASURES each candidate note's real current
+ * size fresh (`getBoundingClientRect()` -- never a cache: a size cached once at creation
+ * time can go stale relative to the note's true rendered size, which is exactly what let
+ * notes get packed closer together than their real width and visually overlap despite
+ * `packNotes()`'s own placement math being correct for whatever width it was handed), packs
+ * them into non-overlapping rows via `packNotes()`, and repositions their divs via CSSOM.
+ * Returns the callout-line endpoints for THIS frame's `buildDrawList()` call.
+ *
+ * TWO SEPARATE packing pools, not one, both laid out on the SAME row:
+ *  - `'Axis'`-kind bookmarks live in the pinned left gutter (their glyph's x never pans
+ *    horizontally with the timeline -- see `viewportState.ts`'s `GUTTER_LEFT_WIDTH` doc),
+ *    so their notes are packed ONLY among themselves, allowed to use the FULL left edge of
+ *    the screen (`minX: 0`, not `GUTTER_LEFT_WIDTH`) since their notes -- unlike their
+ *    glyphs -- aren't gutter content and have no reason to stay clear of it.
+ *    Mixing them into the same pool as timeline-based notes was exactly what dragged an
+ *    axis note rightward as the OTHER pool's targets shifted during a horizontal
+ *    pan/scroll -- PAVA's symmetric adjustment doesn't know "this one shouldn't move".
+ *    Since every axis glyph sits at nearly the SAME x (only nudged by nesting depth),
+ *    sorting them by x (packNotes()'s default) would give a close-to-arbitrary/unstable
+ *    left-right order; sorted by `sortKey: -anchor.y` instead, so notes for axes further
+ *    DOWN the (bottom-anchored) stack -- closer to the note band -- end up FURTHER LEFT,
+ *    and notes for axes further UP end up further right, avoiding crossings between them.
+ *  - Every other kind (Event/MessageDependency/ComponentMethodCall/Position) packs among
+ *    itself, starting to the right of however much room the axis pool used, so the two
+ *    pools never collide with each other on their shared row.
+ *
+ * A bookmark's note is hidden entirely (not just left out of packing) unless its glyph
+ * resolves to an anchor from THIS frame's `lastPrimitives` at all -- no additional x-bound
+ * check beyond that: the left gutter/axis-label strip is TRANSPARENT by this port's own
+ * established design (content draws under it; only the narrow opaque compound-module band
+ * actually covers anything), and every kind's `bookmarkMark` is only ever emitted once its
+ * OWN drawList.ts loop already decided the underlying content is on screen -- so a
+ * resolved anchor already means "visible somewhere in the viewport", gutter included.
+ *
+ * All measurement reads happen before any position writes below, to avoid layout-thrashing
+ * (interleaved DOM reads/writes forcing a synchronous reflow on every iteration).
+ */
+function repositionBookmarkNotes(axesLayout: AxesLayout): { x1: number; y1: number; x2: number; y2: number }[] {
+  if (!displayFlags.showBookmarkInfo || bookmarks.length === 0) return [];
+  const bandTop = GUTTER_TOP_HEIGHT + axesLayout.totalHeight - viewport.vscroll;
+  const anchors = new Map<string, { x: number; y: number }>();
+  for (const p of lastPrimitives) {
+    if (p.kind === 'bookmarkMark' && p.bookmarkId) anchors.set(p.bookmarkId, { x: p.x, y: p.y });
+  }
+  const axisCandidates: NoteLayoutCandidate[] = [];
+  const contentCandidates: NoteLayoutCandidate[] = [];
+  const sizes = new Map<string, { width: number; height: number }>();
+  for (const bookmark of bookmarks) {
+    const el = noteEls.get(bookmark.id);
+    const anchor = anchors.get(bookmark.id);
+    if (!el || !anchor) {
+      el?.style.setProperty('display', 'none');
+      continue;
+    }
+    const rect = el.getBoundingClientRect();
+    sizes.set(bookmark.id, { width: rect.width, height: rect.height });
+    if (bookmark.kind === 'Axis') axisCandidates.push({ id: bookmark.id, targetX: anchor.x - rect.width / 2, width: rect.width, sortKey: -anchor.y });
+    else contentCandidates.push({ id: bookmark.id, targetX: anchor.x - rect.width / 2, width: rect.width });
+  }
+
+  const axisPacked = packNotes(axisCandidates, 0, viewport.canvasWidth, 8);
+  const axisRightEdge = axisPacked.reduce((max, p) => Math.max(max, p.x + sizes.get(p.id)!.width), 0);
+  const contentMinX = axisPacked.length > 0 ? axisRightEdge + 16 : GUTTER_LEFT_WIDTH;
+  const contentPacked = packNotes(contentCandidates, contentMinX, viewport.canvasWidth, 8);
+
+  const connectors: { x1: number; y1: number; x2: number; y2: number }[] = [];
+  for (const p of [...axisPacked, ...contentPacked]) {
+    const el = noteEls.get(p.id)!;
+    const size = sizes.get(p.id)!;
+    const anchor = anchors.get(p.id)!;
+    el.style.left = `${p.x}px`;
+    el.style.top = `${bandTop}px`;
+    el.style.display = '';
+    el.style.visibility = 'visible';
+    connectors.push({ x1: p.x + size.width / 2, y1: bandTop, x2: anchor.x, y2: anchor.y });
+  }
+  return connectors;
 }
 
 /** Mutable view onto `moduleTree` for `labelProvider.ts`'s tooltip builders -- a getter (not a snapshot) so it always reflects the latest `elog/getModuleTree` result even though it's captured once by `attachTooltip()` below. */
@@ -562,11 +735,15 @@ function setDisplayFlags(next: ChartDisplayFlags): void {
   // `navigableBeginTc` (the Home key/button's target) depends on showInitializationEvent --
   // keep it fresh so a Home press right after toggling doesn't use a stale target.
   const initToggled = next.showInitializationEvent !== displayFlags.showInitializationEvent;
+  // "Bookmark Info" toggled -- (re)build/tear down the note divs' content once here rather
+  // than every render frame (see syncBookmarkNoteContent()'s own doc comment).
+  const bookmarkInfoToggled = next.showBookmarkInfo !== displayFlags.showBookmarkInfo;
   displayFlags = next;
   state = { ...state, displayFlags };
   persistState();
   if (separateChanged) void resyncSeparateEntries();
   if (initToggled) void refreshEndpointsTc();
+  if (bookmarkInfoToggled) syncBookmarkNoteContent();
   scheduleRender();
 }
 
@@ -651,6 +828,15 @@ marqueeEl.style.pointerEvents = 'none';
 marqueeEl.style.display = 'none';
 marqueeEl.style.zIndex = '5';
 canvasContainer.appendChild(marqueeEl);
+// "Bookmark Info" note boxes -- a DOM overlay layer for the same reason the marquee is one
+// (real text wrapping/auto-sizing/rich-HTML rendering for free, instead of a hand-rolled
+// canvas text-wrap algorithm; see viewportState.ts's BOOKMARK_NOTES_BAND_HEIGHT doc and
+// syncBookmarkNoteContent()/repositionBookmarkNotes() below). Positioned in the SAME
+// container as the canvas so a note div's CSSOM (x,y) lines up with the canvas-space (x,y)
+// its connector-line primitive uses.
+const bookmarkNotesLayerEl = document.createElement('div');
+bookmarkNotesLayerEl.className = 'elog-bookmark-notes-layer';
+canvasContainer.appendChild(bookmarkNotesLayerEl);
 notificationOverlay = mountNotificationOverlay(document.getElementById('notificationHost')!, refreshFromOverlay);
 
 const hscrollEl = document.getElementById('hscroll')!;
@@ -782,8 +968,10 @@ function renderFrame(): void {
     canvasStack.render([], true);
     renderStatus();
     updateHScrollbar();
+    bookmarkNotesLayerEl.style.display = 'none';
     return;
   }
+  bookmarkNotesLayerEl.style.display = '';
 
   const range = visibleTcRange(viewport);
   const model = renderModelCache.request(
@@ -796,6 +984,9 @@ function renderFrame(): void {
   if (model) applyModel(model);
 
   const axesLayout: AxesLayout = currentAxesLayout();
+  // Reads `lastPrimitives` (the PREVIOUS frame's `bookmarkMark` output) for each bookmark's
+  // current anchor -- a deliberate one-frame lag, see repositionBookmarkNotes()'s own doc.
+  const bookmarkNoteConnectors = repositionBookmarkNotes(axesLayout);
   const lastSimTime = summary.lastSimulationTime !== null ? Number(summary.lastSimulationTime) : 0;
   const tickResult = calculateTicks(currentTimelineMode, viewport.leftTc, range.rightTc, viewport.pixelsPerTc, lastSimTime, simTimeAt);
   currentTickPrefix = tickResult.tickPrefix;
@@ -837,7 +1028,8 @@ function renderFrame(): void {
     bookmarkedModuleIds,
     bookmarkedDependencyKeys,
     bookmarkedMethodCallKeys,
-    positionBookmarkTcs: [...positionBookmarkTcs.values()],
+    positionBookmarks: [...positionBookmarkTcs.entries()].map(([id, v]) => ({ id, tc: v.tc })),
+    bookmarkNoteConnectors,
     displayFlags,
     axisHeaderRoot,
     infoPanelText: computeInfoPanelText(),
@@ -1293,7 +1485,7 @@ async function performExportSvg(result: ExportDialogResult, ctxBase: ExportRange
       bookmarkedModuleIds,
       bookmarkedDependencyKeys,
       bookmarkedMethodCallKeys,
-      positionBookmarkTcs: [...positionBookmarkTcs.values()],
+      positionBookmarks: [...positionBookmarkTcs.entries()].map(([id, v]) => ({ id, tc: v.tc })),
       displayFlags,
       axisHeaderRoot,
       // No live status/info overlays in a static export -- they're screen-only conveniences.
@@ -1579,7 +1771,7 @@ function centerOnAxis(moduleId: number): void {
   const axesLayout = currentAxesLayout();
   const axis = axesLayout.axes.find((a) => a.moduleId === moduleId);
   if (!axis) return;
-  viewport = scrollVerticalTo(viewport, axis.y - contentHeight(viewport) / 2, maxVerticalScroll(axesLayout, contentHeight(viewport)));
+  viewport = scrollVerticalTo(viewport, axis.y - notesAwareContentHeight() / 2, maxVerticalScroll(axesLayout, notesAwareContentHeight()));
   scheduleRender();
 }
 
@@ -2253,7 +2445,7 @@ attachInteractions(canvasContainer, {
     if (tc0 !== null && tc1 !== null && Math.abs(tc1 - tc0) > 1e-12) {
       viewport = zoomToFit(viewport, Math.min(tc0, tc1), Math.max(tc0, tc1), 0);
     }
-    viewport = scrollVerticalTo(viewport, targetVscroll, maxVerticalScroll(axesLayout, contentHeight(viewport)));
+    viewport = scrollVerticalTo(viewport, targetVscroll, maxVerticalScroll(axesLayout, notesAwareContentHeight()));
     scheduleRender();
   },
   onClick: handleClick,
@@ -2532,6 +2724,7 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
       // toolbar right away, without waiting for the user to ever open the panel.
       currentFilterParams = message.filterParams;
       filterPanel.setFiltered(summary?.filtered ?? false);
+      syncBookmarkNoteContent();
       renderFrame();
       if (fileUri) {
         void rpc.request<ElogModule | null>(ElogMethods.getModuleTree, undefined).then((tree) => {
@@ -2655,6 +2848,7 @@ window.addEventListener('message', (event: MessageEvent<HostToWebviewMessage>) =
       bookmarks = message.bookmarks;
       recomputeBookmarkIndexes();
       refreshPositionBookmarkTcs();
+      syncBookmarkNoteContent();
       scheduleRender();
       break;
     case 'nedTypeQueryResult': {

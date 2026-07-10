@@ -212,6 +212,26 @@ export function buildEventLogWebviewHtml(webview: vscode.Webview, extensionUri: 
   .elog-filter-panel-footer button.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
   .elog-filter-panel-footer button:disabled { opacity: 0.5; cursor: default; }
 
+  /* "Bookmark Info" note boxes (chartMain.ts's note-layer refresh) -- floating DOM
+     overlays positioned over the chart canvas (same pattern as the Ctrl-drag marquee),
+     not canvas-drawn, so they get real text wrapping/auto-sizing/rich-HTML rendering
+     for free from the browser instead of a hand-rolled canvas text-wrap algorithm. */
+  .elog-bookmark-notes-layer { position: absolute; inset: 0; pointer-events: none; }
+  .elog-bookmark-note { position: absolute; max-width: 220px; padding: 6px 8px; box-sizing: border-box;
+    background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.1));
+    border: 1px solid var(--vscode-editorWidget-border, transparent); border-radius: 4px;
+    font-size: 11px; line-height: 1.4; color: var(--vscode-foreground); pointer-events: auto;
+    cursor: pointer; overflow-wrap: break-word; }
+  .elog-bookmark-note:hover { border-color: var(--vscode-focusBorder, #007fd4); }
+  .elog-bookmark-note-title { font-weight: bold; margin-bottom: 3px; }
+  .elog-bookmark-note-body p { margin: 0 0 4px 0; }
+  .elog-bookmark-note-body p:last-child { margin-bottom: 0; }
+  .elog-bookmark-note-body ul, .elog-bookmark-note-body ol { margin: 0 0 4px 18px; padding: 0; }
+  .elog-bookmark-note-body h1, .elog-bookmark-note-body h2 { margin: 0 0 4px 0; font-size: 12px; }
+  .elog-bookmark-note-body code { background: rgba(128,128,128,0.25); padding: 0 2px; border-radius: 2px;
+    font-family: var(--vscode-editor-font-family, monospace); }
+  .elog-bookmark-note-body a { color: var(--vscode-textLink-foreground); }
+
   /* Notification overlay (phase U9, common/notificationOverlay.ts) -- the shared
      canceled/out-of-sync/error screen both the chart and table mount over their own
      .elog-body. */
@@ -238,10 +258,12 @@ export function buildEventLogWebviewHtml(webview: vscode.Webview, extensionUri: 
   body.vscode-high-contrast .elog-menu,
   body.vscode-high-contrast .elog-dialog,
   body.vscode-high-contrast .elog-filter-panel,
+  body.vscode-high-contrast .elog-bookmark-note,
   body.vscode-high-contrast-light .elog-tooltip,
   body.vscode-high-contrast-light .elog-menu,
   body.vscode-high-contrast-light .elog-dialog,
-  body.vscode-high-contrast-light .elog-filter-panel {
+  body.vscode-high-contrast-light .elog-filter-panel,
+  body.vscode-high-contrast-light .elog-bookmark-note {
     border-color: var(--vscode-contrastBorder, currentColor) !important;
   }
   body.vscode-high-contrast #chartCanvasContainer:focus-visible,

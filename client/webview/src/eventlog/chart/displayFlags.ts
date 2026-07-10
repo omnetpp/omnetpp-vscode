@@ -28,6 +28,14 @@ export interface ChartDisplayFlags {
    */
   showAxisInfo: boolean;
   showAxisLabels: boolean;
+  /**
+   * ADDITIVE (not a Java flag): shows a small editable note box below the last axis for
+   * every bookmark whose flag glyph is currently on screen, connected to it by a dotted
+   * callout line -- see `chartMain.ts`'s note-layer refresh + `bookmarkNotesLayout.ts`'s
+   * packing. Opt-in default (`false`) since it's an information-dense overlay, unlike
+   * every other flag here which mirrors a Java default.
+   */
+  showBookmarkInfo: boolean;
   /** See this file's header — no UI toggle, no rendering effect (deliberately out of scope). */
   showAxisVectorData: boolean;
   showComponentMethodCalls: boolean;
@@ -58,6 +66,7 @@ export const DEFAULT_DISPLAY_FLAGS: ChartDisplayFlags = {
   showAxisHeaders: true,
   showAxisInfo: true,
   showAxisLabels: true,
+  showBookmarkInfo: false,
   showAxisVectorData: true,
   showComponentMethodCalls: true,
   showEmptyAxes: false,
@@ -107,6 +116,7 @@ export const TOGGLE_ORDER: [keyof ChartDisplayFlags, string][] = [
   ['showPositionAndRange', 'Position and Range Info'],
   ['showAxisInfo', 'Axis Info'],
   ['showEventLogInfo', 'Event Log Info'],
+  ['showBookmarkInfo', 'Bookmark Info'],
 ];
 
 export function toggleFlag(flags: ChartDisplayFlags, key: keyof ChartDisplayFlags): ChartDisplayFlags {

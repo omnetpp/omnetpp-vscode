@@ -115,7 +115,8 @@ export type DrawPrimitive =
    * dependency bookmarks -- only the `(x, y)` anchor differs per caller (see
    * `buildDrawList()`'s three call sites below).
    */
-  | { kind: 'bookmarkMark'; x: number; y: number; color: string }
+  /** `bookmarkId`, when present, is the owning `Bookmark.id` -- lets `chartMain.ts` filter `lastPrimitives` for a bookmark's exact currently-drawn anchor (e.g. for "Bookmark Info" note-box positioning) without duplicating this file's own per-kind anchor math. */
+  | { kind: 'bookmarkMark'; x: number; y: number; color: string; bookmarkId?: string }
   /**
    * Phase U8 — an inline axis-management glyph hotspot (Java's `ModuleAction`, laid
    * out in `layoutAxis()`/`layoutAxisHeader()` and dispatched in `mouseUp()`'s
@@ -314,16 +315,18 @@ export interface BuildDrawListParams {
   tickPrefixLabel?: string;
   /** Phase U11 — the object(s) under the cursor (hover), redrawn "bold" in the highlight color (Java `drawHightlightedObjects()`, `highlightedObjects` populated on mouseMove). Usually holds the single hit group at the pointer. */
   hovered?: { events?: ReadonlySet<number>; dependencyKeys?: ReadonlySet<string>; axisModuleIds?: ReadonlySet<number>; methodCallKeys?: ReadonlySet<string> };
-  /** Phase U6 — event numbers with an `'Event'`-kind bookmark; each gets a `'bookmarkMark'` flag near its event mark. */
-  bookmarkedEventNumbers?: ReadonlySet<number>;
-  /** Phase U6 — module ids with an `'Axis'`-kind bookmark (already resolved from the bookmark's stored `modulePath` -- see `chartMain.ts`'s `recomputeBookmarkIndexes()`); each gets a `'bookmarkMark'` at the start of its axis line. */
-  bookmarkedModuleIds?: ReadonlySet<number>;
-  /** Phase U6 — `MessageDependency`-kind bookmark identity keys (`${causeEventNumber}:${consequenceEventNumber}:${messageId}` -- see `chartMain.ts`'s `bookmarkDepKey()`, which both this and the toggle-candidate builder use so the two stay in sync); a matching dependency gets a `'bookmarkMark'` at its arrow's midpoint. */
-  bookmarkedDependencyKeys?: ReadonlySet<string>;
-  /** `'ComponentMethodCall'`-kind bookmark identity keys (`bookmarkMethodCallKey()` above); a matching method call gets a `'bookmarkMark'` at its begin edge. */
-  bookmarkedMethodCallKeys?: ReadonlySet<string>;
-  /** `'Position'`-kind bookmarks' resolved timeline coordinates (`chartMain.ts`'s `refreshPositionBookmarkTcs()`); each gets a `'bookmarkMark'` near the top ruler at its tc. */
-  positionBookmarkTcs?: readonly number[];
+  /** Phase U6 — event numbers with an `'Event'`-kind bookmark, mapped to that bookmark's id; each gets a `'bookmarkMark'` flag near its event mark. Value type widened from a plain `Set` to a `Map` (ADDITIVE: "Bookmark Info") so the emitted primitive can carry `bookmarkId` -- every existing `.has()` call site keeps working unchanged (`Map` supports it too). */
+  bookmarkedEventNumbers?: ReadonlyMap<number, string>;
+  /** Phase U6 — module ids with an `'Axis'`-kind bookmark (already resolved from the bookmark's stored `modulePath` -- see `chartMain.ts`'s `recomputeBookmarkIndexes()`), mapped to that bookmark's id; each gets a `'bookmarkMark'` at the start of its axis line. */
+  bookmarkedModuleIds?: ReadonlyMap<number, string>;
+  /** Phase U6 — `MessageDependency`-kind bookmark identity keys (`${causeEventNumber}:${consequenceEventNumber}:${messageId}` -- see `chartMain.ts`'s `bookmarkDepKey()`, which both this and the toggle-candidate builder use so the two stay in sync), mapped to that bookmark's id; a matching dependency gets a `'bookmarkMark'` at its arrow's midpoint. */
+  bookmarkedDependencyKeys?: ReadonlyMap<string, string>;
+  /** `'ComponentMethodCall'`-kind bookmark identity keys (`bookmarkMethodCallKey()` above), mapped to that bookmark's id; a matching method call gets a `'bookmarkMark'` at its begin edge. */
+  bookmarkedMethodCallKeys?: ReadonlyMap<string, string>;
+  /** `'Position'`-kind bookmarks' resolved timeline coordinates (`chartMain.ts`'s `refreshPositionBookmarkTcs()`), each paired with its owning bookmark's id; each gets a `'bookmarkMark'` near the top ruler at its tc. */
+  positionBookmarks?: readonly { id: string; tc: number }[];
+  /** "Bookmark Info" callout lines from each visible note box back to its bookmark's flag-glyph anchor -- both endpoints already resolved by `chartMain.ts` (see the connector-emission comment near the end of `buildDrawList()`). */
+  bookmarkNoteConnectors?: readonly { x1: number; y1: number; x2: number; y2: number }[];
   /** Phase U5 — the ~25 Show/Hide toggles (`displayFlags.ts`); defaults to `DEFAULT_DISPLAY_FLAGS` when omitted. */
   displayFlags?: ChartDisplayFlags;
   /** Phase U5 — merged axis-header tree (`axisHeaders.ts`'s `calculateAxisHeaders()`), or `null`/omitted for no headers (e.g. module tree not loaded yet). */
@@ -347,7 +350,7 @@ export interface BuildDrawListParams {
 }
 
 export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
-  const { viewport, events, dependencies, methodCalls, axesLayout, ticks, theme, selectedEventNumbers, selectedDependencyKeys, selectedAxisModuleIds, selectedMethodCallKeys, selectedTimelineCoords, hovered, bookmarkedEventNumbers, bookmarkedModuleIds, bookmarkedDependencyKeys, bookmarkedMethodCallKeys, positionBookmarkTcs, axisHeaderRoot, infoPanelText, skipLabelsForPerf } = params;
+  const { viewport, events, dependencies, methodCalls, axesLayout, ticks, theme, selectedEventNumbers, selectedDependencyKeys, selectedAxisModuleIds, selectedMethodCallKeys, selectedTimelineCoords, hovered, bookmarkedEventNumbers, bookmarkedModuleIds, bookmarkedDependencyKeys, bookmarkedMethodCallKeys, positionBookmarks, axisHeaderRoot, infoPanelText, skipLabelsForPerf } = params;
   const flags = params.displayFlags ?? DEFAULT_DISPLAY_FLAGS;
   const primitives: DrawPrimitive[] = [];
   // Phase U11 — selection/hover emphasis (thicker arrows, axis brackets, bold-red hovered
@@ -415,10 +418,10 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
   // Placed just below the ruler (not overlapping its tick labels) -- `bookmarkMark` is
   // always drawn in the top gutter-chrome overlay pass regardless of (x,y) (canvasStack.ts's
   // `isGutterChrome()`), same as the other 3 bookmark kinds' marks.
-  for (const tc of positionBookmarkTcs ?? []) {
-    const x = contentX(tc, viewport);
+  for (const b of positionBookmarks ?? []) {
+    const x = contentX(b.tc, viewport);
     if (x < 0 || x > viewport.canvasWidth) continue;
-    primitives.push({ kind: 'bookmarkMark', x, y: GUTTER_TOP_HEIGHT + 8, color: bookmarkMarkColor(theme) });
+    primitives.push({ kind: 'bookmarkMark', x, y: GUTTER_TOP_HEIGHT + 8, color: bookmarkMarkColor(theme), bookmarkId: b.id });
   }
 
   // ---- axis lines + pinned labels + merged headers ----
@@ -496,7 +499,8 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
       // Phase U11 -- selected axis: two thin red lines just above/below the axis line,
       // running the full canvas width so they're visible under the left module hierarchy band.
       if (axisSelected) emphasis.push({ kind: 'axisSelectionMark', x1: 0, x2: viewport.canvasWidth, y, lineHeight: axis.lineHeight, color: emphasisColor });
-      if (bookmarkedModuleIds?.has(axis.moduleId)) primitives.push({ kind: 'bookmarkMark', x: bookmarkX, y, color: bookmarkMarkColor(theme) });
+      const axisBookmarkId = bookmarkedModuleIds?.get(axis.moduleId);
+      if (axisBookmarkId) primitives.push({ kind: 'bookmarkMark', x: bookmarkX, y, color: bookmarkMarkColor(theme), bookmarkId: axisBookmarkId });
       // Expand/collapse glyph in the reserved slot before the name (the "close"/remove-X is
       // intentionally omitted -- filtering / Select Modules removes axes). A module offers
       // at most one of the two in practice; prefer collapse if somehow both.
@@ -590,7 +594,8 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
         // own color; selection recolors it RED (bigger too if also hovered). Java's
         // `drawHightlightedObjects()`/`drawEventSelectionMarks()` combined.
         if (evSelected || evHovered) emphasis.push({ kind: markKind, eventNumber: event.eventNumber, moduleId: event.moduleId, x, xEnd, y, radius: evHovered ? EVENT_RADIUS + 2 : EVENT_RADIUS, color: evSelected ? emphasisColor : baseMarkColor });
-        if (bookmarkedEventNumbers?.has(event.eventNumber)) primitives.push({ kind: 'bookmarkMark', x: x - EVENT_RADIUS - 3, y: y - EVENT_RADIUS - 3, color: bookmarkMarkColor(theme) });
+        const eventBookmarkId = bookmarkedEventNumbers?.get(event.eventNumber);
+        if (eventBookmarkId) primitives.push({ kind: 'bookmarkMark', x: x - EVENT_RADIUS - 3, y: y - EVENT_RADIUS - 3, color: bookmarkMarkColor(theme), bookmarkId: eventBookmarkId });
       }
     }
     for (const [xKey, col] of columnDensity) {
@@ -637,7 +642,8 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
     const color = arrowColors.method;
     const callRef: ArrowRef = { kind: 'methodCall', eventNumber: call.eventNumber, sourceModuleId: call.sourceModuleId, targetModuleId: call.targetModuleId, tc: call.tc, entryIndex: call.entryIndex, methodName: call.methodName };
     const hasWidth = xEnd > xBegin + 0.5;
-    if (bookmarkedMethodCallKeys?.has(bookmarkMethodCallKey(call.eventNumber, call.entryIndex))) primitives.push({ kind: 'bookmarkMark', x: xBegin, y: y1, color: bookmarkMarkColor(theme) });
+    const methodCallBookmarkId = bookmarkedMethodCallKeys?.get(bookmarkMethodCallKey(call.eventNumber, call.entryIndex));
+    if (methodCallBookmarkId) primitives.push({ kind: 'bookmarkMark', x: xBegin, y: y1, color: bookmarkMarkColor(theme), bookmarkId: methodCallBookmarkId });
     // faint bar over the call's duration (Java's alpha-24 fillRectangle)
     if (hasWidth && y1 !== y2) primitives.push({ kind: 'parallelogram', points: [[xBegin, y1], [xEnd, y1], [xEnd, y2], [xBegin, y2]], color });
     // solid call line at xBegin (deduped against other near-vertical geometry)
@@ -718,6 +724,16 @@ export function buildDrawList(params: BuildDrawListParams): DrawPrimitive[] {
     pushInfoPanel(primitives, theme, infoPanelText.eventLogInfo, viewport.canvasWidth, viewport.canvasHeight, 'bottom');
   }
 
+  // "Bookmark Info" callout connectors -- a barely-visible dotted line from each visible note
+  // box (a DOM overlay `chartMain.ts` positions; see `notesAwareContentHeight()`) back to its
+  // bookmark's flag-glyph anchor. Both endpoints are already-resolved absolute canvas
+  // coordinates (`chartMain.ts` computed them the same way it resolved the anchor itself, then
+  // ran the note packing pass) -- this is a plain line, no `ref` (not independently
+  // clickable/hit-testable; the note DOM element itself handles its own interaction).
+  for (const c of params.bookmarkNoteConnectors ?? []) {
+    primitives.push({ kind: 'arrow', arrowKind: 'send', x1: c.x1, y1: c.y1, x2: c.x2, y2: c.y2, color: theme.descriptionForeground, dash: [1, 3] });
+  }
+
   // Phase U11 -- selection/hover emphasis last, so it layers on top of the base scene.
   for (const p of emphasis) primitives.push(p);
 
@@ -747,7 +763,7 @@ interface DependencyDrawContext {
   vlineBuffer: VLineBuffer;
   showLabels: boolean;
   /** Phase U6 -- see `bookmarkDependencyKey()`'s doc. */
-  bookmarkedDependencyKeys?: ReadonlySet<string>;
+  bookmarkedDependencyKeys?: ReadonlyMap<string, string>;
   /** Phase U11 -- the selection/hover emphasis pass. Hover keeps the dependency's own color but draws it WIDER; selection recolors it to `emphasisColor` (red). Either way it's solid (no message dash) and drawn on top of the base scene. */
   override?: { emphasisColor: string; selected: boolean; hovered: boolean };
 }
@@ -789,7 +805,7 @@ export function dependencyPassesDisplayFlags(dep: Pick<RenderDependency, 'kind' 
 function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx: DependencyDrawContext): void {
   const { axisByModuleId, viewport, theme, arrowColors, flags, axisSpacing, vlineBuffer, showLabels, bookmarkedDependencyKeys, override } = ctx;
   if (!dependencyPassesDisplayFlags(dep, flags)) return;
-  const isBookmarked = bookmarkedDependencyKeys?.has(bookmarkDependencyKey(dep.causeEventNumber, dep.consequenceEventNumber, dep.messageId)) ?? false;
+  const dependencyBookmarkId = bookmarkedDependencyKeys?.get(bookmarkDependencyKey(dep.causeEventNumber, dep.consequenceEventNumber, dep.messageId));
   if (dep.causeModuleId === null && dep.consequenceModuleId === null) return;
   // Both sides need a resolvable axis to be placed at all -- an event whose module was
   // never seen in any fetched viewport has nowhere to draw a row for (matches the U3/U4
@@ -851,7 +867,11 @@ function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx:
     if (geom.arrowhead) primitives.push({ kind: 'arrowHead', x: geom.arrowhead.x, y: geom.arrowhead.y, angle: geom.arrowhead.angle, color: geom.arrowhead.long ? LONG_ARROWHEAD_COLOR : color, length: geom.arrowhead.length, width: geom.arrowhead.width });
     if (isFiltered && geom.signAnchor) primitives.push({ kind: 'zigzag', segments: buildFilteredSignSegments(geom.signAnchor), color });
     if (flags.showMessageNames && showLabels && dep.messageName) primitives.push({ kind: 'label', x: geom.labelAnchor.x + (isFiltered ? 7 : 0), y: geom.labelAnchor.y, text: dep.messageName, color, align: 'left' });
-    if (isBookmarked) primitives.push({ kind: 'bookmarkMark', x: geom.labelAnchor.x, y: geom.labelAnchor.y, color: bookmarkMarkColor(theme) });
+    // A split/stub arrow (one endpoint offscreen or elided by the width-factor check above)
+    // still resolves SOME labelAnchor near its one real endpoint -- unlike the culls the other
+    // bookmark kinds get (event marks by EVENT_RADIUS, position marks by this same x bound),
+    // that anchor is not itself guaranteed to be on-screen, so the mark needs its own check here.
+    if (dependencyBookmarkId && geom.labelAnchor.x >= 0 && geom.labelAnchor.x <= viewport.canvasWidth) primitives.push({ kind: 'bookmarkMark', x: geom.labelAnchor.x, y: geom.labelAnchor.y, color: bookmarkMarkColor(theme), bookmarkId: dependencyBookmarkId });
     return;
   }
 
@@ -882,5 +902,6 @@ function pushDependency(primitives: DrawPrimitive[], dep: RenderDependency, ctx:
   if (geom.arrowhead) primitives.push({ kind: 'arrowHead', x: geom.arrowhead.x, y: geom.arrowhead.y, angle: geom.arrowhead.angle, color: geom.arrowhead.long ? LONG_ARROWHEAD_COLOR : color, length: geom.arrowhead.length, width: geom.arrowhead.width });
   if (isFiltered && geom.signAnchor) primitives.push({ kind: 'zigzag', segments: buildFilteredSignSegments(geom.signAnchor), color });
   if (flags.showMessageNames && showLabels && dep.messageName) primitives.push({ kind: 'label', x: geom.labelAnchor.x + (isFiltered ? 7 : 0), y: geom.labelAnchor.y, text: dep.messageName, color, align: 'left' });
-  if (isBookmarked) primitives.push({ kind: 'bookmarkMark', x: geom.labelAnchor.x, y: geom.labelAnchor.y, color: bookmarkMarkColor(theme) });
+  // See the isSelf branch above for why this bound is needed here specifically.
+  if (dependencyBookmarkId && geom.labelAnchor.x >= 0 && geom.labelAnchor.x <= viewport.canvasWidth) primitives.push({ kind: 'bookmarkMark', x: geom.labelAnchor.x, y: geom.labelAnchor.y, color: bookmarkMarkColor(theme), bookmarkId: dependencyBookmarkId });
 }

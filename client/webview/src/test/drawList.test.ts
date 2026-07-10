@@ -383,7 +383,7 @@ test('no selection/hover params: no emphasis primitives (axisSelectionMark, bold
 test('bookmarkedEventNumbers: a bookmarked event gets a bookmarkMark near its event mark', () => {
   const viewport = baseViewport();
   const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
-  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: events3, dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, bookmarkedEventNumbers: new Set([2]) });
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: events3, dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, bookmarkedEventNumbers: new Map([[2, 'bm1']]) });
   const marks = primitives.filter((p) => p.kind === 'bookmarkMark') as { x: number; y: number; color: string }[];
   assert.strictEqual(marks.length, 1);
   assert.strictEqual(marks[0].color, theme.bookmarkColor);
@@ -397,14 +397,14 @@ test('bookmarkedEventNumbers omitted/empty: no bookmarkMark primitives at all', 
 test('bookmarkedModuleIds: a bookmarked axis gets a bookmarkMark at its axis line', () => {
   const viewport = baseViewport();
   const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
-  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, bookmarkedModuleIds: new Set([2]) });
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, bookmarkedModuleIds: new Map([[2, 'bm1']]) });
   assert.strictEqual(primitives.filter((p) => p.kind === 'bookmarkMark').length, 1);
 });
 
 test('bookmarkedModuleIds: the flag sits in its own reserved slot immediately before the axis label, not at a fixed gutter-edge x', () => {
   const viewport = baseViewport();
   const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
-  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, bookmarkedModuleIds: new Set([2]) });
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, bookmarkedModuleIds: new Map([[2, 'bm1']]) });
   const mark = primitives.find((p) => p.kind === 'bookmarkMark') as { x: number; y: number };
   const label = primitives.find((p): p is Extract<typeof p, { kind: 'axisLabel' }> => p.kind === 'axisLabel' && p.moduleId === 2)!;
   assert.strictEqual(mark.y, label.y, 'flag sits on the same row as the label');
@@ -417,7 +417,7 @@ test('bookmarkedDependencyKeys: a dependency matching bookmarkDependencyKey(caus
   const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
   const dep = dep_({ causeEventNumber: 1, consequenceEventNumber: 2, causeModuleId: 1, causeTc: 0, consequenceModuleId: 2, consequenceTc: 10, messageId: 7 });
   const key = bookmarkDependencyKey(1, 2, 7);
-  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: events3, dependencies: [dep], methodCalls: [], axesLayout, ticks: [], theme, bookmarkedDependencyKeys: new Set([key]) });
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: events3, dependencies: [dep], methodCalls: [], axesLayout, ticks: [], theme, bookmarkedDependencyKeys: new Map([[key, 'bm1']]) });
   assert.strictEqual(primitives.filter((p) => p.kind === 'bookmarkMark').length, 1);
 });
 
@@ -425,7 +425,7 @@ test('bookmarkedDependencyKeys: a non-matching key produces no bookmarkMark', ()
   const viewport = baseViewport();
   const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
   const dep = dep_({ causeEventNumber: 1, consequenceEventNumber: 2, causeModuleId: 1, causeTc: 0, consequenceModuleId: 2, consequenceTc: 10, messageId: 7 });
-  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: events3, dependencies: [dep], methodCalls: [], axesLayout, ticks: [], theme, bookmarkedDependencyKeys: new Set([bookmarkDependencyKey(1, 2, 8)]) });
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: events3, dependencies: [dep], methodCalls: [], axesLayout, ticks: [], theme, bookmarkedDependencyKeys: new Map([[bookmarkDependencyKey(1, 2, 8), 'bm1']]) });
   assert.strictEqual(primitives.filter((p) => p.kind === 'bookmarkMark').length, 0);
 });
 
@@ -434,7 +434,7 @@ test('bookmarkedMethodCallKeys: a call matching bookmarkMethodCallKey(eventNumbe
   const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
   const call: RenderMethodCall = { eventNumber: 1, tc: 5, sourceModuleId: 1, targetModuleId: 2, methodName: 'sendPacket', entryIndex: 3 };
   const key = bookmarkMethodCallKey(1, 3);
-  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: events3, dependencies: [], methodCalls: [call], axesLayout, ticks: [], theme, bookmarkedMethodCallKeys: new Set([key]) });
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: events3, dependencies: [], methodCalls: [call], axesLayout, ticks: [], theme, bookmarkedMethodCallKeys: new Map([[key, 'bm1']]) });
   assert.strictEqual(primitives.filter((p) => p.kind === 'bookmarkMark').length, 1);
 });
 
@@ -442,14 +442,14 @@ test('bookmarkedMethodCallKeys: a non-matching key produces no bookmarkMark', ()
   const viewport = baseViewport();
   const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
   const call: RenderMethodCall = { eventNumber: 1, tc: 5, sourceModuleId: 1, targetModuleId: 2, methodName: 'sendPacket', entryIndex: 3 };
-  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: events3, dependencies: [], methodCalls: [call], axesLayout, ticks: [], theme, bookmarkedMethodCallKeys: new Set([bookmarkMethodCallKey(1, 4)]) });
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: events3, dependencies: [], methodCalls: [call], axesLayout, ticks: [], theme, bookmarkedMethodCallKeys: new Map([[bookmarkMethodCallKey(1, 4), 'bm1']]) });
   assert.strictEqual(primitives.filter((p) => p.kind === 'bookmarkMark').length, 0);
 });
 
 test('positionBookmarkTcs: a Position bookmark gets a bookmarkMark near the top ruler at its resolved tc', () => {
   const viewport = baseViewport(); // pixelsPerTc=10, leftTc=0 -> tc=5 maps to GUTTER_LEFT_WIDTH + 50px
   const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
-  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, positionBookmarkTcs: [5] });
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, positionBookmarks: [{ id: 'bm1', tc: 5 }] });
   const marks = primitives.filter((p) => p.kind === 'bookmarkMark') as { x: number; y: number; color: string }[];
   assert.strictEqual(marks.length, 1);
   assert.strictEqual(marks[0].x, GUTTER_LEFT_WIDTH + 50);
@@ -465,7 +465,7 @@ test('positionBookmarkTcs omitted/empty: no bookmarkMark primitives at all', () 
 test('positionBookmarkTcs: a tc outside the visible canvas is culled', () => {
   const viewport = baseViewport();
   const axesLayout = deriveAxes(new Set([1, 2, 3]), null, viewport.canvasHeight - GUTTER_TOP_HEIGHT);
-  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, positionBookmarkTcs: [-100000] });
+  const primitives = buildDrawList({ timelineMode: TimelineMode.SIMULATION_TIME, viewport, events: [], dependencies: [], methodCalls: [], axesLayout, ticks: [], theme, positionBookmarks: [{ id: 'bm1', tc: -100000 }] });
   assert.strictEqual(primitives.filter((p) => p.kind === 'bookmarkMark').length, 0);
 });
 

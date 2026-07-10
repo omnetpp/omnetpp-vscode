@@ -137,7 +137,10 @@ hostHandler = async (m) => {
   switch (m.type) {
     case 'ready':
       deliver({
-        type: 'init', fileUri: pathToFileURL(elogPath).toString(), persistedState: undefined,
+        type: 'init', fileUri: pathToFileURL(elogPath).toString(),
+        // "Bookmark Info" starts on, so the notes-layer smoke check below doesn't need to
+        // drive the Show/Hide context menu (a second floating DOM overlay) headlessly.
+        persistedState: { version: 2, displayFlags: { showBookmarkInfo: true } },
         settings: { sequenceChart: {}, eventlog: {} },
         summary, selection: { eventNumbers: [] }, bookmarks: [], filterParams: null,
       });
@@ -189,6 +192,30 @@ await new Promise((r) => setTimeout(r, 200));
 const expectedBegin = summary.firstEventNumber === 0 && summary.lastEventNumber > 0 ? 1 : summary.firstEventNumber;
 const homeSelection = toHost.filter((m) => m.type === 'selectionChanged').pop();
 assert(homeSelection && homeSelection.selection.eventNumbers.length === 1 && homeSelection.selection.eventNumbers[0] === expectedBegin, `Home button selects the first navigable event (#${expectedBegin}), got ${JSON.stringify(homeSelection?.selection.eventNumbers)}`);
+
+// "Bookmark Info" note boxes: deliver a bookmarksChanged for the event Home just centered
+// on (so its flag glyph -- and therefore the note's anchor -- is on screen), plus an
+// Axis-kind bookmark on the root module (exercising the separate pinned-left-gutter
+// packing pool -- see chartMain.ts's repositionBookmarkNotes()). Note positioning reads
+// the PREVIOUS frame's drawn bookmarkMark primitives (a deliberate one-frame lag), so this
+// needs two render ticks after the bookmarks appear: one to actually draw the flags, one
+// to read them back.
+deliver({
+  type: 'bookmarksChanged',
+  bookmarks: [
+    { id: 'bm1', kind: 'Event', label: 'Test Bookmark', eventNumber: expectedBegin, note: '**bold** note' },
+    { id: 'bm2', kind: 'Axis', label: 'Axis Bookmark', modulePath: 'SingleQueue' },
+  ],
+});
+await new Promise((r) => setTimeout(r, 200));
+document.getElementById('zoomIn').click();
+document.getElementById('zoomOut').click();
+await new Promise((r) => setTimeout(r, 200));
+const noteTitles = [...document.querySelectorAll('.elog-bookmark-note-title')].map((el) => el.textContent);
+assert(noteTitles.includes('Axis Bookmark'), `Axis-kind bookmark also gets a note box (separate pinned packing pool), got titles: ${JSON.stringify(noteTitles)}`);
+assert(noteTitles.includes('Test Bookmark'), `bookmark note box renders its title, got titles: ${JSON.stringify(noteTitles)}`);
+const noteBodyEl = document.querySelector('.elog-bookmark-note-body');
+assert(noteBodyEl && noteBodyEl.innerHTML.includes('<strong>bold</strong>'), `bookmark note body renders markdown, got ${noteBodyEl?.innerHTML}`);
 
 toHost.length = 0;
 document.getElementById('gotoEnd').click();
