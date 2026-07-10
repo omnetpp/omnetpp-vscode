@@ -1,3 +1,10 @@
+/**
+ * Ported from: ui/org.omnetpp.ned.core/src/org/omnetpp/ned/core/refactoring/RefactoringTools.java
+ * (`renameNedType`, `renameSubmodule`, `renameGate`, `renameParam`, and the
+ * `computeAffectedTypes*` helpers): same operation set (type/submodule/gate/param
+ * rename with project-wide reference updates), same rule that the most-base
+ * declaring type is the canonical owner of a renameable member.
+ */
 import type { Node as SyntaxNode } from 'web-tree-sitter';
 import type { Tree } from 'web-tree-sitter';
 import type { Position, Range, TextEdit, WorkspaceEdit } from '../model/location';

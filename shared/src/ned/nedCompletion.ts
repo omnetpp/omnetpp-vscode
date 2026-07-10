@@ -17,7 +17,11 @@ const SECTION_KEYWORDS = ['parameters', 'gates', 'types', 'submodules', 'connect
 const PARAM_TYPE_KEYWORDS = ['int', 'double', 'string', 'bool', 'object', 'xml', 'volatile'];
 const GATE_TYPE_KEYWORDS = ['input', 'output', 'inout'];
 
-/** Doc-comment keywords (after `@`) and HTML tags (after `<`), as in the IDE. */
+/**
+ * Doc-comment keywords (after `@`) and HTML tags (after `<`), as in the IDE.
+ * Ported from: ui/org.omnetpp.common/src/org/omnetpp/common/editor/text/Keywords.java
+ * (`DOC_KEYWORDS`, `DOC_TAGS`, `NED_GATE_TYPES`, `NED_PARAM_TYPES` fields).
+ */
 export const DOC_KEYWORDS = [
   'author', 'bug', 'date', 'see', 'since', 'todo', 'version', 'warning', 'page', 'titlepage',
 ];

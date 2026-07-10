@@ -35,6 +35,13 @@ export class ConfigRegistry {
     }
   }
 
+  /**
+   * Mirrors `ConfigRegistry.getOption()` / `lookupWildcardConfigOption()`
+   * (ui/org.omnetpp.inifile.core/src/org/omnetpp/inifile/core/model/ConfigRegistry.java):
+   * look up the exact name first, then fall back to a `%`-wildcard option whose
+   * name matches once its numeric placeholder(s) are substituted, e.g. `seed-%-mt`
+   * for `seed-3-mt`.
+   */
   get(name: string): ConfigOption | undefined {
     const exact = this.byName.get(name);
     if (exact) return exact;

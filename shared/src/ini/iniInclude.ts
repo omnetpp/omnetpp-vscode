@@ -13,6 +13,12 @@ import { sectionCanonicalName } from './iniDocument';
  * include-expansion (textual) order. Every entry/section carries a `sourceUri`
  * pointing at the file it physically lives in, so callers can keep diagnostics
  * and navigation attached to the right file.
+ *
+ * Adapted from OMNeT++'s `InifileReader::doReadFile()` / `getOrCreateSection()`
+ * (src/envir/inifilereader.cc): same textual, recursive include expansion and
+ * same-canonical-name section merging. The include-cycle guard is reimplemented
+ * as a `visited` set of resolved URIs here, in place of the C++ side's
+ * `includedFiles` vector that is pushed/popped around each recursive call.
  */
 
 /**

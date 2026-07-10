@@ -42,6 +42,9 @@ async function readRootPackage(fs: FileSystem, dir: string): Promise<string> {
  * (one folder per line; lines starting with '-' are excluded packages) and
  * `.nedexclusions`, falling back to treating the workspace folder as a single root.
  * Additional roots from the `nedPath` setting are appended.
+ *
+ * Ported from the Eclipse IDE's `ProjectUtils.readNedFoldersFile()`:
+ *   omnetpp-dev/ui/org.omnetpp.common/src/org/omnetpp/common/project/ProjectUtils.java
  */
 export async function discoverProjectLayout(
   fs: FileSystem,

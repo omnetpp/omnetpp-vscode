@@ -25,9 +25,10 @@ import {
 } from './nedAst';
 
 /**
- * Runtime type information for a NED type. Mirrors the C++ NedTypeInfo:
- * lazily resolves the transitive extends/interface closure and merged
- * (inherited + local) parameter/gate/submodule maps.
+ * Runtime type information for a NED type. Mirrors the C++ NedTypeInfo
+ * (src/nedxml/nedtypeinfo.{h,cc}): lazily resolves the transitive
+ * extends/interface closure and merged (inherited + local) parameter/gate/
+ * submodule maps.
  */
 export class NedTypeInfo {
   private gen = -1;

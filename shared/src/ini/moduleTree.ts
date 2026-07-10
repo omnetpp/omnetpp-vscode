@@ -140,6 +140,12 @@ function resolveLikeTypeNames(
  * `<default("X")>` bracket. The chosen name is resolved against the `like` interface;
  * if it resolves the subtree is expanded fully (no longer `open`), with `typename`
  * kept as an assignable pseudo-parameter.
+ *
+ * The precedence order mirrors `cNedNetworkBuilder::getSubmoduleTypeName()`
+ * (src/sim/netbuilder/cnednetworkbuilder.cc), as re-derived for the IDE's static
+ * (non-simulation) resolution by `InifileUtils.resolveLikeExpr()`
+ * (ui/org.omnetpp.inifile.core/src/org/omnetpp/inifile/core/model/InifileUtils.java),
+ * which cites the same C++ function as its source of truth.
  */
 export function expandNetwork(
   cache: NedResourceCache,

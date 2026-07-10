@@ -43,10 +43,10 @@ moduleinterface IUnidirectionalChannel { gates: input i; output o; }
 export const BUILTIN_URI = 'omnetpp-builtin:ned';
 
 /**
- * Project-wide index of NED types. Mirrors the C++ NedResourceCache:
- * stores types by fully-qualified name and resolves unqualified names with the
- * exact precedence (inner type → exact import → same package → wildcard import),
- * and fully-qualified names directly.
+ * Project-wide index of NED types. Mirrors the C++ NedResourceCache
+ * (src/nedxml/nedresourcecache.{h,cc}): stores types by fully-qualified name
+ * and resolves unqualified names with the exact precedence (inner type → exact
+ * import → same package → wildcard import), and fully-qualified names directly.
  *
  * File/type storage, tree ownership, and the generation contract live in
  * {@link ResourceCacheBase}.
@@ -218,7 +218,11 @@ export class NedResourceCache extends ResourceCacheBase<NedFileInfo, NedTypeInfo
   }
 }
 
-/** Convert a NED import spec with wildcards to an anchored RegExp. */
+/**
+ * Convert a NED import spec with wildcards to an anchored RegExp.
+ * Ported from: ui/org.omnetpp.ned.model/src/org/omnetpp/ned/model/ex/NedElementUtilEx.java,
+ * `importToRegex` (identical transform: `.` → `\.`, `**` → `.*`, `*` → `[^.]*`).
+ */
 export function importToRegex(spec: string): RegExp {
   let out = '';
   for (let i = 0; i < spec.length; i++) {

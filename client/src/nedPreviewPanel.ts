@@ -23,7 +23,12 @@ const NED_LANG = 'OMNeT++ NED';
 const VIEW_TYPE = 'omnetpp.nedPreview';
 const PIN_KEY = 'omnetpp.preview.pinnedFqName';
 
-/** Fallback scale (percent) when a sized icon variant file does not exist. */
+/**
+ * Fallback scale (percent) when a sized icon variant file does not exist.
+ * Matches the Eclipse IDE's predefined `Scaling` percentages (VS=-40, S=-60,
+ * L=-150, VL=-250; sign is a direction flag, magnitude is the percentage):
+ *   omnetpp-dev/ui/org.omnetpp.common/src/org/omnetpp/common/image/Scaling.java
+ */
 const SIZE_SCALE: Record<string, number> = { vs: 40, s: 60, l: 150, vl: 250 };
 
 /** What the webview needs to know about one resolved icon. */
@@ -321,6 +326,11 @@ export class NedPreviewPanel {
   }
 
   // ---- icon resolution (Eclipse search order) ----
+  // Ported from the Eclipse IDE's icon resolution in `ImageFactory` (three-tier
+  // search: project images/ → installDir/images/ → plugin-bundled; .png then
+  // .gif lookup); sized variants use the `Scaling` percentages (see SIZE_SCALE
+  // above):
+  //   omnetpp-dev/ui/org.omnetpp.common/src/org/omnetpp/common/image/ImageFactory.java
 
   /** Ordered icon search roots: project images/ dirs → installDir/images → bundled. */
   private iconRoots(): { dir: string; bundled: boolean }[] {

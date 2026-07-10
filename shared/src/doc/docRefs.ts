@@ -16,6 +16,11 @@ export type DocRefResolver = (name: string) => DocRefTarget | undefined;
  * VS Code's `file://…#L<line>,<col>` form opens the file at the symbol. The
  * tilde is markup, so it never appears in the rendered text; refs that don't
  * resolve degrade to the bare name.
+ *
+ * Same cross-reference syntax as the Eclipse IDE's
+ * `DocumentationGenerator.replaceTypeReferences()` (the `INeddocProcessor`
+ * passed to `NedCommentFormatter.makeHtmlDocu()` — see `commentAst.ts`):
+ *   omnetpp-dev/ui/org.omnetpp.neddoc/src/org/omnetpp/neddoc/DocumentationGenerator.java
  */
 export function linkifyDocRefs(doc: string, resolve: DocRefResolver): string {
   return doc.replace(

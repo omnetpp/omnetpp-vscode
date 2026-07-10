@@ -28,7 +28,13 @@ function cplusplusNames(tree: Tree): Set<string> {
   return names;
 }
 
-/** Local MSG diagnostics: duplicate type names and duplicate field names. */
+/**
+ * Local MSG diagnostics: duplicate type names and duplicate field names.
+ *
+ * The duplicate-field check corresponds to `MsgAnalyzer`'s `findField()`/"Field
+ * '%s' already exists" check (src/nedxml/msganalyzer.cc, in `extractFields()`,
+ * ~line 176); the rest of this file's checks are not ports.
+ */
 export function msgLocalDiagnostics(tree: Tree): Diagnostic[] {
   const out: Diagnostic[] = [];
   const seenTypes = new Set<string>();
@@ -60,6 +66,11 @@ export function msgLocalDiagnostics(tree: Tree): Diagnostic[] {
  * Unknown-type diagnostics (warnings) for MSG field/base types. Conservative:
  * only flags unqualified (non-`::`) names that are not primitives, declared MSG
  * types, builtin sim types, forward declarations, or cplusplus-introduced names.
+ *
+ * Parallels the unresolved-`typeQName` check in `MsgAnalyzer::analyzeField()`
+ * (src/nedxml/msganalyzer.cc, ~line 429-433: `lookupExistingClassName()` returns
+ * empty -> "unknown type '%s' for field '%s'..."); this port narrows the check to
+ * unqualified names and widens it with a warning severity instead of an error.
  */
 export function msgSemanticDiagnostics(cache: MsgResourceCache, uri: string): Diagnostic[] {
   const file = cache.getFile(uri);

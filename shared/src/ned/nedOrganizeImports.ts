@@ -8,6 +8,11 @@ import { isTypeRefNode, enclosingContextFor } from './nedNavigation';
  * Compute the edits to organize a NED file's imports: add imports for unqualified
  * cross-package type references, drop unused explicit imports, keep wildcards, and
  * sort. Returns [] when nothing changes.
+ *
+ * Ported from: ui/org.omnetpp.ned.core/src/org/omnetpp/ned/core/refactoring/RefactoringTools.java
+ * (`organizeImports`, `resolveImport`): same algorithm shape — walk unqualified
+ * type references, resolve each against local/toplevel candidates, keep existing
+ * wildcard imports, and drop unused explicit ones.
  */
 export function organizeImports(cache: NedResourceCache, file: NedFileInfo, tree: Tree): TextEdit[] {
   // 1. collect fq-names needed by unqualified references in this file

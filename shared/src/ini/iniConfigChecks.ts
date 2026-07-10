@@ -10,7 +10,18 @@ export type KeyClass =
   | { kind: 'unknown-config' }
   | { kind: 'param-assignment' };
 
-/** Classify an ini key as a section directive, config option, or param assignment. */
+/**
+ * Classify an ini key as a section directive, config option, or param assignment.
+ *
+ * Mirrors the three-way split of OMNeT++'s `KeyType.getKeyType()`
+ * (ui/org.omnetpp.inifile.core/src/org/omnetpp/inifile/core/model/KeyType.java):
+ * no dot -> CONFIG, dot but not a per-object option -> PARAM, dot and a
+ * per-object option -> PER_OBJECT_CONFIG. Adapted: the Java version tells PARAM
+ * from PER_OBJECT_CONFIG by a hyphen heuristic on the key (with a `**.typename`
+ * exception carve-out), whereas this port instead looks the trailing segment up
+ * in the registry's per-object option set (`ConfigOption.isPerObject()`, same
+ * package, `ConfigOption.java`), which is exact rather than heuristic.
+ */
 export function classifyKey(registry: ConfigRegistry, key: string): KeyClass {
   if (INI_SECTION_DIRECTIVES.has(key)) return { kind: 'directive' };
   if (!key.includes('.')) {

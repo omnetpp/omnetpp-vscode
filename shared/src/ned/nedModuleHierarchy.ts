@@ -8,6 +8,12 @@ import { nodeRange } from '../parser/treeUtils';
  * A node in the type-centric Module Hierarchy: the focused type (root) or one of
  * its submodules. Inherited submodules carry `inheritedFrom` and are labelled
  * `Super::name`. Children are fetched lazily per node via its `typeFqName`.
+ *
+ * The submodule-tree traversal and `like`-type resolution during recursive
+ * expansion below are adapted from
+ * ui/org.omnetpp.ned.core/src/org/omnetpp/ned/core/NedTreeTraversal.java /
+ * IModuleTreeVisitor.java; the `Super::name` inherited-label formatting is
+ * original to this view, not a port.
  */
 export interface ModuleHierNode {
   /** Display label: submodule name, or `Super::name` when inherited. */

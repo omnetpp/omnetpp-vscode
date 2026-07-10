@@ -1,3 +1,14 @@
+/**
+ * Semantic (cross-reference) checks for NED types: extends/implements targets,
+ * submodule/connection type resolution, and gate-direction/vector compatibility.
+ *
+ * Ported from:
+ *   ui/org.omnetpp.ned.core/src/org/omnetpp/ned/core/NedValidator.java
+ *     (validateElement for Submodule/Connection/Extends/InterfaceName, validateConnGate)
+ *   src/nedxml/nedcrossvalidator.cc
+ * Same check set and near-identical diagnostic messages (e.g. "is not a module
+ * type", "is not a channel type", "is not a [module/channel] interface").
+ */
 import type { Node as SyntaxNode } from 'web-tree-sitter';
 import { Diagnostic, DiagnosticSeverity } from '../model/location';
 import { nodeRange, firstChildOfType } from '../parser/treeUtils';

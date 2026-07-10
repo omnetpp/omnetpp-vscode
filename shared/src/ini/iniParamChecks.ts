@@ -129,6 +129,13 @@ export function iniParamDiagnostics(
   return out;
 }
 
+/**
+ * Mirrors OMNeT++'s `InifileAnalyzer.validateParamKey()`
+ * (ui/org.omnetpp.inifile.core/src/org/omnetpp/inifile/core/model/InifileAnalyzer.java):
+ * same check sequence — unit consistency across matched parameters, data-type
+ * mismatch, `@enum` value validation, then the redundant-assignment info when the
+ * value equals the NED default — and largely the same diagnostic wording.
+ */
 function typeCheck(
   e: { value: string; valueRange: Range; key: string },
   matched: ParamSlot[],

@@ -55,7 +55,12 @@ function isEscaped(s: string, i: number): boolean {
   return n % 2 === 1;
 }
 
-/** The text before the first *unquoted* `#`; the whole line if there is none. */
+/**
+ * The text before the first *unquoted* `#`; the whole line if there is none.
+ *
+ * Mirrors the quote-aware scan of OMNeT++'s `InifileParser.findEndContent()`
+ * (ui/org.omnetpp.inifile.core/src/org/omnetpp/inifile/core/model/InifileParser.java).
+ */
 export function stripComment(line: string): string {
   let inStr = false;
   for (let i = 0; i < line.length; i++) {
@@ -108,6 +113,15 @@ export function configNameAtHeaderLine(line: string): string | undefined {
  * Parses an OMNeT++ ini file into sections and entries. Handles `#` comments,
  * backslash line continuation, `[General]`/`[Config X]` sections, `include`
  * directives, and recognizes `extends=` for section inheritance.
+ *
+ * Adapted from OMNeT++'s `InifileParser`
+ * (ui/org.omnetpp.inifile.core/src/org/omnetpp/inifile/core/model/InifileParser.java):
+ * comment/quote-aware line scanning and section-heading parsing (incl. the
+ * optional `Config ` prefix) follow the Java parser's rules, but this is not a
+ * byte-faithful port — line continuation here is bracket-depth-based
+ * (`bracketDepth`, for unterminated `[`/`{`/`(` object/array values) in addition
+ * to a trailing backslash, whereas the Java parser instead continues on any
+ * indented following line (leading space/tab) besides the backslash case.
  */
 export function parseIni(text: string, uri?: string): IniDocument {
   const lines = text.split(/\r?\n/);
