@@ -337,7 +337,7 @@ function buildConnFigure(
     faint: lineWidth === 0,
     style: (ds.getAsEnum(Prop.CONNECTION_STYLE) as ConnFigure['style']) ?? 'solid',
     arrowhead: !conn.bidirectional,
-    marker: conn.isLoop && conn.isConditional ? 'o?' : conn.isLoop ? 'o' : conn.isConditional ? '?' : undefined,
+    marker: (conn.loops.length ? 'o' : '') + (conn.conditions.length ? '?' : '') || undefined,
     tooltip: connTooltip(conn),
   };
 
@@ -365,8 +365,8 @@ function connTooltip(conn: PreviewConnection): string {
     `${end(conn.srcModule, conn.srcGate)} ${arrow} ${conn.channelTypeName ? `${conn.channelTypeName} ${arrow} ` : ''}${end(conn.destModule, conn.destGate)}`,
   ];
   if (conn.inheritedFrom) lines.push(`inherited from ${conn.inheritedFrom}`);
-  if (conn.isLoop) lines.push('parametric: inside a for loop');
-  if (conn.isConditional) lines.push('conditional: has an if guard');
+  if (conn.loops.length) lines.push(`for ${conn.loops.join(', ')}`);
+  if (conn.conditions.length) lines.push(`conditional: ${conn.conditions.join(' && ')}`);
   const tt = displayStringFromChain(conn.displayChain).getAsString(Prop.TOOLTIP);
   if (tt) lines.push(tt);
   return lines.join('\n');

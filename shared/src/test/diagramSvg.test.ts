@@ -48,8 +48,8 @@ const CONN = {
   srcGate: 'g',
   destGate: 'g',
   bidirectional: false,
-  isLoop: false,
-  isConditional: false,
+  loops: [] as string[],
+  conditions: [] as string[],
   displayChain: [] as string[],
   declUri: 'file:///net.ned',
   declRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
@@ -86,6 +86,24 @@ test('diagramSvg: structure, layers, tooltips and hit-test attributes', async ()
   assert.equal(areas.length, 2);
   assert.equal(areas[0].targetFqName, 'demo.Node');
   assert.ok(areas[0].x >= 0 && areas[0].y >= 0, 'area coords must be in image space');
+});
+
+test('diagramLayout: connection tooltip and marker show loop specs and conditions', async () => {
+  const model = await buildDiagram(
+    scene({
+      submodules: [sub('a', ['p=100,100']), sub('b', ['p=300,100'])],
+      connections: [
+        { ...CONN, srcModule: 'a', destModule: 'b', loops: ['i=0..n-1', 'j=0..m-1'], conditions: ['i!=j', 'n>1'] },
+        { ...CONN, srcModule: 'b', destModule: 'a', conditions: ['x'] },
+      ],
+    }),
+    opts(),
+  );
+  const [both, condOnly] = model.connections;
+  assert.equal(both.tooltip, 'a.g --> b.g\nfor i=0..n-1, j=0..m-1\nconditional: i!=j && n>1');
+  assert.equal(both.marker, 'o?');
+  assert.equal(condOnly.tooltip, 'b.g --> a.g\nconditional: x');
+  assert.equal(condOnly.marker, '?');
 });
 
 test('diagramSvg: linkHrefFor wraps submodules in <a href>', async () => {

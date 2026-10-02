@@ -105,8 +105,8 @@ test('preview scene: compound module with submodules, inherited members, connect
   assert.equal(border.srcGate, 'ext');
   assert.equal(border.destModule, 'a');
 
-  assert.ok(loop.isLoop);
-  assert.ok(loop.isConditional);
+  assert.deepEqual(loop.loops, ['i=0..6']);
+  assert.deepEqual(loop.conditions, ['i!=3']);
   assert.ok(!loop.bidirectional);
 
   // icons: everything referenced after resolution, incl. the `is=s` variant

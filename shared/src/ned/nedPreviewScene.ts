@@ -45,10 +45,10 @@ export interface PreviewConnection {
   destModule?: string;
   destGate: string;
   bidirectional: boolean;
-  /** Inside a `for` loop — rendered with the `o` midpoint marker. */
-  isLoop: boolean;
-  /** Has an `if` condition — rendered with the `?` midpoint marker. */
-  isConditional: boolean;
+  /** Enclosing `for` loop specs (`i=0..n-1`); non-empty ⇒ the `o` midpoint marker. */
+  loops: string[];
+  /** `if` condition expressions; non-empty ⇒ the `?` midpoint marker. */
+  conditions: string[];
   /** Simple name of the supertype this connection is inherited from, if any. */
   inheritedFrom?: string;
   /** The channel type name, as written (for tooltips), if any. */
@@ -249,8 +249,8 @@ function buildConnection(
     destModule: conn.dest.module,
     destGate: conn.dest.gate,
     bidirectional: conn.direction === '<-->',
-    isLoop: conn.loops.length > 0,
-    isConditional: conn.conditions.length > 0,
+    loops: conn.loops.map((l) => `${l.paramName}=${l.from}..${l.to}`),
+    conditions: conn.conditions,
     inheritedFrom: owner !== focus ? owner.simpleName : undefined,
     channelTypeName: conn.channel?.typeName,
     displayChain: chain,

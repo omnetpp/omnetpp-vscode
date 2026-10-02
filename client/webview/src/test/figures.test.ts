@@ -43,8 +43,8 @@ const CONN = {
   srcGate: 'g',
   destGate: 'g',
   bidirectional: false,
-  isLoop: false,
-  isConditional: false,
+  loops: [] as string[],
+  conditions: [] as string[],
   displayChain: [] as string[],
   declUri: 'file:///net.ned',
   declRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
@@ -97,7 +97,7 @@ test('figures: vector label, connection styles, markers and bundling', async () 
     connections: [
       { ...CONN, srcModule: 'n', destModule: 'm', displayChain: ['ls=blue,2,dashed'] },
       { ...CONN, srcModule: 'n', destModule: 'm' },
-      { ...CONN, srcModule: 'n', destModule: 'n', isLoop: true, isConditional: true }, // self, in a loop with if
+      { ...CONN, srcModule: 'n', destModule: 'n', loops: ['i=0..2'], conditions: ['i!=1'] }, // self, in a loop with if
       { ...CONN, destModule: 'm', bidirectional: true }, // from the parent border
     ],
   });
