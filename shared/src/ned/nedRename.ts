@@ -11,7 +11,16 @@ import type { Position, Range, TextEdit, WorkspaceEdit } from '../model/location
 import { nodeRange } from '../parser/treeUtils';
 import { NedResourceCache, NedFileInfo } from './nedResourceCache';
 import { NedTypeInfo } from './nedTypeInfo';
-import { referenceAt, isTypeRefNode, enclosingContextFor, memberRefAt, memberReferences } from './nedNavigation';
+import {
+  referenceAt,
+  isTypeRefNode,
+  enclosingContextFor,
+  memberRefAt,
+  memberReferences,
+  nedTypeTargetAt,
+  typeStringAt,
+  typeStringReferences,
+} from './nedNavigation';
 import { nameNode } from './nedAst';
 
 /** Range of the last dotted segment of a (possibly qualified) name node. */
@@ -34,14 +43,20 @@ export function nedPrepareRename(
   pos: Position,
 ): { range: Range; placeholder: string } | null {
   const ref = referenceAt(cache, file, tree, pos);
-  if (!ref) return null;
-  if (ref.kind === 'typedef') {
+  if (ref?.kind === 'typedef') {
     return { range: nodeRange(ref.nameNode), placeholder: ref.info.simpleName };
   }
-  if (ref.kind === 'typeref' && ref.target) {
+  if (ref?.kind === 'typeref' && ref.target) {
     return { range: lastSegmentRange(ref.refNode), placeholder: ref.target.simpleName };
   }
-  return null;
+  if (ref) return null;
+  const hit = nedTypeTargetAt(cache, file, tree, pos);
+  return hit ? { range: trailingRange(hit.range, hit.target.simpleName), placeholder: hit.target.simpleName } : null;
+}
+
+/** The trailing `name`-long part of a single-line range (the last segment of a dotted name). */
+function trailingRange(r: Range, name: string): Range {
+  return { start: { line: r.end.line, character: r.end.character - name.length }, end: r.end };
 }
 
 /** The renameable member (param/gate/submodule) at a position, if any. */
@@ -85,6 +100,9 @@ function buildTypeRenameEdits(
       for (let i = 0; i < n.namedChildCount; i++) stack.push(n.namedChild(i)!);
     }
   }
+  for (const loc of typeStringReferences(cache, target)) {
+    add(loc.uri, { range: trailingRange(loc.range, target.simpleName), newText: newName });
+  }
   return { changes };
 }
 
@@ -96,9 +114,9 @@ export function nedRename(
   pos: Position,
   newName: string,
 ): WorkspaceEdit | null {
-  const ref = referenceAt(cache, file, tree, pos);
-  const target: NedTypeInfo | undefined = ref ? (ref.kind === 'typeref' ? ref.target : ref.info) : undefined;
+  const target = nedTypeTargetAt(cache, file, tree, pos)?.target;
   if (!target) {
+    if (referenceAt(cache, file, tree, pos) || typeStringAt(cache, file, tree, pos)) return null;
     // member (param/gate/submodule) rename
     const m = memberRefAt(cache, file, tree, pos);
     if (!m) return null;

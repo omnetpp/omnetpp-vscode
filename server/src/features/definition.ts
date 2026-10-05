@@ -22,9 +22,10 @@ import {
   keySegmentPrefixAt,
   isWildcardSegment,
   extendsLabelAt,
+  mergedSection,
 } from '@omnetpp/shared';
 import type { ParsedDocument } from '../documentModel';
-import { IndexContext, typeDeclLoc, asDefResult, dedupLocations, mergedIniDoc, mergedSection } from './context';
+import { IndexContext, typeDeclLoc, asDefResult, dedupLocations, mergedIniDoc } from './context';
 
 export function computeDefinition(
   parsed: ParsedDocument,

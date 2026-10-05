@@ -2,7 +2,8 @@ import { test } from 'bun:test';
 import assert from 'node:assert';
 import { getParsers, posOf } from './helpers';
 import { BUILTIN_NED_TEXT, BUILTIN_URI, NedResourceCache } from '../ned/nedResourceCache';
-import { nedHover, nedTypeStringDefinition } from '../ned/nedNavigation';
+import { nedHover, nedReferences, nedTypeStringDefinition } from '../ned/nedNavigation';
+import { nedPrepareRename, nedRename, nedRenameType } from '../ned/nedRename';
 import type { Location } from '../model/location';
 
 async function build(files: Record<string, { text: string; pkg?: string }>) {
@@ -178,4 +179,65 @@ module Host {
   assert.ok(many);
   assert.match(many!.markdown, /lib\.Twin/);
   assert.match(many!.markdown, /other\.Twin/);
+});
+
+// ---- references + rename ----
+
+const USES = `package app;
+module Host {
+  parameters:
+    x.typename = "Twin";
+    y.typename = "lib.Twin";
+    **.typename = "AppA";
+  submodules:
+    a: <default("AppA")> like lib.IApp;
+    b: <"Twin"> like lib.IOther;
+    x: <> like lib.IApp;
+    y: <> like lib.IApp;
+}`;
+
+function rangesIn(locs: Location[], uri: string, text: string): string[] {
+  const lines = text.split('\n');
+  return locs
+    .filter((l) => l.uri === uri)
+    .map((l) => lines[l.range.start.line].slice(l.range.start.character, l.range.end.character))
+    .sort();
+}
+
+test('references to a type include the strings that can denote it', async () => {
+  const cache = await build({ 'file:///lib.ned': { text: LIB }, 'file:///other.ned': { text: OTHER }, 'file:///h.ned': { text: USES } });
+  const lib = cache.getFile('file:///lib.ned')!;
+  const twinRefs = nedReferences(cache, lib, lib.tree, posOf(LIB, 'Twin like'), false);
+  assert.deepEqual(rangesIn(twinRefs, 'file:///h.ned', USES), ['Twin', 'lib.Twin'], 'b selects other.Twin (IOther)');
+  const appRefs = nedReferences(cache, lib, lib.tree, posOf(LIB, 'AppA like'), false);
+  assert.deepEqual(rangesIn(appRefs, 'file:///h.ned', USES), ['AppA', 'AppA'], 'the wildcard slot is ambiguous, still included');
+});
+
+test('references from a type string list the type usages', async () => {
+  const cache = await build({ 'file:///lib.ned': { text: LIB }, 'file:///other.ned': { text: OTHER }, 'file:///h.ned': { text: USES } });
+  const h = cache.getFile('file:///h.ned')!;
+  const refs = nedReferences(cache, h, h.tree, posOf(USES, '"Twin";', 1), true);
+  assert.deepEqual(rangesIn(refs, 'file:///lib.ned', LIB), ['Twin']);
+  assert.deepEqual(rangesIn(refs, 'file:///h.ned', USES), ['Twin', 'lib.Twin']);
+});
+
+test('rename of a type changes the last segment of the strings that can denote it', async () => {
+  const cache = await build({ 'file:///lib.ned': { text: LIB }, 'file:///other.ned': { text: OTHER }, 'file:///h.ned': { text: USES } });
+  const edit = nedRenameType(cache, 'lib.Twin', 'Triplet')!;
+  const edits = edit.changes!['file:///h.ned'] ?? [];
+  const lines = USES.split('\n');
+  const renamed = edits.map((e) => lines[e.range.start.line].slice(e.range.start.character, e.range.end.character)).sort();
+  assert.deepEqual(renamed, ['Twin', 'Twin'], 'x (simple) and y (qualified, last segment only); not b');
+  assert.ok(edits.every((e) => e.newText === 'Triplet'));
+});
+
+test('prepare-rename and rename work from a type string with a single match', async () => {
+  const cache = await build({ 'file:///lib.ned': { text: LIB }, 'file:///other.ned': { text: OTHER }, 'file:///h.ned': { text: USES } });
+  const h = cache.getFile('file:///h.ned')!;
+  const pos = posOf(USES, 'lib.Twin"', 5);
+  const prep = nedPrepareRename(cache, h, h.tree, pos);
+  assert.equal(prep?.placeholder, 'Twin');
+  const edit = nedRename(cache, h, h.tree, pos, 'Triplet')!;
+  assert.ok(edit.changes!['file:///lib.ned']?.length, 'declaration renamed');
+  assert.equal(nedPrepareRename(cache, h, h.tree, posOf(USES, '"AppA";', 1)), null, 'ambiguous string: no rename');
 });

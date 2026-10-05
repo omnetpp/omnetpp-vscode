@@ -46,7 +46,7 @@ import { nedMissingImplClassDiagnostics } from '../xref/xrefDiagnostics';
 import { impactOf } from '../xref/impact';
 import { paramContainerSimpleNames } from '../xref/paramContainers';
 import { nedTypeSym, msgTypeSym } from '../xref/symbolId';
-import { memberKeyFor, type MemberKind } from '../ned/nedNavigation';
+import { memberKeyFor, typeStringReferences, type MemberKind } from '../ned/nedNavigation';
 import type { ConnectionInfo, ConnEndpoint } from '../ned/nedAst';
 import type { Node as SyntaxNode } from 'web-tree-sitter';
 
@@ -295,13 +295,17 @@ const TOOLS: ToolDef[] = [
   },
   {
     name: 'find_type_usages',
-    description: 'Locations where a NED type is referenced project-wide (as a base type, like-interface, or submodule type).',
+    description:
+      'Locations where a NED type is referenced project-wide (as a base type, like-interface, submodule or channel type, or a type-name string such as `<default("X")>` or `typename = "X"`).',
     inputSchema: {
       type: 'object',
       properties: { fqName: { type: 'string' } },
       required: ['fqName'],
     },
-    handler: (a, ctx) => ctx.db.findTypeUsages(a.fqName),
+    handler: (a, ctx) => {
+      const t = ctx.nedCache.getType(a.fqName);
+      return [...ctx.db.findTypeUsages(a.fqName), ...(t ? typeStringReferences(ctx.nedCache, t) : [])];
+    },
   },
   {
     name: 'get_connections',

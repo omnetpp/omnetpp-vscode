@@ -628,6 +628,21 @@ function typeStringInterface(
   return { iface: typenameSlotInterface(cache, cache.typeInfoForNode(owner, file.uri), path) };
 }
 
+/** Classify and resolve a `string` node as a type-name string; null if it is not one. */
+function typeStringRefOf(cache: NedResourceCache, file: NedFileInfo, str: SyntaxNode): TypeStringRef | null {
+  const ctx = typeStringInterface(cache, file, str);
+  if (!ctx) return null;
+  const inner = str.text.slice(1, -1);
+  const name = inner.trim();
+  if (!/^[A-Za-z_][\w.]*$/.test(name) || str.startPosition.row !== str.endPosition.row) return null;
+  let candidates = ctx.iface ? cache.lookupLikeCandidates(name, ctx.iface) : [];
+  if (!candidates.length) candidates = cache.lookupLikeCandidates(name, undefined);
+  const line = str.startPosition.row;
+  const start = str.startPosition.column + 1 + inner.indexOf(name);
+  const range = { start: { line, character: start }, end: { line, character: start + name.length } };
+  return { name, range, iface: ctx.iface, candidates };
+}
+
 export function typeStringAt(
   cache: NedResourceCache,
   file: NedFileInfo,
@@ -635,19 +650,50 @@ export function typeStringAt(
   pos: Position,
 ): TypeStringRef | null {
   const str = namedDescendantAt(tree, pos);
-  if (!str || str.type !== 'string') return null;
-  const ctx = typeStringInterface(cache, file, str);
-  if (!ctx) return null;
-  const name = str.text.slice(1, -1).trim();
-  if (!/^[A-Za-z_][\w.]*$/.test(name)) return null;
-  let candidates = ctx.iface ? cache.lookupLikeCandidates(name, ctx.iface) : [];
-  if (!candidates.length) candidates = cache.lookupLikeCandidates(name, undefined);
-  const r = nodeRange(str);
-  const range = {
-    start: { line: r.start.line, character: r.start.character + 1 },
-    end: { line: r.end.line, character: r.end.character - 1 },
-  };
-  return { name, range, iface: ctx.iface, candidates };
+  return str?.type === 'string' ? typeStringRefOf(cache, file, str) : null;
+}
+
+/**
+ * Type-name strings (see {@link typeStringAt}) project-wide that can denote
+ * `target`: its fully qualified name, or its simple name when `target` is among
+ * the candidates (also when the name is ambiguous). Ranges cover the name only.
+ */
+export function typeStringReferences(cache: NedResourceCache, target: NedTypeInfo): Location[] {
+  const out: Location[] = [];
+  for (const f of cache.allFiles()) {
+    if (!f.tree.rootNode.text.includes(target.simpleName)) continue;
+    const stack: SyntaxNode[] = [f.tree.rootNode];
+    while (stack.length) {
+      const n = stack.pop()!;
+      if (n.type === 'string') {
+        if (n.text.slice(1, -1).trim().split('.').pop() === target.simpleName) {
+          const ref = typeStringRefOf(cache, f, n);
+          if (ref?.candidates.some((t) => t.fqName === target.fqName)) out.push({ uri: f.uri, range: ref.range });
+        }
+        continue;
+      }
+      for (let i = 0; i < n.namedChildCount; i++) stack.push(n.namedChild(i)!);
+    }
+  }
+  return out;
+}
+
+/**
+ * The NED type referenced at a position — by a type definition, a type reference,
+ * or a type-name string that resolves to exactly one type — with the range of
+ * the name written there.
+ */
+export function nedTypeTargetAt(
+  cache: NedResourceCache,
+  file: NedFileInfo,
+  tree: Tree,
+  pos: Position,
+): { target: NedTypeInfo; range: Range } | null {
+  const ref = referenceAt(cache, file, tree, pos);
+  if (ref?.kind === 'typedef') return { target: ref.info, range: nodeRange(ref.nameNode) };
+  if (ref?.kind === 'typeref') return ref.target ? { target: ref.target, range: nodeRange(ref.refNode) } : null;
+  const sref = typeStringAt(cache, file, tree, pos);
+  return sref?.candidates.length === 1 ? { target: sref.candidates[0], range: sref.range } : null;
 }
 
 /** Go-to-definition targets for a type-name string literal (see {@link typeStringAt}). */
@@ -834,8 +880,9 @@ export function nedReferences(
   includeDeclaration: boolean,
   typeUsages?: (fqName: string) => Location[],
 ): Location[] {
-  const ref = referenceAt(cache, file, tree, pos);
-  if (!ref) {
+  const hit = nedTypeTargetAt(cache, file, tree, pos);
+  if (!hit) {
+    if (referenceAt(cache, file, tree, pos) || typeStringAt(cache, file, tree, pos)) return [];
     // member (param/gate/submodule) references
     const mref = memberRefAt(cache, file, tree, pos);
     if (mref) {
@@ -844,8 +891,7 @@ export function nedReferences(
     }
     return [];
   }
-  const target = ref.kind === 'typeref' ? ref.target : ref.info;
-  if (!target) return [];
+  const target = hit.target;
 
   const out: Location[] = [];
   if (includeDeclaration) {
@@ -858,6 +904,7 @@ export function nedReferences(
     // fallback: scan every file for type references resolving to target
     for (const f of cache.allFiles()) collectTypeRefs(cache, f, target, out);
   }
+  out.push(...typeStringReferences(cache, target));
   return out;
 }
 

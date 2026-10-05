@@ -18,9 +18,10 @@ import {
   typenameCandidates,
   typenameSlotInterfaces,
   typeCandidatesHover,
+  mergedSection,
 } from '@omnetpp/shared';
 import type { ParsedDocument } from '../documentModel';
-import { IndexContext, baseName, plural, mergedIniDoc, mergedSection } from './context';
+import { IndexContext, baseName, plural, mergedIniDoc } from './context';
 
 /**
  * VS Code's hover widget reserves a minimum height (~4 rows): content shorter

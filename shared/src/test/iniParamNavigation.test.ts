@@ -15,6 +15,8 @@ import {
   modulesAtPath,
   typenameTypeTargets,
   typenameSlotInterfaces,
+  iniTypenameReferences,
+  IniResourceCache,
   iniParamDefinition,
   type IniDocument,
   type IniSection,
@@ -284,4 +286,17 @@ test('typenameTypeTargets filters a simple name by the like interface of the tar
 test('typenameTypeTargets falls back to every module type with that name when the slot is unknown', async () => {
   const { nedCache, doc } = await makeTwinCtx();
   assert.deepEqual(twinTargets(nedCache, doc, '**.nowhere.typename'), ['file:///net.ned', 'file:///other.ned']);
+});
+
+test('iniTypenameReferences finds typename values that can denote a type', async () => {
+  const { nedCache } = await makeTwinCtx();
+  const iniCache = new IniResourceCache();
+  iniCache.addFile('file:///omnetpp.ini', TWIN_INI);
+  const lines = TWIN_INI.split('\n');
+  const texts = (fq: string) =>
+    iniTypenameReferences(iniCache, nedCache, nedCache.getType(fq)!).map(
+      (l) => `${l.range.start.line}:${lines[l.range.start.line].slice(l.range.start.character, l.range.end.character)}`,
+    );
+  assert.deepEqual(texts('Twin'), ['3:Twin', '5:Twin'], 'app slot (IApp) and the unresolved slot');
+  assert.deepEqual(texts('other.Twin'), ['4:Twin', '5:Twin'], 'o slot (IOther) and the unresolved slot');
 });

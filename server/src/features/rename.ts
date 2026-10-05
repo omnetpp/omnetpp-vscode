@@ -6,7 +6,6 @@ import {
   Range,
   findParamAssignments,
   memberRefAt,
-  referenceAt,
   msgTypeAt,
   msgRenameRangeAt,
   nedPrepareRename,
@@ -16,6 +15,8 @@ import {
   msgTypeSym,
   nodeRange,
   msgNameNode,
+  nedTypeTargetAt,
+  iniTypenameReferences,
 } from '@omnetpp/shared';
 import type { ParsedDocument } from '../documentModel';
 import type { IndexContext } from './context';
@@ -74,13 +75,15 @@ function nedRenameCrossLang(parsed: ParsedDocument, pos: Position, newName: stri
   if (!base) return null;
   const changes: Record<string, TextEdit[]> = base.changes ?? {};
 
-  // NED type rename → INI `network=` values that name it
-  const tref = referenceAt(ctx.nedCache, file, file.tree, pos);
-  const fq = tref?.kind === 'typedef' ? tref.info.fqName : tref?.kind === 'typeref' ? tref.target?.fqName : undefined;
-  if (fq) {
-    const oldSimple = fq.split('.').pop()!;
-    for (const e of ctx.db.index.inboundOf(nedTypeSym(fq))) {
+  // NED type rename → INI `network=` and `typename` values that name it
+  const target = nedTypeTargetAt(ctx.nedCache, file, file.tree, pos)?.target;
+  if (target) {
+    const oldSimple = target.simpleName;
+    for (const e of ctx.db.index.inboundOf(nedTypeSym(target.fqName))) {
       if (e.kind === 'ini-network') addEdit(changes, e.src.uri, trailingNameEdit(e.src, oldSimple, newName));
+    }
+    for (const loc of iniTypenameReferences(ctx.iniCache, ctx.nedCache, target)) {
+      addEdit(changes, loc.uri, trailingNameEdit(loc, oldSimple, newName));
     }
   }
 

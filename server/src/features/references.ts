@@ -4,7 +4,6 @@ import {
   Range,
   findParamAssignments,
   memberRefAt,
-  referenceAt,
   msgTypeAt,
   resolveNetworkType,
   effectiveParamModules,
@@ -15,9 +14,17 @@ import {
   paramContainerSimpleNames,
   posInRange,
   iniEntryAt,
+  nedTypeTargetAt,
+  iniTypenameReferences,
+  typeStringReferences,
+  typenameCandidates,
+  typenameSlotInterfaces,
+  leafSegment,
+  mergedSection,
+  type NedTypeInfo,
 } from '@omnetpp/shared';
 import type { ParsedDocument } from '../documentModel';
-import { IndexContext, dedupLocations } from './context';
+import { IndexContext, dedupLocations, mergedIniDoc } from './context';
 
 export function computeReferences(
   parsed: ParsedDocument,
@@ -55,10 +62,12 @@ function nedReferencesAt(parsed: ParsedDocument, pos: Position, includeDeclarati
       refs.push({ uri: a.uri, range: a.keyRange });
     }
   }
-  // a NED type used as a network also has references in INI `network=` keys
-  const tref = referenceAt(ctx.nedCache, file, file.tree, pos);
-  const fq = tref?.kind === 'typedef' ? tref.info.fqName : tref?.kind === 'typeref' ? tref.target?.fqName : undefined;
-  if (fq) refs.push(...ctx.db.findConfigsForNetwork(fq));
+  // a NED type is also referenced from INI `network=` keys and `typename` values
+  const target = nedTypeTargetAt(ctx.nedCache, file, file.tree, pos)?.target;
+  if (target) {
+    refs.push(...ctx.db.findConfigsForNetwork(target.fqName));
+    refs.push(...iniTypenameReferences(ctx.iniCache, ctx.nedCache, target));
+  }
   return refs;
 }
 
@@ -96,13 +105,16 @@ function iniReferencesAt(
       if (!posInRange(pos, e.keyRange) && !posInRange(pos, e.valueRange)) continue;
       const net = resolveNetworkType(ctx.nedCache, e.value);
       if (!net) return [];
-      const refs = [...ctx.db.findTypeUsages(net.fqName), ...ctx.db.findConfigsForNetwork(net.fqName)];
-      if (includeDeclaration) {
-        const decl = ctx.db.index.defOf(nedTypeSym(net.fqName))?.decl;
-        if (decl) refs.push(decl);
-      }
-      return refs;
+      return nedTypeReferences(net, includeDeclaration, ctx, fallbackNetwork);
     }
+  }
+  // typename value naming exactly one type: that type's references.
+  const tn = iniEntryAt(parsed.ini, pos);
+  if (tn && leafSegment(tn.entry.key) === 'typename' && posInRange(pos, tn.entry.valueRange)) {
+    const merged = mergedIniDoc(parsed.ini, parsed.uri, ctx);
+    const ifaces = typenameSlotInterfaces(merged, ctx.nedCache, mergedSection(merged, tn.section), tn.entry.key, fallbackNetwork);
+    const candidates = typenameCandidates(ctx.nedCache, tn.entry.value, ifaces);
+    return candidates.length === 1 ? nedTypeReferences(candidates[0], includeDeclaration, ctx, fallbackNetwork) : [];
   }
   // param-assignment key: matched NED declarations + other INI assignment lines.
   // Restrict to the parameters this key actually WINS (OMNeT++ first-match-wins).
@@ -126,6 +138,21 @@ function iniReferencesAt(
     return dedupLocations(refs);
   }
   return [];
+}
+
+/** Every reference to a NED type: NED type positions and strings, INI `network=` and `typename` values. */
+function nedTypeReferences(target: NedTypeInfo, includeDeclaration: boolean, ctx: IndexContext, fallbackNetwork?: string): Location[] {
+  const refs = [
+    ...ctx.db.findTypeUsages(target.fqName),
+    ...typeStringReferences(ctx.nedCache, target),
+    ...ctx.db.findConfigsForNetwork(target.fqName),
+    ...iniTypenameReferences(ctx.iniCache, ctx.nedCache, target, fallbackNetwork),
+  ];
+  if (includeDeclaration) {
+    const decl = ctx.db.index.defOf(nedTypeSym(target.fqName))?.decl;
+    if (decl) refs.push(decl);
+  }
+  return refs;
 }
 
 /** Highlight occurrences of the type under the cursor within the current document. */

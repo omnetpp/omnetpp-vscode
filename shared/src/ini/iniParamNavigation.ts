@@ -5,9 +5,14 @@ import { nameNode } from '../ned/nedAst';
 import { nodeRange } from '../parser/treeUtils';
 import { ConfigRegistry } from './configRegistry';
 import type { IniDocument, IniSection, IniEntry } from './iniDocument';
+import { sectionCanonicalName } from './iniDocument';
+import { expandIncludes } from './iniInclude';
+import { leafSegment } from './iniKeySegments';
 import type { IniResourceCache } from './iniResourceCache';
 import { iniKeyToRegex } from './keyMatch';
 import {
+  findSection,
+  generalSection,
   effectiveNetwork,
   resolveNetworkType,
   collectTypenameEntries,
@@ -82,6 +87,46 @@ export function typenameSlotInterfaces(
   const out: NedTypeInfo[] = [];
   for (const m of getExpansion(cache, net, bindings).modules) {
     if (m.likeInterface && re.test(m.norm) && !out.includes(m.likeInterface)) out.push(m.likeInterface);
+  }
+  return out;
+}
+
+/**
+ * `section` as seen in the include-expanded document `merged` (matched by name),
+ * so that its inherited scope (base network, typenames, entries) is visible.
+ */
+export function mergedSection(merged: IniDocument, section: IniSection): IniSection {
+  return (section.type === 'general' ? generalSection(merged) : findSection(merged, sectionCanonicalName(section))) ?? section;
+}
+
+/**
+ * INI `*.typename` values project-wide that can denote `target` (see
+ * {@link typenameCandidates}; an ambiguous simple name counts). Ranges cover the
+ * name only, without the quotes.
+ */
+export function iniTypenameReferences(
+  iniCache: IniResourceCache,
+  nedCache: NedResourceCache,
+  target: NedTypeInfo,
+  fallbackNetwork?: string,
+): Location[] {
+  const out: Location[] = [];
+  for (const { uri, doc, text } of iniCache.allDocs()) {
+    if (!text.includes(target.simpleName)) continue;
+    let merged: IniDocument | undefined;
+    for (const section of doc.sections) {
+      for (const e of section.entries) {
+        if (leafSegment(e.key) !== 'typename') continue;
+        const name = e.value.replace(/^"|"$/g, '').trim();
+        if (name.split('.').pop() !== target.simpleName || e.valueRange.start.line !== e.valueRange.end.line) continue;
+        merged ??= doc.includes.length ? expandIncludes(uri, (u) => iniCache.getDoc(u)) : doc;
+        const ifaces = typenameSlotInterfaces(merged, nedCache, mergedSection(merged, section), e.key, fallbackNetwork);
+        if (!typenameCandidates(nedCache, e.value, ifaces).some((t) => t.fqName === target.fqName)) continue;
+        const start = e.valueRange.start.character + e.value.indexOf(name);
+        const line = e.valueRange.start.line;
+        out.push({ uri, range: { start: { line, character: start }, end: { line, character: start + name.length } } });
+      }
+    }
   }
   return out;
 }
