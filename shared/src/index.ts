@@ -38,6 +38,7 @@ export {
   nedTypeStringDefinition,
   typeStringAt,
   type TypeStringRef,
+  typeCandidatesHover,
   type HoverResult,
   nedDocRefResolver,
   nedHover,
@@ -201,6 +202,8 @@ export { iniParamDiagnostics } from './ini/iniParamChecks';
 export { addMissingKeys } from './ini/iniParamCodeActions';
 export {
   typenameTypeTargets,
+  typenameCandidates,
+  typenameSlotInterfaces,
   modulesAtPath,
   matchedModules,
   iniParamDefinition,

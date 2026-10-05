@@ -781,7 +781,7 @@ export function nedHover(
       return { markdown: md, range: pref.range };
     }
     const sref = typeStringAt(cache, file, tree, pos);
-    if (sref) return typeStringHover(cache, sref, external);
+    if (sref) return typeCandidatesHover(cache, sref.name, sref.candidates, sref.range, external);
     return null;
   }
   const info = ref.kind === 'typeref' ? ref.target : ref.info;
@@ -802,17 +802,23 @@ function typeHoverMarkdown(cache: NedResourceCache, info: NedTypeInfo, external?
   return md;
 }
 
-function typeStringHover(
+/**
+ * Hover for a type name written as a string: the type itself when it resolves to
+ * one type, else the list of matching types (or "unknown").
+ */
+export function typeCandidatesHover(
   cache: NedResourceCache,
-  ref: TypeStringRef,
+  name: string,
+  candidates: NedTypeInfo[],
+  range: Range,
   external?: DocRefResolver,
 ): HoverResult {
-  if (ref.candidates.length === 0) return { markdown: `Unknown type \`${ref.name}\``, range: ref.range };
-  if (ref.candidates.length > 1) {
-    const list = ref.candidates.map((t) => `- \`${t.fqName}\``).join('\n');
-    return { markdown: `\`${ref.name}\` matches ${ref.candidates.length} types:\n\n${list}`, range: ref.range };
+  if (candidates.length === 0) return { markdown: `Unknown type \`${name}\``, range };
+  if (candidates.length > 1) {
+    const list = candidates.map((t) => `- \`${t.fqName}\``).join('\n');
+    return { markdown: `\`${name}\` matches ${candidates.length} types:\n\n${list}`, range };
   }
-  return { markdown: typeHoverMarkdown(cache, ref.candidates[0], external), range: ref.range };
+  return { markdown: typeHoverMarkdown(cache, candidates[0], external), range };
 }
 
 /**

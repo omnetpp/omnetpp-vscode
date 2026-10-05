@@ -6,6 +6,7 @@ import {
   iniParamDefinition,
   modulesAtPath,
   typenameTypeTargets,
+  typenameSlotInterfaces,
   classifyKey,
   IniDocument,
   nedDefinition,
@@ -14,9 +15,6 @@ import {
   nedClassRefAt,
   msgDefinition,
   sectionName,
-  findSection,
-  generalSection,
-  expandIncludes,
   resolveIncludeUri,
   posInRange,
   iniEntryAt,
@@ -26,7 +24,7 @@ import {
   extendsLabelAt,
 } from '@omnetpp/shared';
 import type { ParsedDocument } from '../documentModel';
-import { IndexContext, typeDeclLoc, asDefResult, dedupLocations } from './context';
+import { IndexContext, typeDeclLoc, asDefResult, dedupLocations, mergedIniDoc, mergedSection } from './context';
 
 export function computeDefinition(
   parsed: ParsedDocument,
@@ -36,11 +34,7 @@ export function computeDefinition(
 ): Location | Location[] | null {
   // INI has no tree — handle it before the tree guard below.
   if (parsed.language === 'ini' && parsed.ini) {
-    const ownIni = parsed.ini;
-    const merged = ownIni.includes.length
-      ? expandIncludes(parsed.uri, (u) => (u === parsed.uri ? ownIni : ctx.getIniDoc(u)))
-      : ownIni;
-    return iniDefinition(ownIni, merged, parsed.uri, pos, ctx, fallbackNetwork);
+    return iniDefinition(parsed.ini, mergedIniDoc(parsed.ini, parsed.uri, ctx), parsed.uri, pos, ctx, fallbackNetwork);
   }
   if (!parsed.tree) return null;
   if (parsed.language === 'ned') {
@@ -103,9 +97,7 @@ function iniDefinition(
   const { entry } = hit;
   // resolve against the include-expanded document (base network/typenames/entries);
   // the cursor's own section is matched there by name so its inherited scope is seen.
-  const section =
-    (hit.section.type === 'general' ? generalSection(merged) : findSection(merged, sectionName(hit.section))) ??
-    hit.section;
+  const section = mergedSection(merged, hit.section);
 
   // network= : either the key or the value navigates to the network type.
   if (entry.key === 'network') {
@@ -125,7 +117,8 @@ function iniDefinition(
 
   // typename value: the string denotes a NED type — navigate to it.
   if (leafSegment(entry.key) === 'typename' && posInRange(pos, entry.valueRange)) {
-    return asDefResult(typenameTypeTargets(ctx.nedCache, entry.value));
+    const ifaces = typenameSlotInterfaces(merged, ctx.nedCache, section, entry.key, fallbackNetwork);
+    return asDefResult(typenameTypeTargets(ctx.nedCache, entry.value, ifaces));
   }
 
   // dotted key: segment-aware navigation for both real params and per-object

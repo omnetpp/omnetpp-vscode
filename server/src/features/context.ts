@@ -6,7 +6,12 @@ import {
   SemanticDatabase,
   IniResourceCache,
   IniDocument,
+  IniSection,
   NedTypeInfo,
+  expandIncludes,
+  generalSection,
+  findSection,
+  sectionName,
   nodeRange,
   nameNode,
 } from '@omnetpp/shared';
@@ -52,3 +57,16 @@ export function dedupLocations(locs: Location[]): Location[] {
 }
 
 export const plural = (n: number) => (n === 1 ? '' : 's');
+
+/** The include-expanded document of an INI file. */
+export function mergedIniDoc(ini: IniDocument, uri: string, ctx: IndexContext): IniDocument {
+  return ini.includes.length ? expandIncludes(uri, (u) => (u === uri ? ini : ctx.getIniDoc(u))) : ini;
+}
+
+/**
+ * `section` as seen in the include-expanded document `merged` (matched by name),
+ * so that its inherited scope (base network, typenames, entries) is visible.
+ */
+export function mergedSection(merged: IniDocument, section: IniSection): IniSection {
+  return (section.type === 'general' ? generalSection(merged) : findSection(merged, sectionName(section))) ?? section;
+}

@@ -14,9 +14,13 @@ import {
   HoverResult,
   posInRange,
   iniEntryAt,
+  leafSegment,
+  typenameCandidates,
+  typenameSlotInterfaces,
+  typeCandidatesHover,
 } from '@omnetpp/shared';
 import type { ParsedDocument } from '../documentModel';
-import { IndexContext, baseName, plural } from './context';
+import { IndexContext, baseName, plural, mergedIniDoc, mergedSection } from './context';
 
 /**
  * VS Code's hover widget reserves a minimum height (~4 rows): content shorter
@@ -91,6 +95,14 @@ function computeHoverRaw(
       // only the parameters this key WINS (OMNeT++ first-match-wins precedence)
       const matches = effectiveParamModules(parsed.ini, ctx.nedCache, hit.section, hit.entry, ctx.registry, fallbackNetwork);
       if (matches.length) return paramAssignmentHover(matches, hit.entry.key, hit.entry.keyRange);
+    }
+    const typeName = hit?.entry.value.replace(/^"|"$/g, '').trim() ?? '';
+    if (hit && leafSegment(hit.entry.key) === 'typename' && posInRange(pos, hit.entry.valueRange) && /^[A-Za-z_][\w.]*$/.test(typeName)) {
+      const merged = mergedIniDoc(parsed.ini, parsed.uri, ctx);
+      const section = mergedSection(merged, hit.section);
+      const ifaces = typenameSlotInterfaces(merged, ctx.nedCache, section, hit.entry.key, fallbackNetwork);
+      const candidates = typenameCandidates(ctx.nedCache, hit.entry.value, ifaces);
+      return typeCandidatesHover(ctx.nedCache, typeName, candidates, hit.entry.valueRange, msgDocRefResolver(ctx.msgCache));
     }
     return null;
   }

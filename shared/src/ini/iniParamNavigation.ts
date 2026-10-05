@@ -25,24 +25,64 @@ function moduleDeclLocation(typeInfo: NedTypeInfo): Location {
 }
 
 /**
- * Declaration location(s) of the NED type named by a `*.typename = "T"` value.
- * The value is a string but denotes a type, resolved by OMNeT++'s `like` rules:
- * a qualified name maps to that exact type; an unqualified (simple) name maps to
- * every module type sharing it (callers may present a picker). Inner types and
- * non-module types (interfaces, channels) are excluded.
+ * The NED types a `*.typename = "T"` value can denote, resolved by OMNeT++'s `like`
+ * rules: a qualified name maps to that exact type; a simple name maps to every
+ * type sharing it that implements one of `slotIfaces` (the `like` interfaces of
+ * the slots the key targets, see {@link typenameSlotInterfaces}). With no slot
+ * interface, or no implementing match, a simple name maps to every non-inner
+ * module type sharing it.
  */
-export function typenameTypeTargets(cache: NedResourceCache, value: string): Location[] {
+export function typenameCandidates(
+  cache: NedResourceCache,
+  value: string,
+  slotIfaces: NedTypeInfo[] = [],
+): NedTypeInfo[] {
   const name = value.replace(/^"|"$/g, '').trim();
   if (!name || name.includes('$') || name.includes('{')) return [];
-  const seen = new Set<string>();
-  const out: Location[] = [];
+  const out: NedTypeInfo[] = [];
   const push = (t: NedTypeInfo | undefined) => {
-    if (!t || t.isInnerType || !t.isModuleType() || seen.has(t.fqName)) return;
-    seen.add(t.fqName);
-    out.push(moduleDeclLocation(t));
+    if (t && !out.some((o) => o.fqName === t.fqName)) out.push(t);
   };
-  if (name.includes('.')) push(cache.getType(name));
-  else for (const t of cache.allTypes()) if (t.simpleName === name) push(t);
+  for (const iface of slotIfaces) for (const t of cache.lookupLikeCandidates(name, iface)) push(t);
+  if (out.length) return out;
+  const fallback = (t: NedTypeInfo | undefined) => {
+    if (t && !t.isInnerType && t.isModuleType()) push(t);
+  };
+  if (name.includes('.')) fallback(cache.getType(name));
+  else for (const t of cache.allTypes()) if (t.simpleName === name) fallback(t);
+  return out;
+}
+
+/** Declaration locations of the {@link typenameCandidates} (callers may present a picker). */
+export function typenameTypeTargets(
+  cache: NedResourceCache,
+  value: string,
+  slotIfaces: NedTypeInfo[] = [],
+): Location[] {
+  return typenameCandidates(cache, value, slotIfaces).map(moduleDeclLocation);
+}
+
+/**
+ * The `like` interfaces of the slots a `<path>.typename` key targets in the
+ * section's network (empty when the network or the slots cannot be resolved).
+ */
+export function typenameSlotInterfaces(
+  doc: IniDocument,
+  cache: NedResourceCache,
+  section: IniSection,
+  key: string,
+  fallbackNetwork?: string,
+): NedTypeInfo[] {
+  if (!key.endsWith('.typename')) return [];
+  const netName = effectiveNetwork(doc, section) ?? fallbackNetwork;
+  const net = netName ? resolveNetworkType(cache, netName, doc.uri) : undefined;
+  if (!net) return [];
+  const re = iniKeyToRegex(key.slice(0, -'.typename'.length));
+  const bindings = buildTypenameBindings(collectTypenameEntries(doc, section));
+  const out: NedTypeInfo[] = [];
+  for (const m of getExpansion(cache, net, bindings).modules) {
+    if (m.likeInterface && re.test(m.norm) && !out.includes(m.likeInterface)) out.push(m.likeInterface);
+  }
   return out;
 }
 

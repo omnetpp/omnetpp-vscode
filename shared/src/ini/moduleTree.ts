@@ -41,6 +41,8 @@ export interface ModuleNode {
    * for keys targeting an open module.
    */
   open: boolean;
+  /** for a `like` slot: its interface (the type its `typename` must implement). */
+  likeInterface?: NedTypeInfo;
 }
 
 /** An INI `**.x.typename = "Name"` that resolved a `like` slot to >1 candidate
@@ -217,6 +219,7 @@ export function expandNetwork(
           visit(concretes[0], subPath, nextStack, depth + 1, false, myRules);
           const node = modules[idx];
           if (node && node.path === subPath) {
+            node.likeInterface = iface;
             for (let i = 1; i < concretes.length; i++) mergeParams(node, concretes[i]);
             node.params.set('typename', 'string'); // keep typename assignable
             node.defaulted.add('typename');
@@ -261,7 +264,7 @@ export function expandNetwork(
       paramMeta.set(name, { unit: info.unit, enumValues: info.enumValues, default: info.value });
       paramOwner.set(name, iface);
     }
-    modules.push({ path, norm: norm(path), type: iface?.fqName, typeInfo: iface, params, paramMeta, paramOwner, defaulted: new Set(['typename']), open: true });
+    modules.push({ path, norm: norm(path), type: iface?.fqName, typeInfo: iface, params, paramMeta, paramOwner, defaulted: new Set(['typename']), open: true, likeInterface: iface });
     // recurse into interface submodules (rare) but keep open
     if (iface && !stack.has(iface.fqName)) {
       const ns = new Set(stack).add(iface.fqName);

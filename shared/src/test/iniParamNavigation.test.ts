@@ -14,6 +14,7 @@ import {
   matchedModules,
   modulesAtPath,
   typenameTypeTargets,
+  typenameSlotInterfaces,
   iniParamDefinition,
   type IniDocument,
   type IniSection,
@@ -239,4 +240,48 @@ test('iniParamDefinition jumps to the NED parameter declaration', async () => {
   assert.equal(defs[0].uri, 'file:///net.ned');
   // Queue.capacity is declared on the `Queue` simple module
   assert.ok(defs[0].range.start.line >= 0);
+});
+
+const TWIN_NED = `
+moduleinterface IApp { }
+moduleinterface IOther { }
+simple Twin like IApp { }
+module Host { submodules: app: <> like IApp; }
+network TNet { submodules: host[2]: Host; o: <> like IOther; }
+`;
+const TWIN_OTHER_NED = `package other;
+import IOther;
+simple Twin like IOther { }
+`;
+const TWIN_INI = `
+[Config T]
+network = TNet
+**.host[*].app.typename = "Twin"
+**.o.typename = "Twin"
+**.nowhere.typename = "Twin"
+`;
+
+async function makeTwinCtx() {
+  const svc = await getParsers();
+  const nedCache = new NedResourceCache();
+  nedCache.addFile('file:///net.ned', svc.parse('ned', TWIN_NED), '');
+  nedCache.addFile('file:///other.ned', svc.parse('ned', TWIN_OTHER_NED), 'other');
+  const doc = parseIni(TWIN_INI);
+  return { nedCache, doc };
+}
+
+function twinTargets(nedCache: NedResourceCache, doc: IniDocument, key: string): string[] {
+  const ifaces = typenameSlotInterfaces(doc, nedCache, sec(doc, 'T'), key);
+  return typenameTypeTargets(nedCache, '"Twin"', ifaces).map((l) => l.uri).sort();
+}
+
+test('typenameTypeTargets filters a simple name by the like interface of the targeted slot', async () => {
+  const { nedCache, doc } = await makeTwinCtx();
+  assert.deepEqual(twinTargets(nedCache, doc, '**.host[*].app.typename'), ['file:///net.ned']);
+  assert.deepEqual(twinTargets(nedCache, doc, '**.o.typename'), ['file:///other.ned']);
+});
+
+test('typenameTypeTargets falls back to every module type with that name when the slot is unknown', async () => {
+  const { nedCache, doc } = await makeTwinCtx();
+  assert.deepEqual(twinTargets(nedCache, doc, '**.nowhere.typename'), ['file:///net.ned', 'file:///other.ned']);
 });
