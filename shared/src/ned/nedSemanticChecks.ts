@@ -10,17 +10,18 @@
  * type", "is not a channel type", "is not a [module/channel] interface").
  */
 import type { Node as SyntaxNode } from 'web-tree-sitter';
-import { Diagnostic, DiagnosticSeverity } from '../model/location';
+import { Diagnostic, DiagnosticSeverity, type Range } from '../model/location';
 import { nodeRange, firstChildOfType } from '../parser/treeUtils';
 import { NedResourceCache } from './nedResourceCache';
 import { NedTypeInfo } from './nedTypeInfo';
-import { topmostCompoundFq } from './nedNavigation';
+import { topmostCompoundFq, typeStringRefOf } from './nedNavigation';
 import {
   ConnEndpoint,
   ConnectionInfo,
   NedTypeKind,
   extendsNodes,
   implementsNodes,
+  isTypeNode,
   submoduleInfo,
   submoduleNodes,
   typenamePatternsOf,
@@ -105,7 +106,54 @@ function checkType(info: NedTypeInfo, cache: NedResourceCache, out: Diagnostic[]
     }
   }
 
+  checkTypeStrings(info, cache, out);
   checkConnections(info, cache, out);
+}
+
+/**
+ * Type-name strings (`like` expressions, `typename` assignments) in a type's own
+ * body — nested inner types are checked on their own — that name no type, or whose
+ * types do not implement the slot's `like` interface.
+ */
+function checkTypeStrings(info: NedTypeInfo, cache: NedResourceCache, out: Diagnostic[]): void {
+  const stack: SyntaxNode[] = [];
+  for (let i = info.node.namedChildCount - 1; i >= 0; i--) stack.push(info.node.namedChild(i)!);
+  while (stack.length) {
+    const n = stack.pop()!;
+    if (isTypeNode(n)) continue;
+    if (n.type === 'string') {
+      const ref = typeStringRefOf(cache, info.file, n);
+      const d = ref && !ref.optional && typeStringDiagnostic(ref.name, ref.range, ref.iface ? [ref.iface] : [], ref.candidates);
+      if (d) out.push(d);
+      continue;
+    }
+    for (let i = n.namedChildCount - 1; i >= 0; i--) stack.push(n.namedChild(i)!);
+  }
+}
+
+/**
+ * Shared by the NED and INI checks: a type-name string that names no type, or
+ * whose `candidates` implement none of the slot interfaces `ifaces` (when known).
+ */
+export function typeStringDiagnostic(
+  name: string,
+  range: Range,
+  ifaces: NedTypeInfo[],
+  candidates: NedTypeInfo[],
+): Diagnostic | null {
+  const warn = (message: string, code: string): Diagnostic => ({
+    range,
+    severity: DiagnosticSeverity.Warning,
+    message,
+    source: 'omnetpp',
+    code,
+  });
+  if (candidates.length === 0) return warn(`Unknown type '${name}'`, 'unknown-typename');
+  const implementsSlot = (t: NedTypeInfo) => t.allInterfaces().some((i) => ifaces.some((f) => f.fqName === i.fqName));
+  if (!ifaces.length || candidates.some(implementsSlot)) return null;
+  const found = name.includes('.') ? '' : ` (found: ${candidates.map((t) => t.fqName).join(', ')})`;
+  const wanted = ifaces.map((f) => `'${f.fqName}'`).join(' or ');
+  return warn(`'${name}' does not implement ${wanted}${found}`, 'typename-interface-mismatch');
 }
 
 /** Message for an ambiguous unqualified `like` type name. */

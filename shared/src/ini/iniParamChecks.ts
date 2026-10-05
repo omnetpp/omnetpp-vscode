@@ -9,6 +9,9 @@ import { parseExpression } from '../expr/exprParser';
 import { inferType, isTypeMismatch } from '../expr/infer';
 import { unitsCompatible } from '../expr/units';
 import { iniKeyToRegex, normIndices } from './keyMatch';
+import { leafSegment } from './iniKeySegments';
+import { typeStringDiagnostic } from '../ned/nedSemanticChecks';
+import type { NedTypeInfo } from '../ned/nedTypeInfo';
 import {
   effectiveNetwork,
   resolveNetworkType,
@@ -40,13 +43,12 @@ export function iniParamDiagnostics(
     // config pulled in only via include — it is linted in its own file)
     if (!section.entries.some(own)) continue;
     const netName = effectiveNetwork(doc, section);
-    if (!netName) continue;
-    const net = resolveNetworkType(cache, netName, doc.uri);
-    if (!net) continue;
-
+    const net = netName ? resolveNetworkType(cache, netName, doc.uri) : undefined;
     const typenameEntries = collectTypenameEntries(doc, section);
     const bindings = buildTypenameBindings(typenameEntries);
-    const expansion = getExpansion(cache, net, bindings);
+    const expansion = net ? getExpansion(cache, net, bindings) : undefined;
+    checkTypenameValues(section.entries.filter(own), cache, expansion, out);
+    if (!net || !expansion) continue;
     const params = paramSlots(expansion);
 
     // An INI `**.x.typename = "Name"` that matched >1 implementers of the slot's
@@ -210,5 +212,37 @@ function typeCheck(
       source: 'omnetpp',
       code: 'redundant-assignment',
     });
+  }
+}
+
+/**
+ * `*.typename = "T"` values that name no type, or no type implementing the `like`
+ * interface of the slots the key targets in `expansion` (the section's network,
+ * when it resolves). Ambiguous names are reported separately (`ambiguous-typename`).
+ */
+function checkTypenameValues(
+  entries: IniEntry[],
+  cache: NedResourceCache,
+  expansion: ExpandResult | undefined,
+  out: Diagnostic[],
+): void {
+  for (const e of entries) {
+    if (leafSegment(e.key) !== 'typename' || e.valueRange.start.line !== e.valueRange.end.line) continue;
+    const m = /^"\s*([A-Za-z_][\w.]*)\s*"$/.exec(e.value);
+    if (!m) continue;
+    const name = m[1];
+    const ifaces: NedTypeInfo[] = [];
+    if (expansion) {
+      const re = iniKeyToRegex(e.key.slice(0, -'.typename'.length));
+      for (const mod of expansion.modules) {
+        if (mod.likeInterface && re.test(mod.norm) && !ifaces.includes(mod.likeInterface)) ifaces.push(mod.likeInterface);
+      }
+    }
+    const candidates = cache.lookupLikeCandidates(name, undefined);
+    const start = e.valueRange.start.character + e.value.indexOf(name);
+    const line = e.valueRange.start.line;
+    const range = { start: { line, character: start }, end: { line, character: start + name.length } };
+    const d = typeStringDiagnostic(name, range, ifaces, candidates);
+    if (d) out.push(d);
   }
 }

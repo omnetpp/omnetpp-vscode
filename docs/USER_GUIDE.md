@@ -51,6 +51,9 @@ needing the OMNeT++ IDE.
   assignments from included files participate in resolution (so `extends=` a base config
   in another file resolves, and inherited `network=`/typenames are seen), a missing
   included file is flagged, and **`Ctrl`/`Cmd`-clicking an `include` path opens that file**.
+- **Type names written as strings** (see Navigation) are warned about when they name no
+  known type (`unknown-typename`) or no type implementing the slot's `like` interface
+  (`typename-interface-mismatch`). Arguments of `firstAvailable(...)` are not checked.
 - **Cross-reference diagnostics** with **"did-you-mean" quick-fixes** that suggest the
   closest known type/parameter name when a reference doesn't resolve.
 
@@ -89,6 +92,11 @@ type mismatches are caught immediately.
   submodule overrides), gate/submodule names in connections, `import` targets, INI
   `**.param` keys → the NED declaration, and NED `@class`/`@signal` backing classes → their
   MSG declarations.
+- **Type names written as strings** — `<"X">`, `<default("X")>` (submodules and channels),
+  NED `[path.]typename = "X"` and INI `**.typename = "X"` — support Go to Definition, Hover,
+  Find All References and Rename. A simple name resolves like OMNeT++ does: among the types
+  that implement the slot's `like` interface; if the slot is unknown, every type with that
+  name is offered. Rename changes only the last segment of a qualified name.
 - **Find All References** (`Shift+F12`) — symmetric and cross-language.
 - **Workspace Symbol search** (`Ctrl+T`) — jump to any NED/MSG type by name.
 - **Document Highlight** — every occurrence of the type under the cursor.
