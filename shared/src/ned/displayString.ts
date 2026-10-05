@@ -144,7 +144,7 @@ export const DISPLAY_TAGS: DisplayTag[] = [
     key: 'p', name: 'Position', contexts: ['compound', 'submodule'], args: [
       { name: 'x', doc: 'X position', type: 'coord' },
       { name: 'y', doc: 'Y position', type: 'coord' },
-      { name: 'arrangement', doc: 'Arrangement of submodule vectors', type: 'string', values: LAYOUT_VALUES },
+      { name: 'arrangement', doc: 'Arrangement of submodule vectors and layout groups (see the g tag)', type: 'string', values: LAYOUT_VALUES },
       { name: 'arr. par1', doc: 'Arrangement parameter (depends on arrangement)', type: 'string' },
       { name: 'arr. par2', doc: 'Arrangement parameter (depends on arrangement)', type: 'string' },
       { name: 'arr. par3', doc: 'Arrangement parameter (depends on arrangement)', type: 'string' },
@@ -152,7 +152,7 @@ export const DISPLAY_TAGS: DisplayTag[] = [
   },
   {
     key: 'g', name: 'Layout group', contexts: ['compound', 'submodule'], args: [
-      { name: 'group', doc: 'Layout group name; groups unrelated modules for layout', type: 'string' },
+      { name: 'group', doc: 'Layout group name. Submodules with the same group name are arranged together (in declaration order) by the arrangement in their p tag, like the elements of a submodule vector', type: 'string' },
     ],
   },
   {

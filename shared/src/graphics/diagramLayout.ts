@@ -1,5 +1,6 @@
 import type { PreviewConnection, PreviewScene, PreviewSubmodule } from '../protocol';
 import { BasicSpringEmbedderLayout } from './springEmbedder';
+import { arrangementOf, arrangementOffset } from './arrangement';
 import { arrowcoords, type Pt, type Rect, type RoutingConstraint, type RoutingDir } from './arrowcoords';
 import { DisplayString, Prop, displayStringFromChain } from '../ned/displayStringModel';
 import { parseColor } from './colors';
@@ -256,9 +257,30 @@ function runLayout(
     border: layoutBorder(bgWidth, bgHeight),
   });
   const byName = new Map(figures.map((f) => [f.sub.name, f]));
+
+  // "g" layout groups: members are arranged by their "p" tag arrangement like the elements
+  // of a submodule vector, indexed in declaration order (CompoundModuleLayout +
+  // SubmoduleEditPart in the IDE)
+  const groupOf = (f: SubFigure): string | undefined => f.ds.getAsString(Prop.LAYOUT_GROUP) || undefined;
+  const groups = new Map<string, SubFigure[]>();
   for (const f of figures) {
-    if (f.pinned) layout.addFixedNode(f.index, f.cx, f.cy, f.width, f.height);
-    else layout.addMovableNode(f.index, f.width, f.height);
+    const group = groupOf(f);
+    if (group) groups.set(group, [...(groups.get(group) ?? []), f]);
+  }
+  for (const f of figures) {
+    const group = groupOf(f);
+    const members = group ? groups.get(group)! : [];
+    const arrangement = arrangementOf(f.ds);
+    const offset = arrangementOffset(arrangement, group ? members.indexOf(f) : 0, members.length);
+    if (f.pinned) {
+      f.cx += offset.x;
+      f.cy += offset.y;
+      layout.addFixedNode(f.index, f.cx, f.cy, f.width, f.height);
+    } else if (!group || arrangement.arrangement === 'none') {
+      layout.addMovableNode(f.index, f.width, f.height);
+    } else {
+      layout.addAnchoredNode(f.index, `g:${group}`, offset.x, offset.y, f.width, f.height);
+    }
   }
   for (const c of connections) {
     const src = c.srcModule ? byName.get(c.srcModule) : undefined;
