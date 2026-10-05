@@ -241,3 +241,19 @@ test('prepare-rename and rename work from a type string with a single match', as
   assert.ok(edit.changes!['file:///lib.ned']?.length, 'declaration renamed');
   assert.equal(nedPrepareRename(cache, h, h.tree, posOf(USES, '"AppA";', 1)), null, 'ambiguous string: no rename');
 });
+
+test('only strings in result positions are type names; firstAvailable arguments navigate', async () => {
+  const T = `package app;
+module Host {
+  parameters:
+    string r;
+    x.typename = default(r == "AppA" ? "Twin" : "");
+  submodules:
+    x: <> like lib.IApp;
+    a: <default(firstAvailable("Missing", "AppA"))> like lib.IApp;
+}`;
+  const cache = await build({ 'file:///lib.ned': { text: LIB }, 'file:///h.ned': { text: T } });
+  assert.equal(defsAt(cache, 'file:///h.ned', T, '"AppA" ?'), null, 'comparison operand');
+  assert.deepEqual(targetUris(defsAt(cache, 'file:///h.ned', T, '"Twin"')), ['file:///lib.ned']);
+  assert.deepEqual(targetUris(defsAt(cache, 'file:///h.ned', T, '"AppA"))')), ['file:///lib.ned']);
+});

@@ -567,6 +567,30 @@ export interface TypeStringRef {
   iface?: NedTypeInfo;
   /** types with that name implementing `iface`; if there are none, every type with that name. */
   candidates: NedTypeInfo[];
+  /** an argument of `firstAvailable(...)`, which may name types that do not exist. */
+  optional: boolean;
+}
+
+const FIRST_AVAILABLE = /^firstAvailable(OrEmpty)?\s*\(/;
+
+/**
+ * Whether `str` is a value the expression rooted at `root` can evaluate to: a
+ * conditional branch (not the condition), a parenthesized expression, or a
+ * `firstAvailable(...)` argument — not, e.g., a comparison operand.
+ */
+function resultPosition(str: SyntaxNode, root: SyntaxNode): { optional: boolean } | null {
+  let optional = false;
+  for (let n = str; n.parent && n.parent.id !== root.id; n = n.parent) {
+    const p = n.parent;
+    if (p.type === 'conditional_expression' && p.namedChild(0)?.id !== n.id) continue;
+    if (p.type === 'parenthesized_expression') continue;
+    if (p.type === 'call' && FIRST_AVAILABLE.test(p.text)) {
+      optional = true;
+      continue;
+    }
+    return null;
+  }
+  return { optional };
 }
 
 function resolveLikeType(cache: NedResourceCache, file: NedFileInfo, likeTypeNode: SyntaxNode | null) {
@@ -603,33 +627,39 @@ function typeStringInterface(
   cache: NedResourceCache,
   file: NedFileInfo,
   str: SyntaxNode,
-): { iface?: NedTypeInfo } | null {
+): { iface?: NedTypeInfo; optional: boolean } | null {
   const likeExpr = ancestorOfType(str, ['like_expr']);
-  if (likeExpr) return { iface: resolveLikeType(cache, file, likeExpr.parent && firstChildOfType(likeExpr.parent, 'like_type')) };
+  if (likeExpr) {
+    const pos = resultPosition(str, likeExpr);
+    if (!pos) return null;
+    return { ...pos, iface: resolveLikeType(cache, file, likeExpr.parent && firstChildOfType(likeExpr.parent, 'like_type')) };
+  }
 
   const value = ancestorOfType(str, ['value']);
   const param = value?.parent;
-  if (!param || param.type !== 'parameter') return null;
+  if (!value || !param || param.type !== 'parameter') return null;
+  const pos = resultPosition(str, value);
+  if (!pos) return null;
   const key = (firstChildOfType(param, 'pattern') ?? firstChildOfType(param, 'name'))?.text.replace(/\s+/g, '');
   if (!key || (key !== 'typename' && !key.endsWith('.typename'))) return null;
   const path = key === 'typename' ? [] : key.slice(0, -'.typename'.length).split('.');
 
   const owner = ancestorOfType(param, ['submodule', 'connection', ...NED_TYPE_NODES]);
-  if (!owner) return {};
+  if (!owner) return { ...pos };
   if (owner.type === 'submodule' || owner.type === 'connection') {
-    if (path.length === 0) return { iface: resolveLikeType(cache, file, firstChildOfType(owner, 'like_type')) };
-    if (owner.type === 'connection') return {};
+    if (path.length === 0) return { ...pos, iface: resolveLikeType(cache, file, firstChildOfType(owner, 'like_type')) };
+    if (owner.type === 'connection') return { ...pos };
     const subType = firstChildOfType(owner, 'type');
-    if (!subType) return {};
+    if (!subType) return { ...pos };
     const type = cache.lookupType(subType.text, file, topmostCompoundFq(cache, subType, file.uri));
-    return { iface: typenameSlotInterface(cache, type, path) };
+    return { ...pos, iface: typenameSlotInterface(cache, type, path) };
   }
-  if (path.length === 0) return {};
-  return { iface: typenameSlotInterface(cache, cache.typeInfoForNode(owner, file.uri), path) };
+  if (path.length === 0) return { ...pos };
+  return { ...pos, iface: typenameSlotInterface(cache, cache.typeInfoForNode(owner, file.uri), path) };
 }
 
 /** Classify and resolve a `string` node as a type-name string; null if it is not one. */
-function typeStringRefOf(cache: NedResourceCache, file: NedFileInfo, str: SyntaxNode): TypeStringRef | null {
+export function typeStringRefOf(cache: NedResourceCache, file: NedFileInfo, str: SyntaxNode): TypeStringRef | null {
   const ctx = typeStringInterface(cache, file, str);
   if (!ctx) return null;
   const inner = str.text.slice(1, -1);
@@ -640,7 +670,7 @@ function typeStringRefOf(cache: NedResourceCache, file: NedFileInfo, str: Syntax
   const line = str.startPosition.row;
   const start = str.startPosition.column + 1 + inner.indexOf(name);
   const range = { start: { line, character: start }, end: { line, character: start + name.length } };
-  return { name, range, iface: ctx.iface, candidates };
+  return { name, range, iface: ctx.iface, candidates, optional: ctx.optional };
 }
 
 export function typeStringAt(
