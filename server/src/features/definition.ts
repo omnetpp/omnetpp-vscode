@@ -9,6 +9,7 @@ import {
   classifyKey,
   IniDocument,
   nedDefinition,
+  nedTypeStringDefinition,
   nedClassDefinition,
   nedClassRefAt,
   msgDefinition,
@@ -60,6 +61,8 @@ export function computeDefinition(
       const impl = ctx.db.findImplClass(tref.info.fqName);
       if (impl) return impl.decl;
     }
+    const typeStr = nedTypeStringDefinition(ctx.nedCache, file, file.tree, pos);
+    if (typeStr) return typeStr;
     return nedDefinition(ctx.nedCache, file, file.tree, pos);
   }
   if (parsed.language === 'msg') {

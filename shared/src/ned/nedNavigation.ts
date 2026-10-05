@@ -1,6 +1,6 @@
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
 import type { Location, Position, Range } from '../model/location';
-import { ancestorOfType, namedDescendantAt, nodeRange } from '../parser/treeUtils';
+import { ancestorOfType, firstChildOfType, namedDescendantAt, nodeRange } from '../parser/treeUtils';
 import { NedResourceCache, NedFileInfo, BUILTIN_URI } from './nedResourceCache';
 import { DocRefResolver, DocRefTarget, linkifyDocRefs } from '../doc/docRefs';
 import { NedTypeInfo } from './nedTypeInfo';
@@ -555,6 +555,113 @@ export function memberReferences(cache: NedResourceCache, key: MemberKey): Locat
   return out;
 }
 
+/**
+ * A string literal that names a NED type: anywhere inside a `like` expression
+ * (`<"X">`, `<default("X")>`, `<(c ? "X" : "Y")>`, submodule or connection channel)
+ * or in the value of a `[path.]typename` assignment.
+ */
+export interface TypeStringRef {
+  name: string;
+  range: Range;
+  /** the `like` interface of the slot the string selects a type for, when it can be determined. */
+  iface?: NedTypeInfo;
+  /** types with that name implementing `iface`; if there are none, every type with that name. */
+  candidates: NedTypeInfo[];
+}
+
+function resolveLikeType(cache: NedResourceCache, file: NedFileInfo, likeTypeNode: SyntaxNode | null) {
+  if (!likeTypeNode) return undefined;
+  return cache.lookupType(likeTypeNode.text, file, topmostCompoundFq(cache, likeTypeNode, file.uri));
+}
+
+/**
+ * The `like` interface of the slot a `<path>.typename` assignment targets, walking
+ * `path` through submodule types from `owner`. Wildcard paths, non-`like` slots, and
+ * intermediate `like` submodules (whose concrete type is unknown here) yield undefined.
+ */
+function typenameSlotInterface(
+  cache: NedResourceCache,
+  owner: NedTypeInfo | undefined,
+  path: string[],
+): NedTypeInfo | undefined {
+  let type = owner;
+  for (let i = 0; i < path.length; i++) {
+    const seg = path[i].replace(/\[[^\]]*\]$/, '');
+    if (!type || !/^[A-Za-z_]\w*$/.test(seg)) return undefined;
+    const decl = type.submoduleDecl(seg);
+    if (!decl) return undefined;
+    const sub = firstChildOfType(decl.node, 'like_type');
+    const subType = firstChildOfType(decl.node, 'type');
+    if (i === path.length - 1) return resolveLikeType(cache, decl.owner.file, sub);
+    if (!subType) return undefined;
+    type = cache.lookupType(subType.text, decl.owner.file, topmostCompoundFq(cache, subType, decl.owner.file.uri));
+  }
+  return undefined;
+}
+
+function typeStringInterface(
+  cache: NedResourceCache,
+  file: NedFileInfo,
+  str: SyntaxNode,
+): { iface?: NedTypeInfo } | null {
+  const likeExpr = ancestorOfType(str, ['like_expr']);
+  if (likeExpr) return { iface: resolveLikeType(cache, file, likeExpr.parent && firstChildOfType(likeExpr.parent, 'like_type')) };
+
+  const value = ancestorOfType(str, ['value']);
+  const param = value?.parent;
+  if (!param || param.type !== 'parameter') return null;
+  const key = (firstChildOfType(param, 'pattern') ?? firstChildOfType(param, 'name'))?.text.replace(/\s+/g, '');
+  if (!key || (key !== 'typename' && !key.endsWith('.typename'))) return null;
+  const path = key === 'typename' ? [] : key.slice(0, -'.typename'.length).split('.');
+
+  const owner = ancestorOfType(param, ['submodule', 'connection', ...NED_TYPE_NODES]);
+  if (!owner) return {};
+  if (owner.type === 'submodule' || owner.type === 'connection') {
+    if (path.length === 0) return { iface: resolveLikeType(cache, file, firstChildOfType(owner, 'like_type')) };
+    if (owner.type === 'connection') return {};
+    const subType = firstChildOfType(owner, 'type');
+    if (!subType) return {};
+    const type = cache.lookupType(subType.text, file, topmostCompoundFq(cache, subType, file.uri));
+    return { iface: typenameSlotInterface(cache, type, path) };
+  }
+  if (path.length === 0) return {};
+  return { iface: typenameSlotInterface(cache, cache.typeInfoForNode(owner, file.uri), path) };
+}
+
+export function typeStringAt(
+  cache: NedResourceCache,
+  file: NedFileInfo,
+  tree: Tree,
+  pos: Position,
+): TypeStringRef | null {
+  const str = namedDescendantAt(tree, pos);
+  if (!str || str.type !== 'string') return null;
+  const ctx = typeStringInterface(cache, file, str);
+  if (!ctx) return null;
+  const name = str.text.slice(1, -1).trim();
+  if (!/^[A-Za-z_][\w.]*$/.test(name)) return null;
+  let candidates = ctx.iface ? cache.lookupLikeCandidates(name, ctx.iface) : [];
+  if (!candidates.length) candidates = cache.lookupLikeCandidates(name, undefined);
+  const r = nodeRange(str);
+  const range = {
+    start: { line: r.start.line, character: r.start.character + 1 },
+    end: { line: r.end.line, character: r.end.character - 1 },
+  };
+  return { name, range, iface: ctx.iface, candidates };
+}
+
+/** Go-to-definition targets for a type-name string literal (see {@link typeStringAt}). */
+export function nedTypeStringDefinition(
+  cache: NedResourceCache,
+  file: NedFileInfo,
+  tree: Tree,
+  pos: Position,
+): Location[] | null {
+  const ref = typeStringAt(cache, file, tree, pos);
+  if (!ref) return null;
+  return ref.candidates.map((t) => ({ uri: t.file.uri, range: nodeRange(nameNode(t.node) ?? t.node) }));
+}
+
 export function nedDefinition(
   cache: NedResourceCache,
   file: NedFileInfo,
@@ -673,6 +780,8 @@ export function nedHover(
       }
       return { markdown: md, range: pref.range };
     }
+    const sref = typeStringAt(cache, file, tree, pos);
+    if (sref) return typeStringHover(cache, sref, external);
     return null;
   }
   const info = ref.kind === 'typeref' ? ref.target : ref.info;
@@ -683,13 +792,27 @@ export function nedHover(
     }
     return null;
   }
+  return { markdown: typeHoverMarkdown(cache, info, external), range };
+}
+
+function typeHoverMarkdown(cache: NedResourceCache, info: NedTypeInfo, external?: DocRefResolver): string {
   let md = '```ned\n' + typeSignature(info) + '\n```';
   const doc = info.documentation();
-  if (doc) {
-    const resolve = nedDocResolver(cache, info.file, info.fqName, external);
-    md += '\n\n' + linkifyDocRefs(doc, resolve);
+  if (doc) md += '\n\n' + linkifyDocRefs(doc, nedDocResolver(cache, info.file, info.fqName, external));
+  return md;
+}
+
+function typeStringHover(
+  cache: NedResourceCache,
+  ref: TypeStringRef,
+  external?: DocRefResolver,
+): HoverResult {
+  if (ref.candidates.length === 0) return { markdown: `Unknown type \`${ref.name}\``, range: ref.range };
+  if (ref.candidates.length > 1) {
+    const list = ref.candidates.map((t) => `- \`${t.fqName}\``).join('\n');
+    return { markdown: `\`${ref.name}\` matches ${ref.candidates.length} types:\n\n${list}`, range: ref.range };
   }
-  return { markdown: md, range };
+  return { markdown: typeHoverMarkdown(cache, ref.candidates[0], external), range: ref.range };
 }
 
 /**
