@@ -1,6 +1,6 @@
 import { Diagnostic, DiagnosticSeverity, Range } from '../model/location';
 import { NedResourceCache } from '../ned/nedResourceCache';
-import { ParamSlot, paramSlots } from './moduleTree';
+import { ExpandResult, ParamSlot, paramSlotsByName, paramSlots } from './moduleTree';
 import { ConfigRegistry } from './configRegistry';
 import { classifyKey } from './iniConfigChecks';
 import type { IniDocument, IniEntry } from './iniDocument';
@@ -82,7 +82,7 @@ export function iniParamDiagnostics(
       if (!own(e)) continue; // flag only assignments written in this file
       if (classifyKey(registry, e.key).kind !== 'param-assignment') continue;
       const re = iniKeyToRegex(e.key);
-      const matched = params.filter((p) => re.test(p.norm));
+      const matched = candidateSlots(e.key, expansion, params).filter((p) => re.test(p.norm));
 
       if (matched.length > 0) {
         // Only the parameters this key actually WINS are effectively assigned;
@@ -127,6 +127,18 @@ export function iniParamDiagnostics(
     }
   }
   return out;
+}
+
+/**
+ * The slots an ini key can possibly match. A key whose last segment is a plain
+ * identifier compiles to a regex anchored on `.<leaf>$`, so only the slots of that
+ * parameter name can match; testing every slot of a large network for every entry
+ * dominated the workspace diagnostics pass.
+ */
+function candidateSlots(key: string, expansion: ExpandResult, all: readonly ParamSlot[]): readonly ParamSlot[] {
+  const leaf = key.slice(key.lastIndexOf('.') + 1);
+  if (!/^[A-Za-z_]\w*$/.test(leaf)) return all;
+  return paramSlotsByName(expansion).get(leaf) ?? [];
 }
 
 /**

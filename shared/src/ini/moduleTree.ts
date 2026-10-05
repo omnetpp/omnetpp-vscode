@@ -376,8 +376,40 @@ export function networkModuleTree(cache: NedResourceCache, root: NedTypeInfo): M
   return build(root, root.simpleName, root.simpleName, new Set(), 0, false, []);
 }
 
-/** Flatten module nodes into individual parameter slots. */
-export function paramSlots(result: ExpandResult): ParamSlot[] {
+const slotsCache = new WeakMap<ExpandResult, readonly ParamSlot[]>();
+const slotsByNameCache = new WeakMap<ExpandResult, ReadonlyMap<string, readonly ParamSlot[]>>();
+
+/**
+ * Flatten module nodes into individual parameter slots. Memoized per expansion:
+ * `getExpansion` shares one result across all sections of a network, and a large
+ * network (INET hosts) has tens of thousands of slots.
+ */
+export function paramSlots(result: ExpandResult): readonly ParamSlot[] {
+  let out = slotsCache.get(result);
+  if (!out) {
+    out = buildParamSlots(result);
+    slotsCache.set(result, out);
+  }
+  return out;
+}
+
+/** The slots of `paramSlots(result)` grouped by parameter name. */
+export function paramSlotsByName(result: ExpandResult): ReadonlyMap<string, readonly ParamSlot[]> {
+  let byName = slotsByNameCache.get(result);
+  if (!byName) {
+    const m = new Map<string, ParamSlot[]>();
+    for (const slot of paramSlots(result)) {
+      const list = m.get(slot.name);
+      if (list) list.push(slot);
+      else m.set(slot.name, [slot]);
+    }
+    byName = m;
+    slotsByNameCache.set(result, byName);
+  }
+  return byName;
+}
+
+function buildParamSlots(result: ExpandResult): ParamSlot[] {
   const out: ParamSlot[] = [];
   for (const m of result.modules) {
     for (const [name, type] of m.params) {
