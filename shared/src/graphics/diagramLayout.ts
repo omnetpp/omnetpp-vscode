@@ -359,10 +359,13 @@ function buildConnFigure(
 }
 
 function connTooltip(conn: PreviewConnection): string {
-  const end = (mod: string | undefined, gate: string): string => (mod ? `${mod}.${gate}` : gate);
+  const end = (mod: string | undefined, index: string | undefined, gate: string): string =>
+    mod ? `${mod}${index !== undefined ? `[${index}]` : ''}.${gate}` : gate;
+  const src = end(conn.srcModule, conn.srcModuleIndex, conn.srcGate);
+  const dest = end(conn.destModule, conn.destModuleIndex, conn.destGate);
   const arrow = conn.bidirectional ? '<-->' : '-->';
   const lines = [
-    `${end(conn.srcModule, conn.srcGate)} ${arrow} ${conn.channelTypeName ? `${conn.channelTypeName} ${arrow} ` : ''}${end(conn.destModule, conn.destGate)}`,
+    `${src} ${arrow} ${conn.channelTypeName ? `${conn.channelTypeName} ${arrow} ` : ''}${dest}`,
   ];
   if (conn.inheritedFrom) lines.push(`inherited from ${conn.inheritedFrom}`);
   if (conn.loops.length) lines.push(`for ${conn.loops.join(', ')}`);

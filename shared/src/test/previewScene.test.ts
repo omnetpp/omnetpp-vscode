@@ -42,7 +42,7 @@ network Net extends Base
         app: <> like IApp;
     connections allowunconnected:
         a.g++ <--> Eth <--> s.g++;
-        ext <--> a.g++;
+        ext <--> a.g[0];
         for i=0..6 {
             nodes[i].g++ --> nodes[i+1].g++ if i!=3;
         }
@@ -104,7 +104,11 @@ test('preview scene: compound module with submodules, inherited members, connect
   assert.equal(border.srcModule, undefined); // parent gate `ext`
   assert.equal(border.srcGate, 'ext');
   assert.equal(border.destModule, 'a');
+  assert.equal(border.destGate, 'g[0]');
 
+  assert.equal(loop.srcModuleIndex, 'i');
+  assert.equal(loop.srcGate, 'g++');
+  assert.equal(loop.destModuleIndex, 'i+1');
   assert.deepEqual(loop.loops, ['i=0..6']);
   assert.deepEqual(loop.conditions, ['i!=3']);
   assert.ok(!loop.bidirectional);

@@ -93,14 +93,23 @@ test('diagramLayout: connection tooltip and marker show loop specs and condition
     scene({
       submodules: [sub('a', ['p=100,100']), sub('b', ['p=300,100'])],
       connections: [
-        { ...CONN, srcModule: 'a', destModule: 'b', loops: ['i=0..n-1', 'j=0..m-1'], conditions: ['i!=j', 'n>1'] },
+        {
+          ...CONN,
+          srcModule: 'a',
+          srcModuleIndex: 'i',
+          srcGate: 'out$o[j]',
+          destModule: 'b',
+          destGate: 'in++',
+          loops: ['i=0..n-1', 'j=0..m-1'],
+          conditions: ['i!=j', 'n>1'],
+        },
         { ...CONN, srcModule: 'b', destModule: 'a', conditions: ['x'] },
       ],
     }),
     opts(),
   );
   const [both, condOnly] = model.connections;
-  assert.equal(both.tooltip, 'a.g --> b.g\nfor i=0..n-1, j=0..m-1\nconditional: i!=j && n>1');
+  assert.equal(both.tooltip, 'a[i].out$o[j] --> b.in++\nfor i=0..n-1, j=0..m-1\nconditional: i!=j && n>1');
   assert.equal(both.marker, '⦀?');
   assert.equal(condOnly.tooltip, 'b.g --> a.g\nconditional: x');
   assert.equal(condOnly.marker, '?');

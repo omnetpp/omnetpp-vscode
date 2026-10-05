@@ -1,7 +1,7 @@
 import type { Range } from '../model/location';
 import { NedResourceCache } from './nedResourceCache';
 import { NedTypeInfo } from './nedTypeInfo';
-import { ConnectionInfo, NedTypeKind, SubmoduleInfo, nameNode } from './nedAst';
+import { ConnEndpoint, ConnectionInfo, NedTypeKind, SubmoduleInfo, nameNode } from './nedAst';
 import { Prop, displayStringFromChain, displayStringLiteralOf } from './displayStringModel';
 import { firstChildOfType, nodeRange } from '../parser/treeUtils';
 
@@ -40,9 +40,13 @@ export interface PreviewSubmodule {
 export interface PreviewConnection {
   /** Source submodule name; undefined ⇒ the compound module's own gate. */
   srcModule?: string;
+  /** Index expression on a vector source submodule, as written. */
+  srcModuleIndex?: string;
+  /** Gate as written, incl. any `$i`/`$o`, `[index]` or `++`. */
   srcGate: string;
   /** Destination submodule name; undefined ⇒ the compound module's own gate. */
   destModule?: string;
+  destModuleIndex?: string;
   destGate: string;
   bidirectional: boolean;
   /** Enclosing `for` loop specs (`i=0..n-1`); non-empty ⇒ the `⦀` midpoint marker. */
@@ -245,9 +249,11 @@ function buildConnection(
 
   return {
     srcModule: conn.src.module,
-    srcGate: conn.src.gate,
+    srcModuleIndex: conn.src.moduleIndex,
+    srcGate: gateText(conn.src),
     destModule: conn.dest.module,
-    destGate: conn.dest.gate,
+    destModuleIndex: conn.dest.moduleIndex,
+    destGate: gateText(conn.dest),
     bidirectional: conn.direction === '<-->',
     loops: conn.loops.map((l) => `${l.paramName}=${l.from}..${l.to}`),
     conditions: conn.conditions,
@@ -257,6 +263,11 @@ function buildConnection(
     declUri: owner.file.uri,
     declRange: nodeRange(conn.node),
   };
+}
+
+function gateText(ep: ConnEndpoint): string {
+  const index = ep.gatePlusplus ? '++' : ep.gateIndex !== undefined ? `[${ep.gateIndex}]` : '';
+  return `${ep.gate}${ep.subgate ?? ''}${index}`;
 }
 
 // re-exported so the (future) fq-name-based preview request can share the logic
