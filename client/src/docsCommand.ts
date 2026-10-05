@@ -48,6 +48,7 @@ function paramsFromSettings(folder: vscode.WorkspaceFolder, format: DocFormat): 
     customCssPath: resolvePath(cfg.get<string>('customCss', '')),
     doxytagsPath: resolvePath(cfg.get<string>('doxytagsFile', '')),
     doxyUrlPrefix: cfg.get<string>('doxyUrlPrefix', '') || undefined,
+    externalDocs: cfg.get<Record<string, string>>('externalDocs', {}),
   };
 }
 
@@ -109,11 +110,17 @@ export function registerDocsCommand(context: vscode.ExtensionContext, client: La
           },
         );
         for (const w of result.warnings.slice(0, 3)) void vscode.window.showWarningMessage(`neddoc: ${w}`);
+        for (const w of result.externalWarnings) client.outputChannel.appendLine(`neddoc: ${w}`);
+        const unlinked = result.externalWarnings.length
+          ? ` Types from ${result.externalWarnings.length} dependenc${result.externalWarnings.length === 1 ? 'y are' : 'ies are'} not linked (see the output).`
+          : '';
         const action = await vscode.window.showInformationMessage(
-          `NED documentation generated: ${result.pages} page(s), ${result.diagrams} diagram(s).`,
+          `NED documentation generated: ${result.pages} page(s), ${result.diagrams} diagram(s).${unlinked}`,
           'Open',
           'Reveal in Explorer',
+          ...(unlinked ? ['Show Output'] : []),
         );
+        if (action === 'Show Output') client.outputChannel.show(true);
         if (action === 'Open') {
           void vscode.env.openExternal(vscode.Uri.file(result.indexPath));
         } else if (action === 'Reveal in Explorer') {

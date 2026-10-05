@@ -7,6 +7,7 @@
 
 import type { DocBlock } from './commentAst';
 import type { DocGraph } from './graphDiagram';
+import type { ExternalTypeRef } from './externalDocs';
 
 export type PageKind = 'index' | 'packages' | 'namespaces' | 'nedtype' | 'msgtype' | 'fulldiagram';
 
@@ -21,7 +22,8 @@ export interface DocPageRef {
 /** An atomic piece of table-cell / paragraph content. */
 export type DocCell =
   | { kind: 'text'; text: string }
-  /** Link to a documented page (or plain text when `page` is undefined). */
+  /** Link to a documented page or an external type's id (plain text when
+   *  `page` is undefined). */
   | { kind: 'link'; text: string; page?: string; anchor?: string; tooltip?: string }
   /** Link to an external URL (e.g. doxygen C++ documentation). */
   | { kind: 'exlink'; text: string; href: string }
@@ -92,6 +94,13 @@ export interface DocModel {
   searchIndex: SearchEntry[];
   diagrams: DiagramRequest[];
   warnings: string[];
+  /** Indexed types this run does not document, by page id (cells and
+   *  comment references point at these ids like at local pages). */
+  externalTypes: Map<string, ExternalTypeRef>;
+  /** One line per dependency whose types are referenced but cannot be
+   *  linked. Kept apart from `warnings`: they are expected whenever a
+   *  dependency's documentation is not configured. */
+  externalWarnings: string[];
 }
 
 /** Page id for a type: fq name with `::` (MSG C++ names) mapped to `--`. */

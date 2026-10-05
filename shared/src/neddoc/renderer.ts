@@ -7,6 +7,8 @@
 
 import type { DocFormat, NeddocOptions } from './options';
 import type { DocModel, DocPage, DocPageRef } from './docModel';
+import { isAbsoluteUrl, type ExternalTypeRef } from './externalDocs';
+import { escapeHtmlAll, escapeHtmlText } from './commentEmit';
 
 export interface GeneratedFile {
   relativePath: string;
@@ -60,3 +62,34 @@ export function relativeRef(fromDir: string, toPath: string): string {
 export function pageById(model: DocModel, id: string): DocPageRef | undefined {
   return model.pages.find((p) => p.ref.id === id)?.ref;
 }
+
+/** href from `fromDir` to a dependency type's external page (undefined when
+ *  it cannot be linked). Relative targets are relative to the output root. */
+export function externalHref(ref: ExternalTypeRef, fromDir: string): string | undefined {
+  if (!ref.target) return undefined;
+  return isAbsoluteUrl(ref.target) ? ref.target : relativeRef(fromDir, ref.target);
+}
+
+/** Tooltip marking a dependency type (Eclipse: "[from <project>]"). */
+export function externalTooltip(ref: ExternalTypeRef, base?: string): string {
+  const marker = ref.target ? `[from ${ref.from}] \u2197` : `[from ${ref.from} \u2014 not documented here]`;
+  return base ? `${base} ${marker}` : marker;
+}
+
+/** HTML for a reference to a dependency type: an `externaltype` link (the
+ *  stylesheet adds the ↗), or a marked span when it cannot be linked. */
+export function externalTypeHtml(ref: ExternalTypeRef, text: string, fromDir: string, tooltip?: string): string {
+  const href = externalHref(ref, fromDir);
+  const title = ` title="${escapeHtmlAll(externalTooltip(ref, tooltip))}"`;
+  return href
+    ? `<a class="externaltype" href="${escapeHtmlAll(href)}"${title}>${escapeHtmlText(text)}</a>`
+    : `<span class="externaltype"${title}>${escapeHtmlText(text)}</span>`;
+}
+
+/** Stylesheet rules for externaltype references, appended to the built-in
+ *  stylesheets of the HTML formats. */
+export const EXTERNAL_TYPE_CSS = `
+.externaltype { cursor: alias; }
+span.externaltype { border-bottom: 1px dotted currentColor; cursor: help; }
+a.externaltype::after { content: "\\2197"; font-size: 75%; margin-left: 0.1em; }
+`;

@@ -16,12 +16,13 @@ import {
   excludePatternRegex,
   generateNeddoc,
   defaultNeddocOptions,
+  parseExternalDocsSpec,
   type DocFormat,
   type GeneratedFile,
   type IncludeResolution,
   type NeddocOptions,
 } from '@omnetpp/shared';
-import { createNodeIconProvider } from '@omnetpp/shared/node';
+import { createNodeIconProvider, loadExternalDocSets } from '@omnetpp/shared/node';
 import { createDiskToolSetup, parseNedPathDirs } from './context.js';
 
 interface CliOptions {
@@ -35,6 +36,7 @@ interface CliOptions {
   doxytagsPath?: string;
   doxyUrlPrefix?: string;
   customCssPath?: string;
+  externalDocs: Record<string, string>;
   toggles: Partial<NeddocOptions>;
 }
 
@@ -75,12 +77,20 @@ Options:
                                  (the html* formats).
   --doxytags=<file>              Doxygen tag file for "C++ definition" links.
   --doxy-url-prefix=<url>        URL prefix for doxygen links.
+  -l, --external-docs=<list>     Documentation of dependencies generated
+                                 separately: <package>=<url-or-path> items,
+                                 comma- or space-separated; repeatable. A path
+                                 is relative to the output directory (its
+                                 nedtags.xml/msgtags.xml give the page names).
+                                 Types of the longest matching package prefix
+                                 link there; other dependency types are marked
+                                 "not documented here".
   --verbose                      Print progress.
   -h, --help                     Show this help.
 
 Exit codes:
   0  documentation generated
-  1  generated with warnings
+  1  generated with warnings (unlinked dependency references do not count)
   2  usage or runtime error`;
 
 function fail(msg: string): never {
@@ -107,7 +117,15 @@ function parseArgs(argv: string[]): CliOptions {
     nedPath: process.env.OMNETPP_NED_PATH ?? '',
     verbose: false,
     excludePatterns: [],
+    externalDocs: {},
     toggles: {},
+  };
+  const addExternalDocs = (spec: string) => {
+    try {
+      Object.assign(opts.externalDocs, parseExternalDocsSpec(spec));
+    } catch (e) {
+      fail(e instanceof Error ? e.message : String(e));
+    }
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -122,6 +140,12 @@ function parseArgs(argv: string[]): CliOptions {
       const v = argv[++i];
       if (!v) fail('-x requires a pattern argument');
       opts.excludePatterns.push(...v.split(/[,\s]+/).filter(Boolean));
+    } else if (a === '-l') {
+      const v = argv[++i];
+      if (!v) fail('-l requires a <package>=<url-or-path> list argument');
+      addExternalDocs(v);
+    } else if (a.startsWith('--external-docs=')) {
+      addExternalDocs(a.slice('--external-docs='.length));
     } else if (a.startsWith('--format=')) {
       const f = a.slice('--format='.length) as DocFormat;
       if (!FORMATS.includes(f)) fail(`invalid --format: ${f} (expected ${FORMATS.join('|')})`);
@@ -206,6 +230,7 @@ async function main(): Promise<void> {
     excludePatterns: opts.excludePatterns,
     includeResolver,
     projectTitle: opts.title ?? opts.projectDirs[0].split(sep).filter(Boolean).pop(),
+    externalDocs: loadExternalDocSets(opts.externalDocs, outputDir),
   };
   if (opts.doxytagsPath) {
     let xml = '';
@@ -304,6 +329,7 @@ async function main(): Promise<void> {
   if (statusLine) process.stderr.write(`\r${' '.repeat(statusWidth)}\r`);
 
   for (const w of result.warnings) process.stderr.write(`opp_neddoc: warning: ${w}\n`);
+  for (const w of result.externalWarnings) process.stderr.write(`opp_neddoc: warning: ${w}\n`);
   const entry = opts.format === 'markdown' ? 'index.md' : opts.format === 'rst' ? 'index.rst' : 'index.html';
   process.stdout.write(
     `Generated ${result.pages} page(s), ${result.diagrams} diagram(s), ${files} file(s) into ${outputDir}\n` +

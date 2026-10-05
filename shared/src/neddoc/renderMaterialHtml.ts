@@ -11,7 +11,8 @@
 import { emitHtml, escapeHtmlAll, escapeHtmlText } from './commentEmit';
 import type { DocCell, DocModel, DocPage, DocPageRef, DocSection, NavNode } from './docModel';
 import type { GeneratedFile, NeddocRenderer, RenderCtx } from './renderer';
-import { pageById } from './renderer';
+import { EXTERNAL_TYPE_CSS, externalHref, pageById } from './renderer';
+import { htmlEmitOpts, type LinkingEmitOpts } from './renderHtml';
 
 /** Chip colors of HtmlRenderer.typeSectionHeading(). */
 const CHIP_COLORS: Record<string, string> = {
@@ -76,18 +77,21 @@ export class MaterialHtmlRenderer implements NeddocRenderer {
   renderPage(page: DocPage, ctx: RenderCtx): string {
     const linkTo = (pageId: string, anchor?: string): string => {
       const target = pageById(ctx.model, pageId);
-      if (!target) return '#';
-      return this.pagePath(target) + (anchor ? `#${anchor}` : '');
+      if (target) return this.pagePath(target) + (anchor ? `#${anchor}` : '');
+      const ext = ctx.model.externalTypes.get(pageId);
+      return (ext && externalHref(ext, '')) ?? '#';
     };
+    const emitOpts = htmlEmitOpts(ctx, linkTo, '');
     const content =
       page.ref.kind === 'index'
         ? DEFAULT_OVERVIEW
-        : page.sections.map((s) => this.renderSection(s, ctx, linkTo)).filter(Boolean).join('\n');
+        : page.sections.map((s) => this.renderSection(s, ctx, emitOpts)).filter(Boolean).join('\n');
     const template = injectSearch(this.asset('page.tmpl'));
     return template.replace(/@title@/g, escapeHtmlText(page.ref.title)).replace('@content@', content);
   }
 
-  private renderCells(cells: DocCell[], linkTo: (p: string, a?: string) => string): string {
+  private renderCells(cells: DocCell[], emitOpts: LinkingEmitOpts): string {
+    const linkTo = emitOpts.linkTo;
     return cells
       .map((cell) => {
         switch (cell.kind) {
@@ -97,19 +101,21 @@ export class MaterialHtmlRenderer implements NeddocRenderer {
             return `<i>${escapeHtmlText(cell.text)}</i>`;
           case 'link': {
             if (!cell.page) return escapeHtmlText(cell.text);
+            const external = emitOpts.externalTypeRef(cell.page, cell.text, cell.tooltip);
+            if (external !== undefined) return external;
             const tooltip = cell.tooltip ? ` title="${escapeHtmlAll(cell.tooltip)}"` : '';
             return `<a${tooltip} href="${escapeHtmlAll(linkTo(cell.page, cell.anchor))}">${escapeHtmlText(cell.text)}</a>`;
           }
           case 'exlink':
             return `<a class="reference-cpp" href="${escapeHtmlAll(cell.href)}">${escapeHtmlText(cell.text)}</a>`;
           case 'doc':
-            return emitHtml(cell.blocks, { hrefFor: (target) => linkTo(target) });
+            return emitHtml(cell.blocks, emitOpts);
         }
       })
       .join('');
   }
 
-  private renderSection(section: DocSection, ctx: RenderCtx, linkTo: (p: string, a?: string) => string): string {
+  private renderSection(section: DocSection, ctx: RenderCtx, emitOpts: LinkingEmitOpts): string {
     switch (section.kind) {
       case 'badge': {
         // HtmlRenderer.typeSectionHeading(): floated name + colored mdl chip
@@ -124,9 +130,9 @@ export class MaterialHtmlRenderer implements NeddocRenderer {
         );
       }
       case 'para':
-        return `<p>${this.renderCells(section.cells, linkTo)}</p>`;
+        return `<p>${this.renderCells(section.cells, emitOpts)}</p>`;
       case 'doc':
-        return emitHtml(section.blocks, { hrefFor: (target) => linkTo(target) });
+        return emitHtml(section.blocks, emitOpts);
       case 'subheading': {
         const anchor = section.anchor ? `<span id="${escapeHtmlAll(section.anchor)}"> </span>\n` : '';
         return `${anchor}<h3 class="subtitle">${escapeHtmlText(section.text)}</h3>`;
@@ -139,7 +145,7 @@ export class MaterialHtmlRenderer implements NeddocRenderer {
           .map((row) => {
             const cls = row.cssClass ? ` class="${row.cssClass}"` : '';
             const id = row.anchor ? ` id="${escapeHtmlAll(row.anchor)}"` : '';
-            const cells = row.cells.map((c) => `      <td>${this.renderCells(c, linkTo)}</td>`).join('\n');
+            const cells = row.cells.map((c) => `      <td>${this.renderCells(c, emitOpts)}</td>`).join('\n');
             return `   <tr${cls}${id}>\n${cells}\n   </tr>`;
           })
           .join('\n');
@@ -162,6 +168,10 @@ export class MaterialHtmlRenderer implements NeddocRenderer {
       // copyStaticResources(cssPath) behavior)
       if (name === 'style.css' && ctx.options.customCss !== undefined) {
         files.push({ relativePath: name, content: ctx.options.customCss });
+        continue;
+      }
+      if (name === 'style.css' && name in this.assets) {
+        files.push({ relativePath: name, content: this.asset(name) + EXTERNAL_TYPE_CSS });
         continue;
       }
       if (name in this.assets) files.push({ relativePath: name, content: this.assets[name] });

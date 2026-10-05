@@ -5,6 +5,7 @@
  */
 
 import type { IncludeResolution } from './commentAst';
+import type { ExternalDocSet } from './externalDocs';
 
 export type DocFormat = 'html' | 'html-readthedocs' | 'html-material' | 'markdown' | 'rst';
 
@@ -35,6 +36,10 @@ export interface NeddocOptions {
   excludePatterns: string[];
   /** Doxygen link-out: a pre-read doxytags.xml + URL prefix for C++ links. */
   doxytags?: { xml: string; urlPrefix: string };
+  /** Separately generated documentation of dependencies: references to
+   *  indexed-but-not-documented types link there (Eclipse: External
+   *  documentation). */
+  externalDocs?: ExternalDocSet[];
   /** Resolves `@include <file>` directives in comments (host provides I/O). */
   includeResolver?: (fileRef: string, fromId: string | undefined) => IncludeResolution | undefined;
   /** Title shown on the overview page and in the navigation header. */

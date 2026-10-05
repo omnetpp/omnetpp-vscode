@@ -41,6 +41,7 @@ import {
 import { cooperativeYielder, type NeddocOptions } from './options';
 import type { DocGraph, DocGraphEdge, DocGraphNode } from './graphDiagram';
 import { doxyUrlFor, parseDoxyTags } from './doxytags';
+import { ExternalDocsResolver, type ExternalTypeRef } from './externalDocs';
 import { collectUnassignedParameters, paramAssignmentsOf } from './unassignedParams';
 
 // ---------------------------------------------------------------------------
@@ -121,6 +122,8 @@ class Extraction {
   private nedPageId = new Map<string, string>(); // ned fq -> page id
   private msgPageId = new Map<string, string>(); // msg fq -> page id
   private typeNames = new Map<string, string[]>(); // referable name -> page ids
+  private externalTypes = new Map<string, ExternalTypeRef>(); // page id -> dependency docs
+  private externalTypeNames = new Map<string, string[]>(); // referable name -> external page ids
   private usersOf = new Map<string, NedTypeInfo[]>(); // ned fq -> user types
   private usedBy = new Map<string, NedTypeInfo[]>(); // ned fq -> local used types
   private implementorsOf = new Map<string, NedTypeInfo[]>(); // iface fq -> all implementors
@@ -149,12 +152,14 @@ class Extraction {
     for (const t of nedTypes) this.nedPageId.set(t.fqName, pageIdForType(t.fqName, 'ned'));
     for (const t of msgTypes) this.msgPageId.set(t.fqName, pageIdForType(t.fqName, 'msg'));
     if (options.doxytags) this.doxyMap = parseDoxyTags(options.doxytags.xml);
+    this.collectExternalTypes();
     this.collectTypeNames();
     this.collectRelations();
     const includeResolver = this.options.includeResolver;
     this.commentCtx = {
       hyperlinkMode: this.options.automaticHyperlinks ? 'automatic' : 'tilde',
-      lookupTypeName: (name) => this.typeNames.get(name),
+      // local types shadow same-named dependency types (as in Eclipse)
+      lookupTypeName: (name) => this.typeNames.get(name) ?? this.externalTypeNames.get(name),
       // an @include in a type's comment resolves relative to the file the
       // comment lives in; nested includes pass their own file id explicitly
       resolveInclude: includeResolver ? (ref, fromId) => includeResolver(ref, fromId ?? this.currentUri) : undefined,
@@ -187,35 +192,101 @@ class Extraction {
       searchIndex: this.searchIndex,
       diagrams: this.diagrams,
       warnings: this.warnings,
+      externalTypes: this.externalTypes,
+      externalWarnings: this.unlinkedExternalWarnings(),
     };
+  }
+
+  // ---- dependency types (documented elsewhere, or not at all) ----
+
+  private collectExternalTypes(): void {
+    const resolver = new ExternalDocsResolver(this.options.externalDocs ?? []);
+    for (const t of this.nedCache.allTypes()) {
+      if (t.isInnerType || t.file.uri === BUILTIN_URI || this.nedPageId.has(t.fqName)) continue;
+      this.externalTypes.set(pageIdForType(t.fqName, 'ned'), resolver.resolveNed(t.fqName));
+    }
+    if (this.options.messageDefinitions && this.msgCache) {
+      for (const t of this.msgCache.allTypes()) {
+        if (this.msgPageId.has(t.fqName)) continue;
+        this.externalTypes.set(pageIdForType(t.fqName, 'msg'), resolver.resolveMsg(t.fqName, t.simpleName));
+      }
+    }
+  }
+
+  /** Count references to dependency types that cannot be linked, per
+   *  dependency and reason (Eclipse: reportUnlinkedExternalReferences). */
+  private unlinkedExternalWarnings(): string[] {
+    const counts = new Map<string, { ref: ExternalTypeRef; count: number }>();
+    const count = (pageId: string | undefined) => {
+      const ref = pageId ? this.externalTypes.get(pageId) : undefined;
+      if (!ref || ref.target) return;
+      const key = `${ref.from}\0${ref.reason}`;
+      const entry = counts.get(key);
+      if (entry) entry.count++;
+      else counts.set(key, { ref, count: 1 });
+    };
+    const visit = (node: unknown): void => {
+      if (Array.isArray(node)) {
+        for (const item of node) visit(item);
+        return;
+      }
+      if (!node || typeof node !== 'object') return;
+      const obj = node as { kind?: unknown; page?: unknown; targets?: unknown };
+      if (obj.kind === 'link' && typeof obj.page === 'string') count(obj.page);
+      else if (obj.kind === 'typeref' && Array.isArray(obj.targets)) for (const t of obj.targets) count(t as string);
+      for (const value of Object.values(node)) if (value && typeof value === 'object') visit(value);
+    };
+    for (const page of this.pages) visit(page.sections);
+    return [...counts.values()]
+      .sort((a, b) => a.ref.from.localeCompare(b.ref.from))
+      .map(({ ref, count: n }) => {
+        const what = `${n} reference${n === 1 ? '' : 's'} to types from '${ref.from}' not linked`;
+        return ref.reason === 'not-in-tagfile'
+          ? `${what} (not listed in the tag file of its external documentation)`
+          : `${what} (no external documentation configured for it)`;
+      });
   }
 
   // ---- name map for comment type references (collectTypeNames port) ----
 
-  private addTypeName(name: string, pageId: string): void {
-    const list = this.typeNames.get(name);
+  private static addName(map: Map<string, string[]>, name: string, pageId: string): void {
+    const list = map.get(name);
     if (list) {
       if (!list.includes(pageId)) list.push(pageId);
-    } else this.typeNames.set(name, [pageId]);
+    } else map.set(name, [pageId]);
+  }
+
+  private static addNedNames(map: Map<string, string[]>, simpleName: string, fqName: string, id: string): void {
+    Extraction.addName(map, simpleName, id);
+    if (fqName !== simpleName) Extraction.addName(map, fqName, id);
+  }
+
+  /** A C++ name ns::sub::Foo is referable as ::ns::sub::Foo, ns::sub::Foo,
+   *  sub::Foo and Foo (as in the Eclipse generator). */
+  private static addMsgNames(map: Map<string, string[]>, fqName: string, id: string): void {
+    let qname = fqName;
+    Extraction.addName(map, '::' + qname, id);
+    while (qname.includes('::')) {
+      Extraction.addName(map, qname, id);
+      qname = qname.slice(qname.indexOf('::') + 2);
+    }
+    Extraction.addName(map, qname, id);
   }
 
   private collectTypeNames(): void {
-    for (const t of this.nedTypes) {
-      const id = this.nedPageId.get(t.fqName)!;
-      this.addTypeName(t.simpleName, id);
-      if (t.fqName !== t.simpleName) this.addTypeName(t.fqName, id);
+    for (const t of this.nedTypes) Extraction.addNedNames(this.typeNames, t.simpleName, t.fqName, this.nedPageId.get(t.fqName)!);
+    for (const t of this.msgTypes) Extraction.addMsgNames(this.typeNames, t.fqName, this.msgPageId.get(t.fqName)!);
+
+    // dependency types: in automatic mode only linkable ones, so that prose
+    // does not fill up with "not documented here" markers (as in Eclipse)
+    const wanted = (id: string) => !this.options.automaticHyperlinks || !!this.externalTypes.get(id)?.target;
+    for (const t of this.nedCache.allTypes()) {
+      const id = pageIdForType(t.fqName, 'ned');
+      if (this.externalTypes.has(id) && wanted(id)) Extraction.addNedNames(this.externalTypeNames, t.simpleName, t.fqName, id);
     }
-    for (const t of this.msgTypes) {
-      const id = this.msgPageId.get(t.fqName)!;
-      // a C++ name ns::sub::Foo is referable as ::ns::sub::Foo, ns::sub::Foo,
-      // sub::Foo and Foo (as in the Eclipse generator)
-      let qname = t.fqName;
-      this.addTypeName('::' + qname, id);
-      while (qname.includes('::')) {
-        this.addTypeName(qname, id);
-        qname = qname.slice(qname.indexOf('::') + 2);
-      }
-      this.addTypeName(qname, id);
+    for (const t of this.msgCache?.allTypes() ?? []) {
+      const id = pageIdForType(t.fqName, 'msg');
+      if (this.externalTypes.has(id) && wanted(id)) Extraction.addMsgNames(this.externalTypeNames, t.fqName, id);
     }
   }
 
@@ -280,12 +351,28 @@ class Extraction {
 
   // ---- shared cell builders ----
 
+  /** Page id a reference to a type points at: its local page, or its id in
+   *  the dependency-type map. */
+  private nedTarget(fqName: string): string | undefined {
+    const local = this.nedPageId.get(fqName);
+    if (local) return local;
+    const id = pageIdForType(fqName, 'ned');
+    return this.externalTypes.has(id) ? id : undefined;
+  }
+
+  private msgTarget(fqName: string): string | undefined {
+    const local = this.msgPageId.get(fqName);
+    if (local) return local;
+    const id = pageIdForType(fqName, 'msg');
+    return this.externalTypes.has(id) ? id : undefined;
+  }
+
   private nedTypeLink(t: NedTypeInfo, label?: string): DocCell {
     const text = label ?? t.simpleName;
     return {
       kind: 'link',
       text,
-      page: this.nedPageId.get(t.fqName),
+      page: this.nedTarget(t.fqName),
       tooltip: text === t.fqName ? undefined : t.fqName,
     };
   }
@@ -295,7 +382,7 @@ class Extraction {
     return {
       kind: 'link',
       text,
-      page: this.msgPageId.get(t.fqName),
+      page: this.msgTarget(t.fqName),
       tooltip: text === t.fqName ? undefined : t.fqName,
     };
   }
@@ -895,9 +982,12 @@ class Extraction {
   /** A C++ type name cell: linked when it names a documented MSG type. */
   private cppTypeCell(cppType: string): DocCell[] {
     if (!cppType) return [];
-    const targets = this.typeNames.get(cppType.replace(/\s+/g, ''));
-    if (targets && targets.length === 1 && targets[0].startsWith('msg-'))
-      return [{ kind: 'link', text: cppType, page: targets[0] }];
+    const name = cppType.replace(/\s+/g, '');
+    const targets = this.typeNames.get(name) ?? this.externalTypeNames.get(name);
+    if (targets && targets.length === 1 && targets[0].startsWith('msg-')) {
+      const ext = this.externalTypes.get(targets[0]);
+      if (!ext || ext.target) return [{ kind: 'link', text: cppType, page: targets[0] }];
+    }
     return [{ kind: 'text', text: cppType }];
   }
 
@@ -935,8 +1025,9 @@ class Extraction {
       const nameCells: DocCell[] = [];
       row.path.forEach((seg, i) => {
         if (i > 0) nameCells.push({ kind: 'text', text: '.' });
-        if (seg.typeFqName && this.nedPageId.has(seg.typeFqName)) {
-          nameCells.push({ kind: 'link', text: seg.text, page: this.nedPageId.get(seg.typeFqName), tooltip: seg.typeFqName });
+        const target = seg.typeFqName ? this.nedTarget(seg.typeFqName) : undefined;
+        if (target) {
+          nameCells.push({ kind: 'link', text: seg.text, page: target, tooltip: seg.typeFqName });
         } else {
           nameCells.push({ kind: 'text', text: seg.text });
         }

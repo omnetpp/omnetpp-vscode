@@ -8,7 +8,7 @@
 import { extractDocModel, type NeddocInput } from './extract';
 import { pageIdForType, type DiagramRequest, type DocModel } from './docModel';
 import { cooperativeYielder, defaultNeddocOptions, type NeddocOptions } from './options';
-import { dirOf, pageById, relativeRef, type GeneratedFile, type NeddocRenderer, type RenderCtx } from './renderer';
+import { dirOf, externalHref, pageById, relativeRef, type GeneratedFile, type NeddocRenderer, type RenderCtx } from './renderer';
 import { HtmlRenderer } from './renderHtml';
 import { RtdHtmlRenderer } from './renderRtdHtml';
 import { MaterialHtmlRenderer } from './renderMaterialHtml';
@@ -73,6 +73,9 @@ export interface NeddocResult {
   pages: number;
   diagrams: number;
   warnings: string[];
+  /** References to dependency types that could not be linked, one line per
+   *  dependency (informational: not counted as generation warnings). */
+  externalWarnings: string[];
   cancelled?: boolean;
 }
 
@@ -149,7 +152,9 @@ export async function generateNeddoc(
         model,
         hrefForPage: (pageId) => {
           const ref = pageById(model, pageId);
-          return ref ? relativeRef(dirOf(imageOut), renderer.pagePath(ref)) : undefined;
+          if (ref) return relativeRef(dirOf(imageOut), renderer.pagePath(ref));
+          const ext = model.externalTypes.get(pageId);
+          return ext && externalHref(ext, dirOf(imageOut));
         },
       };
       try {
@@ -188,7 +193,7 @@ export async function generateNeddoc(
   await emit({ relativePath: 'nedtags.xml', content: nedTagFile(model, renderer) });
   if (options.messageDefinitions) await emit({ relativePath: 'msgtags.xml', content: msgTagFile(model, renderer) });
   progress?.report?.('Done', model.pages.length, model.pages.length, 100);
-  return { pages: model.pages.length, diagrams: images.size, warnings: model.warnings };
+  return { pages: model.pages.length, diagrams: images.size, warnings: model.warnings, externalWarnings: model.externalWarnings };
 }
 
 /** Convenience wrapper collecting all output files in memory (tests, MCP). */

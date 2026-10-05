@@ -8,11 +8,11 @@
  * JSON) so the documentation also works from file:// URLs.
  */
 
-import { emitHtml, escapeHtmlAll, escapeHtmlText } from './commentEmit';
+import { emitHtml, escapeHtmlAll, escapeHtmlText, type HtmlEmitOpts } from './commentEmit';
 import type { DocCell, DocModel, DocPage, DocPageRef, DocSection, NavNode } from './docModel';
 import type { DocFormat } from './options';
 import type { NeddocRenderer, RenderCtx, GeneratedFile } from './renderer';
-import { defaultPagePath, dirOf, pageById, relativeRef } from './renderer';
+import { EXTERNAL_TYPE_CSS, defaultPagePath, dirOf, externalHref, externalTypeHtml, pageById, relativeRef } from './renderer';
 
 export class HtmlRenderer implements NeddocRenderer {
   // widened so themed subclasses (RtdHtmlRenderer) can set their own format
@@ -28,10 +28,12 @@ export class HtmlRenderer implements NeddocRenderer {
     const root = fromDir ? '../'.repeat(fromDir.split('/').length) : '';
     const linkTo = (pageId: string, anchor?: string): string => {
       const target = pageById(ctx.model, pageId);
-      if (!target) return '#';
-      return relativeRef(fromDir, this.pagePath(target)) + (anchor ? `#${anchor}` : '');
+      if (target) return relativeRef(fromDir, this.pagePath(target)) + (anchor ? `#${anchor}` : '');
+      const ext = ctx.model.externalTypes.get(pageId);
+      return (ext && externalHref(ext, fromDir)) ?? '#';
     };
-    const body = page.sections.map((s) => this.renderSection(s, page, ctx, linkTo, fromDir)).filter(Boolean).join('\n');
+    const emitOpts = htmlEmitOpts(ctx, linkTo, fromDir);
+    const body = page.sections.map((s) => this.renderSection(s, page, ctx, emitOpts, fromDir)).filter(Boolean).join('\n');
     const title = escapeHtmlAll(page.ref.title);
     const projectTitle = escapeHtmlAll(ctx.options.projectTitle ?? 'NED Documentation');
     return this.pageShell({ root, pageId: page.ref.id, title, projectTitle, body });
@@ -77,7 +79,8 @@ ${body}
     return STYLE_CSS;
   }
 
-  private renderCells(cells: DocCell[], page: DocPage, ctx: RenderCtx, linkTo: (p: string, a?: string) => string): string {
+  private renderCells(cells: DocCell[], emitOpts: LinkingEmitOpts): string {
+    const linkTo = emitOpts.linkTo;
     return cells
       .map((cell) => {
         switch (cell.kind) {
@@ -87,13 +90,15 @@ ${body}
             return `<i>${escapeHtmlText(cell.text)}</i>`;
           case 'link': {
             if (!cell.page) return escapeHtmlText(cell.text);
+            const external = emitOpts.externalTypeRef(cell.page, cell.text, cell.tooltip);
+            if (external !== undefined) return external;
             const tooltip = cell.tooltip ? ` title="${escapeHtmlAll(cell.tooltip)}"` : '';
             return `<a href="${escapeHtmlAll(linkTo(cell.page, cell.anchor))}"${tooltip}>${escapeHtmlText(cell.text)}</a>`;
           }
           case 'exlink':
             return `<a href="${escapeHtmlAll(cell.href)}" target="_blank">${escapeHtmlText(cell.text)}</a>`;
           case 'doc':
-            return emitHtml(cell.blocks, { hrefFor: (target) => linkTo(target) });
+            return emitHtml(cell.blocks, emitOpts);
         }
       })
       .join('');
@@ -103,16 +108,16 @@ ${body}
     section: DocSection,
     page: DocPage,
     ctx: RenderCtx,
-    linkTo: (p: string, a?: string) => string,
+    emitOpts: LinkingEmitOpts,
     fromDir: string,
   ): string {
     switch (section.kind) {
       case 'badge':
         return `<div class="badge badge-${section.typeKind}">${escapeHtmlText(section.label)}</div>`;
       case 'para':
-        return `<p class="meta">${this.renderCells(section.cells, page, ctx, linkTo)}</p>`;
+        return `<p class="meta">${this.renderCells(section.cells, emitOpts)}</p>`;
       case 'doc':
-        return `<div class="description">${emitHtml(section.blocks, { hrefFor: (target) => linkTo(target) })}</div>`;
+        return `<div class="description">${emitHtml(section.blocks, emitOpts)}</div>`;
       case 'subheading':
         return `<h2${section.anchor ? ` id="${escapeHtmlAll(section.anchor)}"` : ''}>${escapeHtmlText(section.text)}</h2>`;
       case 'table': {
@@ -121,7 +126,7 @@ ${body}
           .map((row) => {
             const cls = row.cssClass ? ` class="${row.cssClass}"` : '';
             const id = row.anchor ? ` id="${escapeHtmlAll(row.anchor)}"` : '';
-            const cells = row.cells.map((c) => `<td>${this.renderCells(c, page, ctx, linkTo)}</td>`).join('');
+            const cells = row.cells.map((c) => `<td>${this.renderCells(c, emitOpts)}</td>`).join('');
             return `<tr${cls}${id}>${cells}</tr>`;
           })
           .join('\n');
@@ -141,7 +146,7 @@ ${body}
 
   auxFiles(ctx: RenderCtx): GeneratedFile[] {
     return [
-      { relativePath: 'assets/style.css', content: ctx.options.customCss ?? this.styleCss() },
+      { relativePath: 'assets/style.css', content: ctx.options.customCss ?? this.styleCss() + EXTERNAL_TYPE_CSS },
       { relativePath: 'assets/neddoc.js', content: NEDDOC_JS },
       {
         relativePath: 'assets/navtree-data.js',
@@ -196,7 +201,8 @@ function rebaseSvgLinks(svg: string, fromDir: string, imagePath: string): string
     const parts = (imageDir ? imageDir.split('/') : []).concat(href.split('/'));
     const resolved: string[] = [];
     for (const part of parts) {
-      if (part === '..') resolved.pop();
+      // a `..` above the output root survives (dependency docs next to ours)
+      if (part === '..' && resolved.length > 0 && resolved[resolved.length - 1] !== '..') resolved.pop();
       else if (part !== '.') resolved.push(part);
     }
     return `href="${relativeRef(fromDir, resolved.join('/'))}"`;
@@ -347,3 +353,30 @@ const NEDDOC_JS = `// neddoc — sidebar nav tree + client-side type search (van
   else { initTree(); initSearch(); }
 })();
 `;
+
+/** Comment-emitter options plus the page's link resolution, shared by the
+ *  HTML renderers: dependency types render as `externaltype` references. */
+export interface LinkingEmitOpts extends HtmlEmitOpts {
+  linkTo: (pageId: string, anchor?: string) => string;
+  externalTypeRef: (pageId: string, text: string, tooltip?: string) => string | undefined;
+}
+
+export function htmlEmitOpts(
+  ctx: RenderCtx,
+  linkTo: (pageId: string, anchor?: string) => string,
+  fromDir: string,
+): LinkingEmitOpts {
+  const externalTypeRef = (pageId: string, text: string, tooltip?: string): string | undefined => {
+    const ext = ctx.model.externalTypes.get(pageId);
+    return ext ? externalTypeHtml(ext, text, fromDir, tooltip) : undefined;
+  };
+  return {
+    linkTo,
+    externalTypeRef,
+    hrefFor: (target) => {
+      const href = linkTo(target);
+      return href === '#' ? undefined : href;
+    },
+    typeRef: (target, text) => externalTypeRef(target, text),
+  };
+}

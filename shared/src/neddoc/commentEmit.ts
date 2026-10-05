@@ -17,6 +17,9 @@ import type { DocBlock, DocInline } from './commentAst';
 export interface HtmlEmitOpts {
   /** Page-relative href for a type-reference target id; undefined = no link. */
   hrefFor: (targetId: string) => string | undefined;
+  /** Complete markup for a single-target reference that needs special
+   *  rendering (dependency types); undefined = the normal link. */
+  typeRef?: (targetId: string, text: string) => string | undefined;
 }
 
 /** Escape text for HTML, but keep character entities the author wrote
@@ -73,6 +76,8 @@ function htmlTypeRef(ref: Extract<DocInline, { kind: 'typeref' }>, opts: HtmlEmi
   const name = escapeHtmlText(ref.name);
   if (ref.targets.length === 0) return `<span class="error">${name}</span>`;
   if (ref.targets.length === 1) {
+    const special = opts.typeRef?.(ref.targets[0], ref.name);
+    if (special !== undefined) return special;
     const href = opts.hrefFor(ref.targets[0]);
     return href ? `<a href="${escapeHtmlAll(href)}">${name}</a>` : name;
   }
@@ -133,6 +138,9 @@ export function emitHtml(blocks: DocBlock[], opts: HtmlEmitOpts): string {
 export interface MarkdownEmitOpts {
   /** Page-relative link target for a type-reference id; undefined = no link. */
   hrefFor: (targetId: string) => string | undefined;
+  /** Complete markup for a single-target reference that needs special
+   *  rendering (dependency types); undefined = the normal link. */
+  typeRef?: (targetId: string, text: string) => string | undefined;
 }
 
 /** Escape Markdown-significant punctuation in plain text. */
@@ -184,6 +192,8 @@ function mdTypeRef(ref: Extract<DocInline, { kind: 'typeref' }>, opts: MarkdownE
   const name = escapeMdText(ref.name);
   if (ref.targets.length === 0) return `**${name}**`; // unresolved ~ref: bold, no link
   if (ref.targets.length === 1) {
+    const special = opts.typeRef?.(ref.targets[0], ref.name);
+    if (special !== undefined) return special;
     const href = opts.hrefFor(ref.targets[0]);
     return href ? `[${name}](${href})` : name;
   }

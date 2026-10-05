@@ -19,7 +19,7 @@ import {
   type IncludeResolution,
   type NeddocOptions,
 } from '@omnetpp/shared';
-import { createNodeIconProvider } from '@omnetpp/shared/node';
+import { createNodeIconProvider, loadExternalDocSets } from '@omnetpp/shared/node';
 import { iconDirs as computeIconDirs, type ServerState } from './serverState';
 
 export function registerDocsRequests(connection: Connection, state: ServerState): void {
@@ -53,8 +53,15 @@ export function registerDocsRequests(connection: Connection, state: ServerState)
       }
     };
 
+    // validated before anything is written, like the CLI's -l
+    for (const [prefix, target] of Object.entries(params.externalDocs ?? {})) {
+      if (!prefix.trim() || !target.trim())
+        throw new Error(`invalid omnetpp.neddoc.externalDocs entry "${prefix}": "${target}" (expected a package prefix and a URL or path)`);
+    }
+
     const warnings: string[] = [];
     const optionOverrides: Partial<NeddocOptions> = {
+      externalDocs: loadExternalDocSets(params.externalDocs ?? {}, outputDir),
       format: params.format,
       includeResolver,
       projectTitle: params.title || folders[0]?.split(sep).filter(Boolean).pop(),
@@ -160,6 +167,7 @@ export function registerDocsRequests(connection: Connection, state: ServerState)
       diagrams: result.diagrams,
       files,
       warnings: [...warnings, ...result.warnings],
+      externalWarnings: result.externalWarnings,
       indexPath: join(outputDir, entry),
     };
   });

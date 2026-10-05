@@ -104,6 +104,9 @@ export interface GenerateDocsParams {
   /** Absolute path of a doxygen tag file for "C++ definition" links. */
   doxytagsPath?: string;
   doxyUrlPrefix?: string;
+  /** Dependency documentation: NED package prefix -> URL, or a path relative
+   *  to `outputDir`. */
+  externalDocs?: Record<string, string>;
 }
 
 export interface GenerateDocsProgress {
@@ -119,6 +122,9 @@ export interface GenerateDocsResult {
   diagrams: number;
   files: number;
   warnings: string[];
+  /** References to dependency types that could not be linked (one line per
+   *  dependency). */
+  externalWarnings: string[];
   /** Absolute path of the generated entry page (index.html / index.md / ...). */
   indexPath: string;
 }

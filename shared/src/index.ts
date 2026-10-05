@@ -144,6 +144,12 @@ export {
   createDiagramRenderer,
 } from './neddoc/generate';
 export { type IncludeResolution } from './neddoc/commentAst';
+export {
+  type ExternalDocSet,
+  type ExternalTypeRef,
+  ExternalDocsResolver,
+  parseExternalDocsSpec,
+} from './neddoc/externalDocs';
 export { renderTypeFigureSvg, type TypeFigureOptions } from './neddoc/typeFigure';
 export { renderGraphDiagramSvg, type DocGraph, type DocGraphNode, type DocGraphEdge } from './neddoc/graphDiagram';
 export { layeredLayout, type LayeredNode, type LayeredEdge, type LayeredResult } from './neddoc/layeredLayout';

@@ -3,3 +3,4 @@
 export { NodeFileSystem } from './nodeFileSystem';
 export { createNodeIconProvider, sniffImageSize, listIconIds, type NodeIconProviderOptions } from './docIcons';
 export { NodeRandomAccessFile, NodeRandomAccessFileProvider } from './nodeRandomAccessFile';
+export { loadExternalDocSets } from './externalDocSets';

@@ -303,6 +303,33 @@ Dependencies)"**. Results appear in a navigable Quick Pick; pick one to jump to 
 **Advantage.** Assess the blast radius of a change before making it — invaluable when
 refactoring shared library types.
 
+### NED documentation — linking to dependencies
+
+**Feature.** **"OMNeT++: Generate NED Documentation"** (and the `opp_neddoc` command-line
+tool) documents the types of the workspace folders. Types from other NED source roots
+(`omnetpp.nedPath`, `--ned-path`) are indexed but not documented. References to them can
+link to the documentation of those dependencies that was generated separately — for
+example a model framework that builds on INET links to the INET documentation.
+
+**How to use it.** Map NED package prefixes to the location of their documentation:
+
+- **VS Code:** the `omnetpp.neddoc.externalDocs` setting, e.g.
+  `{ "inet": "https://inet.omnetpp.org/doc/neddoc" }`.
+- **`opp_neddoc`:** `-l inet=https://inet.omnetpp.org/doc/neddoc` (the Eclipse IDE's
+  syntax: `<package>=<location>` items, comma- or space-separated; repeatable).
+
+The location is a URL, or a path relative to the output directory (e.g. `../inet`). For a
+path, the generator reads the `nedtags.xml` / `msgtags.xml` that every documentation run
+writes there, and uses the exact page names from them. For a URL, it assumes the Eclipse
+page naming (`<qualified name>.html`). The longest matching prefix wins, so
+`inet.showcases` can point somewhere other than `inet`.
+
+References to dependency types are marked in the HTML output (↗, with a "from inet"
+tooltip). A type whose dependency is not mapped — or that the dependency's tag file does
+not list — is shown as "not documented here" instead of as a broken link. Each run
+reports one line per such dependency: in the CLI as a warning that does not change the
+exit code, in VS Code in the **OMNeT++ Language Server** output.
+
 ### Settings
 
 | Setting | Meaning |

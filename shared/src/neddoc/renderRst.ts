@@ -11,7 +11,7 @@ import { emitRst, emitRstInlines, escapeRstText, flattenInlines, type RstEmitOpt
 import type { DocBlock } from './commentAst';
 import type { DocCell, DocPage, DocPageRef, DocSection, NavNode } from './docModel';
 import type { GeneratedFile, NeddocRenderer, RenderCtx } from './renderer';
-import { defaultPagePath, dirOf, pageById, relativeRef } from './renderer';
+import { defaultPagePath, dirOf, externalHref, pageById, relativeRef } from './renderer';
 
 /** Sphinx label for a page or a page section (labels are global). */
 export function rstLabel(pageId: string, anchor?: string): string {
@@ -31,7 +31,12 @@ export class RstRenderer implements NeddocRenderer {
     const fromDir = dirOf(this.pagePath(page.ref));
     const refFor = (targetId: string, text: string): string | undefined => {
       const target = pageById(ctx.model, targetId);
-      if (!target) return undefined;
+      if (!target) {
+        // dependency types: an anonymous hyperlink marked with ↗, or plain text
+        const ext = ctx.model.externalTypes.get(targetId);
+        const href = ext && externalHref(ext, fromDir);
+        return href ? `\`${text.replace(/[`<>]/g, '')} \u2197 <${href}>\`__` : undefined;
+      }
       return `:ref:\`${text.replace(/[`<>]/g, '')} <${rstLabel(targetId)}>\``;
     };
     const emitOpts: RstEmitOpts = { refFor };

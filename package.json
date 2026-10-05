@@ -854,6 +854,15 @@
           "order": 22,
           "markdownDescription": "URL or path prefix for the doxygen links (e.g. `../doxy`), joined with the page names from the tag file."
         },
+        "omnetpp.neddoc.externalDocs": {
+          "type": "object",
+          "default": {},
+          "order": 23,
+          "additionalProperties": {
+            "type": "string"
+          },
+          "markdownDescription": "Separately generated documentation of dependencies. Maps a NED package prefix to the URL of its documentation, or to a path relative to the output directory, e.g. `{ \"inet\": \"https://inet.omnetpp.org/doc/neddoc\" }`. References to types of that package (the longest matching prefix wins) link there instead of showing as \"not documented here\". For a local path, the target's `nedtags.xml`/`msgtags.xml` supply the exact page names; otherwise the Eclipse page naming (`<qualified name>.html`) is assumed."
+        },
         "omnetpp.diagnostics.scope": {
           "type": "string",
           "enum": [

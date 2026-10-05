@@ -8,7 +8,7 @@
 import { emitMarkdown, emitMarkdownInlines, escapeMdText, type MarkdownEmitOpts } from './commentEmit';
 import type { DocCell, DocPage, DocPageRef, DocSection, NavNode } from './docModel';
 import type { GeneratedFile, NeddocRenderer, RenderCtx } from './renderer';
-import { defaultPagePath, dirOf, pageById, relativeRef } from './renderer';
+import { defaultPagePath, dirOf, externalHref, pageById, relativeRef } from './renderer';
 
 export class MarkdownRenderer implements NeddocRenderer {
   readonly format = 'markdown' as const;
@@ -25,7 +25,20 @@ export class MarkdownRenderer implements NeddocRenderer {
       if (!target) return '#';
       return relativeRef(fromDir, this.pagePath(target)) + (anchor ? `#${anchor}` : '');
     };
-    const emitOpts: MarkdownEmitOpts = { hrefFor: (target) => linkTo(target) };
+    // dependency types: a link marked with ↗, or plain text
+    const externalRef = (pageId: string, text: string): string | undefined => {
+      const ext = ctx.model.externalTypes.get(pageId);
+      if (!ext) return undefined;
+      const href = externalHref(ext, fromDir);
+      return href ? `[${escapeMdText(text)} \u2197](${href})` : escapeMdText(text);
+    };
+    const emitOpts: MarkdownEmitOpts = {
+      hrefFor: (target) => {
+        const ext = ctx.model.externalTypes.get(target);
+        return ext ? externalHref(ext, fromDir) : linkTo(target);
+      },
+      typeRef: externalRef,
+    };
     const out: string[] = [`# ${escapeMdText(page.ref.title)}`];
     for (const section of page.sections) {
       const rendered = this.renderSection(section, ctx, linkTo, emitOpts, fromDir);
@@ -44,9 +57,12 @@ export class MarkdownRenderer implements NeddocRenderer {
         case 'label':
           out += cell.text ? `*${escapeMdText(cell.text)}*` : '';
           break;
-        case 'link':
-          out += cell.page ? `[${escapeMdText(cell.text)}](${linkTo(cell.page, cell.anchor)})` : escapeMdText(cell.text);
+        case 'link': {
+          const external = cell.page ? emitOpts.typeRef?.(cell.page, cell.text) : undefined;
+          if (external !== undefined) out += external;
+          else out += cell.page ? `[${escapeMdText(cell.text)}](${linkTo(cell.page, cell.anchor)})` : escapeMdText(cell.text);
           break;
+        }
         case 'exlink':
           out += `[${escapeMdText(cell.text)}](${cell.href})`;
           break;
