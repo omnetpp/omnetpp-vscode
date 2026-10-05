@@ -45,7 +45,7 @@ export interface PreviewConnection {
   destModule?: string;
   destGate: string;
   bidirectional: boolean;
-  /** Enclosing `for` loop specs (`i=0..n-1`); non-empty ⇒ the `o` midpoint marker. */
+  /** Enclosing `for` loop specs (`i=0..n-1`); non-empty ⇒ the `⦀` midpoint marker. */
   loops: string[];
   /** `if` condition expressions; non-empty ⇒ the `?` midpoint marker. */
   conditions: string[];

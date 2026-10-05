@@ -337,7 +337,7 @@ function buildConnFigure(
     faint: lineWidth === 0,
     style: (ds.getAsEnum(Prop.CONNECTION_STYLE) as ConnFigure['style']) ?? 'solid',
     arrowhead: !conn.bidirectional,
-    marker: (conn.loops.length ? 'o' : '') + (conn.conditions.length ? '?' : '') || undefined,
+    marker: (conn.loops.length ? '⦀' : '') + (conn.conditions.length ? '?' : '') || undefined,
     tooltip: connTooltip(conn),
   };
 

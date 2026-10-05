@@ -113,7 +113,7 @@ test('figures: vector label, connection styles, markers and bundling', async () 
   assert.notDeepEqual(styled.points, plain.points);
   // self connection renders as an arc at the top-right corner
   assert.ok(self.selfArc && !self.selfArc.onBorder);
-  assert.equal(self.marker, 'o?');
+  assert.equal(self.marker, '⦀?');
   // border connection: containment routing from the compound rect, no arrowhead
   assert.ok(!border.arrowhead);
   assert.equal(border.points.length, 2);

@@ -101,7 +101,7 @@ test('diagramLayout: connection tooltip and marker show loop specs and condition
   );
   const [both, condOnly] = model.connections;
   assert.equal(both.tooltip, 'a.g --> b.g\nfor i=0..n-1, j=0..m-1\nconditional: i!=j && n>1');
-  assert.equal(both.marker, 'o?');
+  assert.equal(both.marker, '⦀?');
   assert.equal(condOnly.tooltip, 'b.g --> a.g\nconditional: x');
   assert.equal(condOnly.marker, '?');
 });

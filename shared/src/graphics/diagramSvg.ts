@@ -239,7 +239,7 @@ function renderConnection(c: ConnFigure, b: SvgBuilder): void {
   }
 
   if (c.marker) {
-    // 'o' (for-loop) / '?' (conditional) hint at the line midpoint
+    // '⦀' (for-loop) / '?' (conditional) hint at the line midpoint
     const mid = c.selfArc ? { x: c.selfArc.cx + c.selfArc.r, y: c.selfArc.cy } : midpoint(c.points);
     if (mid) {
       b.el('circle', { cx: mid.x, cy: mid.y, r: 7, fill: 'white', stroke: c.color, 'stroke-width': 1 });
