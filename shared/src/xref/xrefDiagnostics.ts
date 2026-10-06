@@ -67,7 +67,7 @@ export function nedMissingImplClassDiagnostics(
     const ownClass = nedClassRefs(t.node)[0]; // the type's own @class(...) value, if any
     const className = impl.className;
     out.push({
-      range: nodeRange(ownClass?.node ?? nameNode(t.node) ?? t.node),
+      range: ownClass?.range ?? nodeRange(nameNode(t.node) ?? t.node),
       severity: DiagnosticSeverity.Warning,
       message: ownClass
         ? `No registered C++ class '${className}' (Define_Module/Register_Class/…) was found for simple module '${t.simpleName}'.`

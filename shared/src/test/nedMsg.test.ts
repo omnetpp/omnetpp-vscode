@@ -60,3 +60,15 @@ test('an unresolved @class (C++-only class) resolves to nothing without erroring
   const bogus = nedCache.getType('p.Bogus')!;
   assert.equal(resolveNedClass(msgCache, bogus, 'NoSuchClass'), undefined);
 });
+
+test('quoted @class / @signal(type=) values resolve, with ranges inside the quotes', async () => {
+  const ned =
+    'package p;\n@namespace("myns");\n' +
+    'simple Sender {\n @class("SenderImpl");\n @signal[out](type="MyPacket");\n}\n';
+  const { nedCache, msgCache } = await build({ 'file:///p.ned': ned }, { 'file:///p.msg': MSG });
+  const file = nedCache.getFile('file:///p.ned')!;
+  const def = nedClassDefinition(msgCache, nedCache, file, file.tree, { line: 3, character: 12 });
+  assert.equal(def?.uri, 'file:///p.msg');
+  const uses = findMsgUsagesInNed(msgCache, nedCache, 'myns::MyPacket');
+  assert.deepEqual(uses.map((u) => u.range), [{ start: { line: 4, character: 20 }, end: { line: 4, character: 28 } }]);
+});

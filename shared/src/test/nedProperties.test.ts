@@ -3,6 +3,7 @@ import assert from 'node:assert';
 import { getParsers } from './helpers';
 import { BUILTIN_NED_TEXT, BUILTIN_URI, NedResourceCache } from '../ned/nedResourceCache';
 import { nedCompletion } from '../ned/nedCompletion';
+import { unquotePropertyValue } from '../ned/nedAst';
 
 async function nedCache(files: Record<string, string>) {
   const svc = await getParsers();
@@ -380,4 +381,29 @@ test('findTypeProperty resolves @defaultStatistic (local) and inherits it, expos
     // absent -> null
     assert.strictEqual(cache.getType('Plain')!.findTypeProperty('defaultStatistic'), null);
   });
+});
+
+test('unquotePropertyValue: quoted and unquoted single values mean the same', () => {
+  assert.strictEqual(unquotePropertyValue('X2AppServer'), 'X2AppServer');
+  assert.strictEqual(unquotePropertyValue('"X2AppServer"'), 'X2AppServer');
+  assert.strictEqual(unquotePropertyValue('"inet::Packet"'), 'inet::Packet');
+  assert.strictEqual(unquotePropertyValue('""'), '');
+  assert.strictEqual(unquotePropertyValue('"a","b"'), '"a","b"', 'a list is not a single quoted value');
+});
+
+test('@isNetwork accepts quoted and unquoted values', async () => {
+  const cache = await nedCache({
+    'file:///N.ned':
+      'module Bare { @isNetwork; }\n' +
+      'module T1 { @isNetwork(true); }\n' +
+      'module T2 { @isNetwork("true"); }\n' +
+      'module F1 { @isNetwork(false); }\n' +
+      'module F2 { @isNetwork("false"); }\n' +
+      'module Sub extends F2 { }\n',
+  });
+  const isNet = (n: string) => cache.getType(n)!.isNetworkType();
+  assert.deepStrictEqual(
+    ['Bare', 'T1', 'T2', 'F1', 'F2', 'Sub'].map(isNet),
+    [true, true, true, false, false, false],
+  );
 });

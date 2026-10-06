@@ -150,7 +150,7 @@ export function nedClassRefAt(
   const owner = nedCache.typeInfoForNode(typeNode, file.uri);
   if (!owner) return null;
   for (const ref of nedClassReferences(owner)) {
-    const range = nodeRange(ref.node);
+    const range = ref.range;
     if (rangeContainsPos(range, pos)) {
       return { ref, owner, target: resolveNedClass(msgCache, owner, ref.className), range };
     }
@@ -195,7 +195,7 @@ export function extractNedClassEdges(
         from: fromSym,
         to: resolved ? msgTypeSym(resolved.fqName) : null,
         rawTarget: ref.className,
-        src: { uri: file.uri, range: nodeRange(ref.node) },
+        src: { uri: file.uri, range: ref.range },
         originUri: file.uri,
         nsContext: ns,
         unresolved: !resolved,
@@ -215,7 +215,7 @@ export function findMsgUsagesInNed(
   for (const type of nedCache.allTypes()) {
     for (const ref of nedClassReferences(type)) {
       const resolved = resolveNedClass(msgCache, type, ref.className);
-      if (resolved?.fqName === msgFqName) out.push({ uri: type.file.uri, range: nodeRange(ref.node) });
+      if (resolved?.fqName === msgFqName) out.push({ uri: type.file.uri, range: ref.range });
     }
   }
   return out;

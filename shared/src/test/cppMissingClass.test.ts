@@ -106,3 +106,22 @@ test('only simple modules are checked (compound/network are exempt)', async () =
   const d = nedMissingImplClassDiagnostics(ctx.db, ctx.nedCache, 'file:///Net.ned');
   assert.equal(d.length, 0);
 });
+
+test('a quoted @class("Name") value finds the registered class', async () => {
+  const ctx = await build();
+  ctx.addCpp('file:///x.cc', 'namespace demo { Define_Module(X2AppServer); }');
+  ctx.addNed('file:///Foo.ned', `${HDR}simple Foo {\n  @class("X2AppServer");\n}`);
+  assert.equal(ctx.db.findImplClass('demo.Foo')?.qualifiedName, 'demo::X2AppServer');
+  assert.equal(nedMissingImplClassDiagnostics(ctx.db, ctx.nedCache, 'file:///Foo.ned').length, 0);
+});
+
+test('a quoted unregistered @class value is reported without its quotes', async () => {
+  const ctx = await build();
+  ctx.addCpp('file:///x.cc', 'namespace demo { Define_Module(SomethingElse); }');
+  ctx.addNed('file:///Foo.ned', `${HDR}simple Foo {\n  @class("Bar");\n}`);
+  const d = nedMissingImplClassDiagnostics(ctx.db, ctx.nedCache, 'file:///Foo.ned');
+  assert.equal(d.length, 1);
+  assert.ok(/C\+\+ class 'Bar'/.test(d[0].message));
+  // `  @class("Bar");` → the name spans columns 10..13, inside the quotes
+  assert.deepEqual(d[0].range, { start: { line: 3, character: 10 }, end: { line: 3, character: 13 } });
+});

@@ -1,5 +1,6 @@
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter';
-import { childrenOfType, firstChildOfType, childByField, walk } from '../parser/treeUtils';
+import { childrenOfType, firstChildOfType, childByField, nodeRange, walk } from '../parser/treeUtils';
+import type { Range } from '../model/location';
 
 /** tree-sitter node types for the six NED type definitions. */
 export const NED_TYPE_NODES = [
@@ -361,7 +362,7 @@ export function nedPropertyInfo(node: SyntaxNode): NedPropertyInfo {
 export function fileNamespace(tree: Tree): string | undefined {
   for (const p of childrenOfType(tree.rootNode, 'property')) {
     if (nameNode(p)?.text === 'namespace') {
-      const v = nedPropertyInfo(p).tags[0]?.value;
+      const v = unquotePropertyValue(nedPropertyInfo(p).tags[0]?.value ?? '');
       if (v) return v;
     }
   }
@@ -372,6 +373,25 @@ export function fileNamespace(tree: Tree): string | undefined {
 export interface NedClassRef {
   className: string;
   node: SyntaxNode;
+  /** The class name itself: `node` minus surrounding quotes. */
+  range: Range;
+}
+
+/** A single-valued property may be quoted (`@class("Foo")`); the kernel sees `Foo`. */
+export function unquotePropertyValue(value: string): string {
+  return /^"[^"]*"$/.test(value) ? value.slice(1, -1).trim() : value;
+}
+
+function classRef(tag: NedPropertyTag): NedClassRef | undefined {
+  const className = unquotePropertyValue(tag.value);
+  if (!className) return undefined;
+  const range = nodeRange(tag.node);
+  if (className !== tag.value && range.start.line === range.end.line) {
+    const offset = tag.node.text.indexOf(className);
+    range.start = { line: range.start.line, character: range.start.character + offset };
+    range.end = { line: range.start.line, character: range.start.character + className.length };
+  }
+  return { className, node: tag.node, range };
 }
 
 /** `@class(...)` backing-class references on a type. */
@@ -379,9 +399,8 @@ export function nedClassRefs(typeNode: SyntaxNode): NedClassRef[] {
   const out: NedClassRef[] = [];
   for (const p of propertyNodes(typeNode)) {
     const info = nedPropertyInfo(p);
-    if (info.name === 'class' && info.tags[0]?.value) {
-      out.push({ className: info.tags[0].value, node: info.tags[0].node });
-    }
+    const ref = info.name === 'class' && info.tags[0] ? classRef(info.tags[0]) : undefined;
+    if (ref) out.push(ref);
   }
   return out;
 }
@@ -393,7 +412,8 @@ export function nedSignalTypeRefs(typeNode: SyntaxNode): NedClassRef[] {
     const info = nedPropertyInfo(p);
     if (info.name !== 'signal') continue;
     const typeTag = info.tags.find((t) => t.key === 'type');
-    if (typeTag?.value) out.push({ className: typeTag.value, node: typeTag.node });
+    const ref = typeTag && classRef(typeTag);
+    if (ref) out.push(ref);
   }
   return out;
 }

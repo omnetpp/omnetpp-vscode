@@ -23,7 +23,7 @@ export { type FormatOptions, formatDocumentEdits } from './features/format';
 export { type WorkspaceSymbolInfo, workspaceSymbols } from './features/workspaceSymbols';
 
 // NED
-export { nameNode, fileNamespace } from './ned/nedAst';
+export { nameNode, fileNamespace, unquotePropertyValue } from './ned/nedAst';
 export { nedDocumentSymbols } from './ned/nedSymbols';
 export { nedLocalDiagnostics } from './ned/nedLocalChecks';
 export { BUILTIN_URI, BUILTIN_NED_TEXT, type NedFileInfo, NedResourceCache } from './ned/nedResourceCache';

@@ -15,6 +15,7 @@ import {
   implementsNodes,
   leadingDocComment,
   nedPropertyInfo,
+  unquotePropertyValue,
   type NedPropertyInfo,
   paramInfo,
   paramNodes,
@@ -330,17 +331,16 @@ export class NedTypeInfo {
   isNetworkType(): boolean {
     if (this.kind === 'network') return true;
     if (!this.isModuleType()) return false;
-    for (const p of propertyNodes(this.node)) {
-      const t = p.text.replace(/\s+/g, '');
-      if (/^@isNetwork\b/.test(t) && !/^@isNetwork\(false\)/.test(t)) return true;
-    }
+    const declaresIsNetwork = (t: NedTypeInfo): boolean =>
+      propertyNodes(t.node).some((p) => {
+        const info = nedPropertyInfo(p);
+        return info.name === 'isNetwork' && unquotePropertyValue(info.tags[0]?.value ?? '') !== 'false';
+      });
+    if (declaresIsNetwork(this)) return true;
     // inherited @isNetwork
     for (const base of this.ancestors()) {
       if (base.kind === 'network') return true;
-      for (const p of propertyNodes(base.node)) {
-        const t = p.text.replace(/\s+/g, '');
-        if (/^@isNetwork\b/.test(t) && !/^@isNetwork\(false\)/.test(t)) return true;
-      }
+      if (declaresIsNetwork(base)) return true;
     }
     return false;
   }

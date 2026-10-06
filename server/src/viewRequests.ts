@@ -2,7 +2,7 @@ import type { Connection, TextDocuments } from 'vscode-languageserver/node';
 import type { TextDocument } from 'vscode-languageserver-textdocument';
 import { pathToFileURL } from 'node:url';
 import { existsSync } from 'node:fs';
-import { effectiveNetwork, configSummaries, findCounterparts, OmnetppMethods } from '@omnetpp/shared';
+import { effectiveNetwork, configSummaries, findCounterparts, OmnetppMethods, unquotePropertyValue } from '@omnetpp/shared';
 import type {
   ActiveConfig,
   CounterpartParams,
@@ -179,9 +179,10 @@ export function registerViewRequests(
     if (!prop) return null;
     // First value = the statistic/vector name; a `module=...` tag = the sub-path (Eclipse
     // reads the property's default value + optional `module` key).
-    const vectorName = prop.tags.find((t) => t.key === undefined || t.key === '')?.value?.trim() || prop.tags[0]?.value?.trim() || '';
+    const valueOf = (tag: { value: string } | undefined) => unquotePropertyValue(tag?.value ?? '');
+    const vectorName = valueOf(prop.tags.find((t) => !t.key)) || valueOf(prop.tags[0]);
     if (!vectorName) return null;
-    const moduleSubPath = prop.tags.find((t) => t.key === 'module')?.value?.trim() || null;
+    const moduleSubPath = valueOf(prop.tags.find((t) => t.key === 'module')) || null;
     return { vectorName, moduleSubPath };
   });
 
