@@ -18,6 +18,7 @@ import type { IniResourceCache } from '../ini/iniResourceCache';
 import type { CppResourceCache } from '../cpp/cppResourceCache';
 import type { SemanticDatabase } from '../xref/semanticDatabase';
 import { isCppSourceFile } from '../cpp/cppScanner';
+import { isInNedFolder, type ProjectLayout } from './projectModel';
 
 /** {mtimeMs,size} change signal recorded per disk file (see `FileStat`). */
 export interface DiskFileMeta {
@@ -36,6 +37,16 @@ export interface DiskFileSink {
 /** Skip rules common to every disk scan: dot entries, node_modules, out. */
 function isSkippedEntry(name: string): boolean {
   return name.startsWith('.') || name === 'node_modules' || name === 'out';
+}
+
+/** The language a file is indexed as, or undefined if it is not indexed. NED
+ *  and INI files in excluded packages are not indexed. */
+function indexedKind(layout: ProjectLayout, fsPath: string, name: string): keyof DiskFileSink | undefined {
+  if (name.endsWith('.ned')) return isInNedFolder(layout, fsPath) ? 'ned' : undefined;
+  if (name.endsWith('.msg')) return 'msg';
+  if (name.endsWith('.ini')) return isInNedFolder(layout, fsPath) ? 'ini' : undefined;
+  if (isCppSourceFile(name)) return 'cpp';
+  return undefined;
 }
 
 /** Recursive walk under `dir`; `visit()` gets every surviving non-directory
@@ -105,22 +116,20 @@ export async function loadBuiltins(
 }
 
 /**
- * Walk every root directory and dispatch each indexable file to the sink by
- * extension: `.ned` / `.msg` / `.ini` / C++ source (`isCppSourceFile`), in that
- * test order. Roots are visited in order, without dedup (a file under two
+ * Walk every source root of the layout and dispatch each indexable file to the
+ * sink by extension: `.ned` / `.msg` / `.ini` / C++ source (`isCppSourceFile`),
+ * in that test order. Roots are visited in order, without dedup (a file under two
  * overlapping roots is dispatched twice, matching the historical behavior).
  */
 export async function scanSourceRoots(
   fs: FileSystem,
-  rootDirs: readonly string[],
+  layout: ProjectLayout,
   sink: DiskFileSink,
 ): Promise<void> {
-  for (const dir of rootDirs) {
+  for (const { dir } of layout.roots) {
     await walkDir(fs, dir, async (fsPath, name) => {
-      if (name.endsWith('.ned')) await sink.ned(fsPath);
-      else if (name.endsWith('.msg')) await sink.msg(fsPath);
-      else if (name.endsWith('.ini')) await sink.ini(fsPath);
-      else if (isCppSourceFile(name)) await sink.cpp(fsPath);
+      const kind = indexedKind(layout, fsPath, name);
+      if (kind) await sink[kind](fsPath);
     });
   }
 }
@@ -133,17 +142,12 @@ export async function scanSourceRoots(
  */
 export async function collectIndexableFiles(
   fs: FileSystem,
-  rootDirs: readonly string[],
+  layout: ProjectLayout,
 ): Promise<Map<string, DiskFileMeta>> {
   const out = new Map<string, DiskFileMeta>();
-  for (const dir of rootDirs) {
+  for (const { dir } of layout.roots) {
     await walkDir(fs, dir, async (fsPath, name, stat) => {
-      if (
-        name.endsWith('.ned') ||
-        name.endsWith('.msg') ||
-        name.endsWith('.ini') ||
-        isCppSourceFile(name)
-      ) {
+      if (indexedKind(layout, fsPath, name)) {
         out.set(fsPath, { mtimeMs: stat.mtimeMs ?? 0, size: stat.size ?? 0 });
       }
     });

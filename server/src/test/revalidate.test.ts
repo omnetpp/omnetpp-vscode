@@ -134,3 +134,23 @@ test('revalidate requests a full reindex when the layout changes', async () => {
   const r = await idx.revalidate([ROOT], []);
   assert.equal(r.needsReindex, true, 'layout change forces reindex');
 });
+
+test('INI files outside NED folders are never indexed, nor reported as changes', async () => {
+  const fs = new MemFS();
+  fs.set(`${ROOT}/.nedfolders`, 'src\n-old', 1000);
+  fs.set(`${ROOT}/src/omnetpp.ini`, '[General]\nnetwork = Net', 1000);
+  fs.set(`${ROOT}/src/old/omnetpp.ini`, '[General]\nnetwork = Net', 1000);
+  fs.set(`${ROOT}/doc/omnetpp.ini`, '[General]\nnetwork = Net', 1000);
+  const idx = await freshIndex(fs);
+  const indexed = () => [...idx.iniCache.allDocs()].map((d) => d.uri);
+  assert.deepEqual(indexed(), [uri('src/omnetpp.ini')]);
+  assert.equal(idx.isInNedFolder(uri('src/omnetpp.ini')), true);
+  assert.equal(idx.isInNedFolder(uri('src/old/omnetpp.ini')), false);
+  assert.equal(idx.isInNedFolder(uri('doc/omnetpp.ini')), false);
+
+  await idx.onFileChanged(uri('doc/omnetpp.ini'), false); // watcher event
+  assert.deepEqual(indexed(), [uri('src/omnetpp.ini')]);
+
+  const r = await idx.revalidate([ROOT], []);
+  assert.equal(r.iniChanged, false);
+});

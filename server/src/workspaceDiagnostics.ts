@@ -3,7 +3,7 @@ import type { TextDocument } from 'vscode-languageserver-textdocument';
 import { BUILTIN_URI } from '@omnetpp/shared';
 import type { ParsedDocument } from './documentModel';
 import { computeDiagnostics } from './features/diagnostics';
-import { ServerState, ctx, safeFsPath } from './serverState';
+import { ServerState, ctx, isIgnoredDoc, isUnderWorkspace } from './serverState';
 
 /**
  * The functions the rest of the server calls to keep diagnostics in sync: instant
@@ -44,16 +44,13 @@ export function registerWorkspaceDiagnostics(
    *  markers once a file becomes clean or drops out of the index. */
   const workspaceDiagUris = new Set<string>();
 
-  function isUnderWorkspace(uri: string): boolean {
-    const p = safeFsPath(uri);
-    if (!p) return false;
-    return state.workspaceFolders.some(
-      (root) => p === root || p.startsWith(root.endsWith('/') ? root : `${root}/`),
-    );
-  }
-
   function refresh(doc: TextDocument): void {
     if (!state.store) return;
+    if (isIgnoredDoc(state, doc)) {
+      state.store.remove(doc.uri);
+      connection.sendDiagnostics({ uri: doc.uri, diagnostics: [] });
+      return;
+    }
     const parsed = state.store.update(doc);
     if (state.index && parsed.tree) {
       if (parsed.language === 'ned') state.index.updateOpenDocument(doc.uri, parsed.text);
@@ -100,15 +97,15 @@ export function registerWorkspaceDiagnostics(
     // the caches change while the pass is suspended.
     const work: (() => ParsedDocument)[] = [];
     for (const f of index.cache.allFiles()) {
-      if (f.uri === BUILTIN_URI || !isUnderWorkspace(f.uri)) continue;
+      if (f.uri === BUILTIN_URI || !isUnderWorkspace(state, f.uri)) continue;
       work.push(() => ({ uri: f.uri, language: 'ned', version: 0, text: f.tree.rootNode.text, tree: f.tree }));
     }
     for (const f of index.msgCache.allFiles()) {
-      if (!isUnderWorkspace(f.uri)) continue;
+      if (!isUnderWorkspace(state, f.uri)) continue;
       work.push(() => ({ uri: f.uri, language: 'msg', version: 0, text: f.tree.rootNode.text, tree: f.tree }));
     }
     for (const { uri, doc, text } of index.iniCache.allDocs()) {
-      if (!isUnderWorkspace(uri)) continue;
+      if (!isUnderWorkspace(state, uri)) continue;
       work.push(() => ({ uri, language: 'ini', version: 0, text, ini: doc }));
     }
 

@@ -9,7 +9,6 @@ import {
   ParserService,
   SemanticDatabase,
   discoverProjectLayout,
-  isExcludedPackage,
   loadBuiltins,
   packageForFile,
   populateDatabase,
@@ -48,10 +47,9 @@ export async function buildDiskIndex(
   await loadBuiltins(fs, parsers, configDir, { nedCache, msgCache, configRegistry });
 
   const layout = await discoverProjectLayout(fs, workspaceFolders, nedPathDirs);
-  await scanSourceRoots(fs, layout.roots.map((r) => r.dir), {
+  await scanSourceRoots(fs, layout, {
     ned: async (p) => {
       const pkg = packageForFile(layout.roots, p);
-      if (pkg && isExcludedPackage(layout.excludedPackages, pkg)) return;
       try {
         nedCache.addFile(pathToFileURL(p).toString(), parsers.parse('ned', await fs.readFile(p)), pkg);
       } catch {

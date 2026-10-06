@@ -33,7 +33,7 @@ import {
 import { computeTypeHierarchySubtypes } from './features/typeHierarchy';
 import { computePreviewScene, computePreviewSceneByFq } from './features/nedPreview';
 import type { IndexContext } from './features/context';
-import { ServerState, ctx, iniDocFor, languageOfDoc, safeFsPath } from './serverState';
+import { ServerState, ctx, iniDocFor, isUnderWorkspace, languageOfDoc, safeFsPath } from './serverState';
 
 /**
  * A conservative test that an `.ini` file is actually an OMNeT++ ini, so that
@@ -200,11 +200,13 @@ export function registerViewRequests(
     async (params: ListConfigurationsParams): Promise<IniFileConfigs[]> => {
       // The client supplies the candidate ini uris (found via workspace.findFiles);
       // union in any open ini buffers so freshly-created/unsaved files appear too.
+      // Only workspace files in NED folders count: `nedPath` roots are libraries.
       const uris = new Set<string>(params.uris ?? []);
       for (const doc of documents.all()) if (languageOfDoc(doc) === 'ini') uris.add(doc.uri);
 
       const result: IniFileConfigs[] = [];
       for (const uri of uris) {
+        if (!isUnderWorkspace(state, uri) || !state.index?.isInNedFolder(uri)) continue;
         const doc = await iniDocFor(state, uri);
         if (!doc || !looksLikeOmnetppIni(doc)) continue;
         const configs = configSummaries(doc);

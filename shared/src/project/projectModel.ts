@@ -120,3 +120,14 @@ export function packageForFile(roots: NedSourceRoot[], filePath: string): string
 export function isExcludedPackage(excluded: string[], pkg: string): boolean {
   return excluded.some((e) => pkg === e || pkg.startsWith(e + '.'));
 }
+
+/**
+ * Whether `path` lies in a NED folder: under a source root and not in an
+ * excluded package. Copies of `.ini` (and `.ned`) files elsewhere in the
+ * workspace (documentation, stray checkouts) must not be analyzed.
+ */
+export function isInNedFolder(layout: ProjectLayout, path: string): boolean {
+  if (!rootForPath(layout.roots, path)) return false;
+  const pkg = packageForFile(layout.roots, path);
+  return !pkg || !isExcludedPackage(layout.excludedPackages, pkg);
+}

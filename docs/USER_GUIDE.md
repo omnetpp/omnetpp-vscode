@@ -196,7 +196,8 @@ back to that config's network type.)
 #### Configurations view
 
 **Shows.** Every non-abstract `[Config …]`/`[General]` section in the workspace, grouped by
-`.ini` file.
+`.ini` file. Only `.ini` files inside the workspace's NED folders are listed (see *Project
+model discovery* below).
 
 **Use.** It does *not* follow the cursor — it refreshes automatically as `.ini` files
 change. Title-bar actions let you **Filter** / **Clear filter** the list, **Refresh**, and
@@ -365,7 +366,9 @@ exit code, in VS Code in the **OMNeT++ Language Server** output.
 > **Project model discovery.** NED source roots come from `.nedfolders` / `.nedexclusions`
 > / `package.ned`, falling back to indexing workspace folders, plus `omnetpp.nedPath` and
 > the install dir. Settings apply **live** — changing `nedPath`/`installDir` reindexes
-> without a window reload.
+> without a window reload. `.ini` files count only inside a NED folder (under a source root,
+> not in an excluded package): copies elsewhere, e.g. in documentation, are ignored even
+> when opened in an editor.
 
 ---
 

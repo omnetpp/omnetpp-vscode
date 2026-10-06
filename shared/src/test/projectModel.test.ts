@@ -2,6 +2,7 @@ import { test } from 'bun:test';
 import assert from 'node:assert';
 import {
   discoverProjectLayout,
+  isInNedFolder,
   packageForFile,
   parsePackageDecl,
 } from '../project/projectModel';
@@ -29,4 +30,17 @@ test('project layout discovery with .nedfolders and package.ned', async () => {
   assert.deepEqual(layout.excludedPackages, ['org.excluded']);
   assert.equal(packageForFile(layout.roots, '/ws/src/sub/Foo.ned'), 'myproj.sub');
   assert.equal(parsePackageDecl('// c\npackage a.b.c;\n'), 'a.b.c');
+});
+
+test('isInNedFolder: under a source root and not in an excluded package', () => {
+  const layout = {
+    roots: [{ dir: '/ws/src', rootPackage: 'myproj' }, { dir: '/ws/simulations', rootPackage: '' }],
+    excludedPackages: ['myproj.old', 'doc'],
+  };
+  assert.equal(isInNedFolder(layout, '/ws/src/net/omnetpp.ini'), true);
+  assert.equal(isInNedFolder(layout, '/ws/simulations/omnetpp.ini'), true);
+  assert.equal(isInNedFolder(layout, '/ws/docs/copy/omnetpp.ini'), false);
+  assert.equal(isInNedFolder(layout, '/ws/srcold/omnetpp.ini'), false);
+  assert.equal(isInNedFolder(layout, '/ws/src/old/omnetpp.ini'), false);
+  assert.equal(isInNedFolder(layout, '/ws/simulations/doc/omnetpp.ini'), false);
 });

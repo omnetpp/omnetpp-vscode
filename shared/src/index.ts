@@ -76,6 +76,7 @@ export {
   rootForPath,
   packageForFile,
   isExcludedPackage,
+  isInNedFolder,
 } from './project/projectModel';
 export {
   type DiskFileMeta,

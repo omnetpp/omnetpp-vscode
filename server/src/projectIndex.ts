@@ -15,6 +15,7 @@ import {
   discoverProjectLayout,
   isCppSourceFile,
   isExcludedPackage,
+  isInNedFolder,
   loadBuiltins,
   packageForFile,
   parseIni,
@@ -97,7 +98,7 @@ export class ProjectIndex {
     this.db.onNedFile(BUILTIN_URI);
 
     this.layout = await discoverProjectLayout(this.fs, workspaceFolders, nedPathDirs);
-    await scanSourceRoots(this.fs, this.layout.roots.map((r) => r.dir), {
+    await scanSourceRoots(this.fs, this.layout, {
       ned: (p) => this.indexFile(p),
       msg: (p) => this.indexMsgFile(p),
       ini: (p) => this.indexIniFile(p),
@@ -119,6 +120,7 @@ export class ProjectIndex {
   async indexIniFile(fsPath: string): Promise<void> {
     const uri = pathToFileURL(fsPath).toString();
     if (this.isOpen(uri)) return; // open buffer owns the cache entry
+    if (!isInNedFolder(this.layout, fsPath)) return;
     let text: string;
     try {
       text = await this.fs.readFile(fsPath);
@@ -302,7 +304,7 @@ export class ProjectIndex {
       };
     }
 
-    const onDisk = await collectIndexableFiles(this.fs, this.layout.roots.map((r) => r.dir));
+    const onDisk = await collectIndexableFiles(this.fs, this.layout);
     const disk = new Map<string, { mtimeMs: number; size: number }>();
     for (const [p, meta] of onDisk) disk.set(pathToFileURL(p).toString(), meta);
 
@@ -335,6 +337,16 @@ export class ProjectIndex {
       mark(uri);
     }
     return result;
+  }
+
+  /** Whether the file lies in a NED folder (see `isInNedFolder`); INI files
+   *  elsewhere are ignored, even when open in an editor. */
+  isInNedFolder(uri: string): boolean {
+    try {
+      return isInNedFolder(this.layout, fileURLToPath(uri));
+    } catch {
+      return false;
+    }
   }
 
   folderPackageForUri(uri: string): string {

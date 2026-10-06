@@ -126,12 +126,25 @@ export function safeFsPath(uri: string): string | undefined {
   }
 }
 
+export function isUnderWorkspace(state: ServerState, uri: string): boolean {
+  const p = safeFsPath(uri);
+  if (!p) return false;
+  return state.workspaceFolders.some(
+    (root) => p === root || p.startsWith(root.endsWith('/') ? root : `${root}/`),
+  );
+}
+
 export function languageOfDoc(doc: TextDocument): 'ned' | 'msg' | 'ini' | undefined {
   const u = doc.uri.toLowerCase();
   if (doc.languageId === 'OMNeT++ NED' || u.endsWith('.ned')) return 'ned';
   if (doc.languageId === 'OMNeT++ MSG' || u.endsWith('.msg')) return 'msg';
   if (doc.languageId === 'OMNeT++ INI' || u.endsWith('.ini')) return 'ini';
   return undefined;
+}
+
+/** An INI document outside every NED folder: the server provides no features for it. */
+export function isIgnoredDoc(state: ServerState, doc: TextDocument): boolean {
+  return languageOfDoc(doc) === 'ini' && !state.index?.isInNedFolder(doc.uri);
 }
 
 /** Parse an ini either from its open buffer (authoritative) or from disk. */

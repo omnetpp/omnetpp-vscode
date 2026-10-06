@@ -44,6 +44,7 @@ import {
   iconProvider,
   invalidateIconIds,
   invalidateIconProvider,
+  isIgnoredDoc,
   languageOfDoc,
   safeFsPath,
 } from './serverState';
@@ -160,6 +161,7 @@ connection.onInitialized(async () => {
 documents.onDidChangeContent((e) => {
   const lang = languageOfDoc(e.document);
   if (lang === 'ini') {
+    if (isIgnoredDoc(state, e.document)) return;
     state.store?.update(e.document); // cheap parse now; defer (heavier) analysis
     wsDiag.scheduleIni(e.document.uri);
     return;

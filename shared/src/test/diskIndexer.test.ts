@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { FileStat, FileSystem } from '../fs/fileSystem';
 import { collectIndexableFiles, scanSourceRoots } from '../project/diskIndexer';
+import type { ProjectLayout } from '../project/projectModel';
 
 // Minimal in-memory FileSystem (same shape as server/src/test/revalidate.test.ts).
 class MemFS implements FileSystem {
@@ -50,6 +51,10 @@ function collectingSink(): { seen: Map<string, string[]>; sink: Parameters<typeo
   };
 }
 
+function layout(dirs: string[], excludedPackages: string[] = []): ProjectLayout {
+  return { roots: dirs.map((dir) => ({ dir, rootPackage: '' })), excludedPackages };
+}
+
 describe('diskIndexer', () => {
   test('scanSourceRoots dispatches by extension and honors skip rules', async () => {
     const fs = new MemFS();
@@ -65,7 +70,7 @@ describe('diskIndexer', () => {
     fs.set('/proj/out/gen.msg', 'skipped');
 
     const { seen, sink } = collectingSink();
-    await scanSourceRoots(fs, ['/proj'], sink);
+    await scanSourceRoots(fs, layout(['/proj']), sink);
 
     expect(seen.get('ned')).toEqual(['/proj/Net.ned']);
     expect(seen.get('msg')).toEqual(['/proj/sub/Pkt.msg']);
@@ -78,7 +83,7 @@ describe('diskIndexer', () => {
     fs.set('/a/A.ned', 'x');
     fs.set('/b/B.ned', 'x');
     const { seen, sink } = collectingSink();
-    await scanSourceRoots(fs, ['/b', '/missing', '/a'], sink);
+    await scanSourceRoots(fs, layout(['/b', '/missing', '/a']), sink);
     expect(seen.get('ned')).toEqual(['/b/B.ned', '/a/A.ned']);
   });
 
@@ -89,9 +94,28 @@ describe('diskIndexer', () => {
     fs.set('/proj/notes.txt', 'nope', 333);
     fs.set('/proj/.hidden/X.ned', 'nope', 444);
 
-    const disk = await collectIndexableFiles(fs, ['/proj']);
+    const disk = await collectIndexableFiles(fs, layout(['/proj']));
     expect([...disk.keys()].sort()).toEqual(['/proj/Net.ned', '/proj/Pkt.msg']);
     expect(disk.get('/proj/Net.ned')).toEqual({ mtimeMs: 111, size: 5 });
     expect(disk.get('/proj/Pkt.msg')).toEqual({ mtimeMs: 222, size: 7 });
+  });
+
+  test('INI and NED files in excluded packages are not indexed', async () => {
+    const fs = new MemFS();
+    fs.set('/proj/sim/omnetpp.ini', '[General]');
+    fs.set('/proj/sim/Net.ned', 'network Net {}');
+    fs.set('/proj/doc/copy/omnetpp.ini', '[General]');
+    fs.set('/proj/doc/copy/Net.ned', 'network Net {}');
+    fs.set('/proj/doc/Pkt.msg', 'packet Pkt {}');
+    const l = layout(['/proj'], ['doc']);
+
+    const { seen, sink } = collectingSink();
+    await scanSourceRoots(fs, l, sink);
+    expect(seen.get('ini')).toEqual(['/proj/sim/omnetpp.ini']);
+    expect(seen.get('ned')).toEqual(['/proj/sim/Net.ned']);
+    expect(seen.get('msg')).toEqual(['/proj/doc/Pkt.msg']);
+
+    const disk = await collectIndexableFiles(fs, l);
+    expect([...disk.keys()].sort()).toEqual(['/proj/doc/Pkt.msg', '/proj/sim/Net.ned', '/proj/sim/omnetpp.ini']);
   });
 });
