@@ -248,6 +248,16 @@
         "category": "OMNeT++"
       },
       {
+        "command": "omnetpp.installCliTools",
+        "title": "Install Command-Line Tools",
+        "category": "OMNeT++"
+      },
+      {
+        "command": "omnetpp.uninstallCliTools",
+        "title": "Uninstall Command-Line Tools",
+        "category": "OMNeT++"
+      },
+      {
         "command": "omnetpp.generateNedDocumentation",
         "title": "Generate NED Documentation",
         "category": "OMNeT++",

@@ -21,6 +21,7 @@ import { registerViews } from './views';
 import { registerNedPreview } from './nedPreviewPanel';
 import { registerDocsCommand } from './docsCommand';
 import { registerCounterpartCommand } from './counterparts';
+import { registerCliToolsCommands } from './cliTools';
 import { startMcpBridge } from './mcpBridge';
 import { registerEventLog } from './eventlog';
 
@@ -91,6 +92,8 @@ export function activate(context: ExtensionContext): void {
     serverOptions,
     clientOptions
   );
+
+  registerCliToolsCommands(context);
 
   void client.start();
   registerViews(context, client);
