@@ -15,3 +15,12 @@ export function indexPath(fsPath: string, platform: NodeJS.Platform = process.pl
 export function uriToIndexPath(uri: string, platform: NodeJS.Platform = process.platform): string {
   return indexPath(fileURLToPath(uri, { windows: platform === 'win32' }), platform);
 }
+
+/** Split a NED path list. Windows uses ';' only, since ':' follows the drive
+ *  letter; elsewhere ':' (the OS path-list separator) and ';' both work. */
+export function splitNedPath(list: string, platform: NodeJS.Platform = process.platform): string[] {
+  return list
+    .split(platform === 'win32' ? ';' : /[;:]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}

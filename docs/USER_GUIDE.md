@@ -710,7 +710,7 @@ results reflect exactly what you're editing right now, unsaved changes included.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `omnetpp.nedPath` | `""` | Extra NED source-root directories (`;`-separated), in addition to those discovered from `.nedfolders`/`package.ned`. Indexed for cross-file resolution. |
+| `omnetpp.nedPath` | `""` | Extra NED source-root directories (`;`-separated; on Linux/macOS `:` also works), in addition to those discovered from `.nedfolders`/`package.ned`. Indexed for cross-file resolution. |
 | `omnetpp.installDir` | `""` | OMNeT++ installation root. Only its `images/` folder is used, as an icon source. When empty, the `OMNETPP_ROOT` (or `__omnetpp_root_dir`) environment variable is used. |
 | `omnetpp.diagnostics.scope` | `workspace` | `workspace` analyzes every NED/MSG/INI file, so errors in unopened files stay visible; `openFiles` analyzes open editors only. |
 | `omnetpp.codeLens.iniParams` | `true` | Show the "N module parameters" CodeLens on INI assignment lines. |
@@ -811,7 +811,7 @@ opp_lint --ned-path=/opt/inet/src src/   # add libraries for cross-file resoluti
 
 | Option | Meaning |
 | --- | --- |
-| `--ned-path=<dirs>` | Extra NED source roots (`;`- or `:`-separated) for cross-file resolution. Indexed but **not** linted. Default: `OMNETPP_NED_PATH`. |
+| `--ned-path=<dirs>` | Extra NED source roots (`;`-separated, or `:` outside Windows) for cross-file resolution. Indexed but **not** linted. Default: `OMNETPP_NED_PATH`. |
 | `--format=text\|json` | Output format (default `text`). |
 | `--severity=error\|warning\|info\|hint` | Minimum severity to report (default `hint` — report everything). |
 | `--fail-on=error\|warning\|info\|hint\|never` | Exit non-zero if a diagnostic at this severity or worse is found (default `error`). |

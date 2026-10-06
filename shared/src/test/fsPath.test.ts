@@ -1,6 +1,6 @@
 import { test } from 'bun:test';
 import assert from 'node:assert';
-import { indexPath, uriToIndexPath } from '../node/fsPath';
+import { indexPath, splitNedPath, uriToIndexPath } from '../node/fsPath';
 
 test('indexPath on win32 uses forward slashes and a lowercase drive letter', () => {
   assert.equal(indexPath('C:\\inet\\src', 'win32'), 'c:/inet/src');
@@ -18,4 +18,14 @@ test('uriToIndexPath turns VS Code URIs into index paths', () => {
   assert.equal(uriToIndexPath('file:///C:/proj/a.ned', 'win32'), 'c:/proj/a.ned');
   assert.equal(uriToIndexPath('file:///proj/a%2Bb.ned', 'linux'), '/proj/a+b.ned');
   assert.throws(() => uriToIndexPath('untitled:Untitled-1', 'linux'));
+});
+
+test('splitNedPath keeps Windows drive letters and splits on ; only', () => {
+  assert.deepEqual(splitNedPath('C:\\inet\\src; D:/lib/ned;', 'win32'), ['C:\\inet\\src', 'D:/lib/ned']);
+  assert.deepEqual(splitNedPath('C:\\inet\\src', 'win32'), ['C:\\inet\\src']);
+});
+
+test('splitNedPath accepts : and ; outside Windows', () => {
+  assert.deepEqual(splitNedPath('/opt/inet/src:/opt/lib ; /x', 'linux'), ['/opt/inet/src', '/opt/lib', '/x']);
+  assert.deepEqual(splitNedPath('  ', 'darwin'), []);
 });

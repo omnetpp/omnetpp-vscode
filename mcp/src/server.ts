@@ -36,7 +36,8 @@ Arguments:
   projectDir          Project directories to index. Defaults to the current directory.
 
 Options:
-  --ned-path=<dirs>   Extra NED source roots (libraries), ';'- or ':'-separated.
+  --ned-path=<dirs>   Extra NED source roots (libraries), ';'-separated
+                      (or ':' outside Windows).
                       Defaults to the OMNETPP_NED_PATH environment variable.
   -h, --help          Show this help.`;
 

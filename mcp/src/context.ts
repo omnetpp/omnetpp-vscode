@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ParserService, ToolContext, fileUri, normalizeFileUri } from '@omnetpp/shared';
-import { NodeFileSystem } from '@omnetpp/shared/node';
+import { NodeFileSystem, splitNedPath } from '@omnetpp/shared/node';
 import { buildDiskIndex, DiskIndex } from './indexBuilder.js';
 
 export interface DiskToolSetup {
@@ -57,11 +57,7 @@ export async function createDiskToolSetup(
   return { ctx, index, parsers, wasmDir, configDir };
 }
 
-/** Split a `;`/`:`-separated NED path list into absolute directories. */
+/** Split a NED path list (see `splitNedPath`) into absolute directories. */
 export function parseNedPathDirs(nedPath: string): string[] {
-  return nedPath
-    .split(/[;:]/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((s) => resolve(s));
+  return splitNedPath(nedPath).map((s) => resolve(s));
 }

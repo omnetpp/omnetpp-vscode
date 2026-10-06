@@ -767,7 +767,7 @@
         "omnetpp.nedPath": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Semicolon-separated list of additional NED source root directories (like the `ned-path` config option). Used in addition to source roots discovered from `.nedfolders`/`package.ned`."
+          "markdownDescription": "Semicolon-separated list of additional NED source root directories (like the `ned-path` config option; on Linux/macOS `:` also separates). Used in addition to source roots discovered from `.nedfolders`/`package.ned`."
         },
         "omnetpp.installDir": {
           "type": "string",

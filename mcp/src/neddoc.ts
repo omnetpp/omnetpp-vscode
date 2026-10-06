@@ -60,7 +60,8 @@ Options:
   --format=<fmt>      Output format: html (default) | html-readthedocs |
                       html-material | markdown | rst.
   --ned-path=<dirs>   Extra NED source roots for cross-file resolution
-                      (libraries), ';'- or ':'-separated. Indexed, not documented.
+                      (libraries), ';'-separated (or ':' outside Windows).
+                      Indexed, not documented.
   --title=<text>      Documentation title (default: the project dir name).
   -x <pattern>        Exclude directories matching the glob-ish pattern
                       (* and ** supported); repeatable.

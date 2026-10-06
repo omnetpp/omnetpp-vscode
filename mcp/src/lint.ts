@@ -56,7 +56,8 @@ Arguments:
 
 Options:
   --ned-path=<dirs>   Extra NED source roots for cross-file resolution (libraries),
-                      ';'- or ':'-separated. These are indexed but not linted.
+                      ';'-separated (or ':' outside Windows). These are indexed
+                      but not linted.
   --format=<fmt>      Output format: text (default) or json.
   --severity=<level>  Minimum severity to report: error | warning | info | hint
                       (default: hint — report everything).
