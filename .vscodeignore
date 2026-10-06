@@ -29,3 +29,6 @@ omnetpp-vscode.code-workspace
 # IDE metadata (and vsce's secret scanner must not try to open it)
 .idea/**
 .idea
+# local agent/editor state and scratch files (vsce packs from disk, not from git)
+.devin/**
+scratchpad/**
