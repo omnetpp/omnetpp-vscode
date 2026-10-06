@@ -115,6 +115,14 @@ export {
   resolveNedClass,
   findMsgUsagesInNed,
 } from './xref/nedMsgLinks';
+export { findCounterparts } from './xref/counterparts';
+export {
+  type CounterpartKind,
+  type CounterpartResult,
+  type CounterpartTarget,
+  counterpartKind,
+  nextCounterpart,
+} from './xref/counterpartRing';
 
 // C++ scanner + cache (lightweight cross-referencing of .cc/.h)
 export { isCppSourceFile } from './cpp/cppScanner';

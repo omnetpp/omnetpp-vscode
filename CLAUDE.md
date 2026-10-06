@@ -162,7 +162,9 @@ For the MCP feature (after `bun run dev:build`):
 `mcp-smoke.mjs <projectDir>` drives the standalone `dist/opp_ide_mcp.js` over MCP stdio;
 `mcp-live-smoke.mjs <projectDir>` drives `dist/server.js` and exercises the
 `omnetpp/mcp/*` live-index requests (incl. unsaved-buffer reflection);
-`preview-smoke.mjs` checks the `omnetpp/nedPreview` scene request shape the same way. Note: MCP stdio is
+`preview-smoke.mjs` checks the `omnetpp/nedPreview` scene request shape the same way.
+`counterparts-smoke.mjs [<projectDir> <file>…]` checks the `omnetpp/counterparts` request (the
+`Alt+O` .cc/.h/.ned switch) the same way, with the C++ files not open as LSP documents. Note: MCP stdio is
 **newline-delimited JSON**, not LSP `Content-Length` framing. `lint-cli-smoke.mjs` drives
 the bundled CLI linter (`dist/opp_lint.js`) over a throwaway project (diagnostics,
 suppression, JSON shape, exit codes). For the eventlog feature (after `bun run dev:build`):

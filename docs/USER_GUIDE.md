@@ -101,9 +101,24 @@ type mismatches are caught immediately.
 - **Workspace Symbol search** (`Ctrl+T`) — jump to any NED/MSG type by name.
 - **Document Highlight** — every occurrence of the type under the cursor.
 - **CodeLens** showing cross-reference counts above declarations.
+- **Switch Between C++ and NED File** (`Alt+O`) — steps through the files of a module in
+  the order `.cc` → `.h` → `.ned` → `.cc`, skipping the ones that do not exist. The files
+  are paired the way OMNeT++ pairs them (`@class`, `@namespace`, `Define_Module`, and the
+  class inherited from a base type), so differently named files are found too. Without a
+  match, the file with the same base name in the same folder is used. In a NED file with
+  several modules, the module at the cursor decides. When the next step has several
+  candidates (e.g. one C++ class used by several NED types), the one named like the current
+  file wins; without such a file, a picker opens.
 
 **How to use it.** Standard VS Code gestures (`F12`, `Shift+F12`, `Ctrl+T`, hover). Hover
-docs render documentation comments, with clickable `~Symbol` references.
+docs render documentation comments, with clickable `~Symbol` references. `Alt+O` works in
+NED and C/C++ editors. The C/C++ and clangd extensions bind `Alt+O` to their own
+header/source switch; if theirs wins, add this to your `keybindings.json`:
+
+```json
+{ "key": "alt+o", "command": "omnetpp.switchCounterpart",
+  "when": "editorTextFocus && (editorLangId == 'cpp' || editorLangId == 'c' || editorLangId == 'OMNeT++ NED')" }
+```
 
 **Advantage.** Navigate large model libraries (e.g. INET) the way you navigate code —
 following types, parameters, and signals across NED and MSG boundaries.

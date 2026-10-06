@@ -20,6 +20,7 @@ import { OmnetppMethods, type OmnetppSettings } from '@omnetpp/shared/protocol';
 import { registerViews } from './views';
 import { registerNedPreview } from './nedPreviewPanel';
 import { registerDocsCommand } from './docsCommand';
+import { registerCounterpartCommand } from './counterparts';
 import { startMcpBridge } from './mcpBridge';
 import { registerEventLog } from './eventlog';
 
@@ -95,6 +96,7 @@ export function activate(context: ExtensionContext): void {
   registerViews(context, client);
   registerNedPreview(context, client);
   registerDocsCommand(context, client);
+  registerCounterpartCommand(context, client);
   registerEventLog(context, client);
   registerRevalidationTriggers(context);
 

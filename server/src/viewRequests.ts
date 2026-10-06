@@ -1,8 +1,12 @@
 import type { Connection, TextDocuments } from 'vscode-languageserver/node';
 import type { TextDocument } from 'vscode-languageserver-textdocument';
-import { effectiveNetwork, configSummaries, OmnetppMethods } from '@omnetpp/shared';
+import { pathToFileURL } from 'node:url';
+import { existsSync } from 'node:fs';
+import { effectiveNetwork, configSummaries, findCounterparts, OmnetppMethods } from '@omnetpp/shared';
 import type {
   ActiveConfig,
+  CounterpartParams,
+  CounterpartResult,
   CursorParams,
   FqNameParams,
   IniDocument,
@@ -29,7 +33,7 @@ import {
 import { computeTypeHierarchySubtypes } from './features/typeHierarchy';
 import { computePreviewScene, computePreviewSceneByFq } from './features/nedPreview';
 import type { IndexContext } from './features/context';
-import { ServerState, ctx, iniDocFor, languageOfDoc } from './serverState';
+import { ServerState, ctx, iniDocFor, languageOfDoc, safeFsPath } from './serverState';
 
 /**
  * A conservative test that an `.ini` file is actually an OMNeT++ ini, so that
@@ -96,6 +100,19 @@ export function registerViewRequests(
     const parsed = params.uri ? state.store?.get(params.uri) : undefined;
     if (!parsed) return null;
     return computePreviewScene(parsed, params.position, c) ?? null;
+  });
+
+  // Served from the index, not the open-document store: C++ editors are not LSP
+  // documents. The URI is re-encoded the way the disk indexer keys files.
+  connection.onRequest(OmnetppMethods.counterparts, async (params: CounterpartParams): Promise<CounterpartResult> => {
+    const c = ctx(state);
+    const fsPath = safeFsPath(params.uri);
+    const uri = fsPath ? pathToFileURL(fsPath).toString() : params.uri;
+    if (!c) return { kind: null, cc: [], h: [], ned: [] };
+    return findCounterparts(c.db, uri, params.position, async (u) => {
+      const p = safeFsPath(u);
+      return p !== undefined && existsSync(p);
+    });
   });
 
   connection.onRequest(OmnetppMethods.moduleHierarchyChildren, (params: FqNameParams) => {

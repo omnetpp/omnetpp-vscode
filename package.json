@@ -240,6 +240,11 @@
         "icon": "$(open-preview)"
       },
       {
+        "command": "omnetpp.switchCounterpart",
+        "title": "Switch Between C++ and NED File",
+        "category": "OMNeT++"
+      },
+      {
         "command": "omnetpp.generateNedDocumentation",
         "title": "Generate NED Documentation",
         "category": "OMNeT++",
@@ -412,6 +417,10 @@
         {
           "command": "omnetpp.showNedPreview",
           "when": "editorLangId == 'OMNeT++ NED'"
+        },
+        {
+          "command": "omnetpp.switchCounterpart",
+          "when": "editorLangId == 'cpp' || editorLangId == 'c' || editorLangId == 'OMNeT++ NED'"
         },
         {
           "command": "omnetpp.previewShowType",
@@ -697,6 +706,11 @@
       }
     ],
     "keybindings": [
+      {
+        "command": "omnetpp.switchCounterpart",
+        "key": "alt+o",
+        "when": "editorTextFocus && (editorLangId == 'cpp' || editorLangId == 'c' || editorLangId == 'OMNeT++ NED')"
+      },
       {
         "command": "omnetpp.previewBack",
         "key": "alt+left",

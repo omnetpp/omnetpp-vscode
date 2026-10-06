@@ -29,7 +29,8 @@ or build it locally.
   inheritance and value-type checks, and full INI config-option validation. Inline
   `suppress(...)` directives silence individual codes.
 - **Navigation & refactoring**: go-to-definition, find-references, hover, rename, and a
-  workspace symbol search — all of it **cross-language** (NED ⇄ MSG ⇄ INI).
+  workspace symbol search — all of it **cross-language** (NED ⇄ MSG ⇄ INI). `Alt+O`
+  switches between a module's `.cc`, `.h` and `.ned` files.
 - **INI parameter resolution**: `**.param = value` keys are resolved against the expanded
   module tree of the selected `network`, flagging dead keys and type conflicts.
 - **Reverse-dependency tooling**: a "Used By" view, CodeLens reference counts, and

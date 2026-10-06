@@ -382,6 +382,21 @@ export class SemanticDatabase {
     return c ? { qualifiedName: c.qualifiedName, decl: c.decl } : null;
   }
 
+  /**
+   * The NED types whose own implementation class is `qualifiedName` (their
+   * `@class`, or their own name for a simple/channel), with the type-name
+   * location. Types that only inherit the class from a base are not included.
+   */
+  findImplTypes(qualifiedName: string): { fqName: string; decl: Location }[] {
+    const out: { fqName: string; decl: Location }[] = [];
+    for (const e of this.index.inboundOf(cppSym(qualifiedName))) {
+      if (e.kind !== 'ned-impl') continue;
+      const p = parseSymbolId(e.from);
+      if (p?.lang === 'ned') out.push({ fqName: p.fqName, decl: e.src });
+    }
+    return out;
+  }
+
   /** Forget a file's contribution to the cross-reference graph. */
   dropFile(uri: string): void {
     this.index.dropFile(uri);

@@ -4,7 +4,7 @@
 // error on both ends instead of a silent runtime failure.
 //
 // Deliberately dependency-light: the only runtime exports are the
-// OmnetppMethods constant and the tiny self-contained ini-header helper below —
+// OmnetppMethods constant and the tiny self-contained helpers below —
 // everything else is `import type`/`export type` (erased at compile time), so
 // the client can bundle '@omnetpp/shared/protocol' without dragging in the
 // semantic core.
@@ -15,6 +15,7 @@ import type { ParamAssign, ParamHierNode } from './ned/nedParamHierarchy';
 import type { ConfigSummary } from './ini/iniDocument';
 import type { ToolDef } from './mcp/tools';
 import type { PreviewScene, PreviewSubmodule, PreviewConnection, PreviewIcon } from './ned/nedPreviewScene';
+import type { CounterpartKind, CounterpartResult, CounterpartTarget } from './xref/counterpartRing';
 
 export type {
   Position,
@@ -29,12 +30,19 @@ export type {
   PreviewSubmodule,
   PreviewConnection,
   PreviewIcon,
+  CounterpartKind,
+  CounterpartResult,
+  CounterpartTarget,
 };
 
 // Runtime re-export for the client: the canonical `[Config X]` header-name rule
 // (used when building ActiveConfig from the cursor position without a server
 // round trip). iniDocument.js is self-contained — no transitive requires.
 export { configNameAtHeaderLine } from './ini/iniDocument';
+
+// Runtime re-export for the client's .cc → .h → .ned switch command
+// (counterpartRing.js is self-contained as well).
+export { nextCounterpart } from './xref/counterpartRing';
 
 /** Method names of every custom request/notification (see per-key comments). */
 export const OmnetppMethods = {
@@ -66,6 +74,8 @@ export const OmnetppMethods = {
   listConfigurations: 'omnetpp/listConfigurations',
   /** request: ViewFocusParams → PreviewScene | null (graphical NED preview) */
   nedPreview: 'omnetpp/nedPreview',
+  /** request: CounterpartParams → CounterpartResult (the corresponding .cc/.h/.ned files) */
+  counterparts: 'omnetpp/counterparts',
   /** request: void → ToolDef[] (the MCP tool schemas) */
   mcpListTools: 'omnetpp/mcp/listTools',
   /** request: McpCallToolParams → tool-specific result */
@@ -133,6 +143,12 @@ export interface GenerateDocsResult {
 export interface CursorParams {
   uri: string;
   position: Position;
+}
+
+/** The file to find counterparts for; the cursor narrows a multi-type NED file to one type. */
+export interface CounterpartParams {
+  uri: string;
+  position?: Position;
 }
 
 /** Focus for the tree views: a pinned type ({fqName}) or an editor position. */
