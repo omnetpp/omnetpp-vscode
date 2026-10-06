@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { LanguageClient } from 'vscode-languageclient/node';
 import {
+  matchNedTypeName,
   OmnetppMethods,
   resolveInstallDir,
   type Position as Pos,
@@ -299,8 +300,8 @@ export class NedPreviewPanel {
   /**
    * Pin request from the search box: empty input clears the pin; otherwise the
    * loose input is resolved to an *existing* NED type before pinning. A name
-   * that resolves to no indexed type is ignored, so the history only ever holds
-   * real pinned types.
+   * that resolves to no indexed type is ignored, and one shared by several types
+   * asks which is meant, so the history only ever holds real, intended types.
    */
   private async setPinFromSearch(text: string | undefined): Promise<void> {
     const raw = text?.trim();
@@ -312,22 +313,37 @@ export class NedPreviewPanel {
     if (fqName) await this.navigateTo(fqName);
   }
 
-  /** Resolve loose input to an indexed NED type's fq-name (exact, else unique
-   *  simple-name match); undefined if no such type exists. */
+  /** Resolve loose input to an indexed NED type's fq-name (exact, else simple-name
+   *  match; the user picks one if several types share the name); undefined if no
+   *  such type exists or the pick was cancelled. */
   private async resolveKnownType(text: string): Promise<string | undefined> {
-    let types: { fqName: string }[];
+    let types: { fqName: string; kind: string; file: string }[];
     try {
-      types = await this.client.sendRequest<{ fqName: string }[]>(OmnetppMethods.mcpCallTool, {
+      types = await this.client.sendRequest<{ fqName: string; kind: string; file: string }[]>(OmnetppMethods.mcpCallTool, {
         name: 'list_ned_types',
         arguments: {},
       });
     } catch {
       return text; // index unavailable: best-effort pin verbatim
     }
-    if (types.some((t) => t.fqName === text)) return text; // exact fq-name
-    const needle = text.toLowerCase();
-    const matches = types.filter((t) => (t.fqName.split('.').pop() ?? t.fqName).toLowerCase() === needle);
-    return matches.length >= 1 ? matches[0].fqName : undefined;
+    const match = matchNedTypeName(text, types.map((t) => t.fqName));
+    if (match.kind === 'exact' || match.kind === 'unique') return match.fqName;
+    if (match.kind === 'none') return undefined;
+    const byFq = new Map(types.map((t) => [t.fqName, t]));
+    const picks = match.fqNames.map((fqName) => {
+      const t = byFq.get(fqName);
+      return {
+        label: fqName,
+        description: t ? `${t.kind} · ${vscode.workspace.asRelativePath(vscode.Uri.parse(t.file))}` : undefined,
+        fqName,
+      };
+    });
+    const picked = await vscode.window.showQuickPick(picks, {
+      title: `${match.fqNames.length} NED types are named '${text}'`,
+      placeHolder: 'Pick the type to show',
+      matchOnDescription: true,
+    });
+    return picked?.fqName;
   }
 
   // ---- icon resolution (Eclipse search order) ----

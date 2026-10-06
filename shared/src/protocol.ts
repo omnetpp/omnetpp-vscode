@@ -44,6 +44,10 @@ export { configNameAtHeaderLine } from './ini/iniDocument';
 // (counterpartRing.js is self-contained as well).
 export { nextCounterpart } from './xref/counterpartRing';
 
+// Runtime re-export for the NED preview's search box (typeNameMatch.js is
+// self-contained too).
+export { matchNedTypeName, type NedTypeNameMatch } from './ned/typeNameMatch';
+
 /** Method names of every custom request/notification (see per-key comments). */
 export const OmnetppMethods = {
   /** notification client→server, no params: trigger index revalidation */
