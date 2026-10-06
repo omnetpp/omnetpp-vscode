@@ -2,7 +2,7 @@
 // the NED and MSG caches; keep MSG out of nedAst.ts / nedTypeInfo.ts.
 //
 // It resolves NED `@class(...)` and `@signal(...type=...)` class tokens to MSG
-// types (using the NED file's `@namespace`), and provides the reverse: which NED
+// types (using the NED file's effective `@namespace`), and provides the reverse: which NED
 // sites reference a given MSG type. This is purely best-effort *navigation*: a
 // `@class` names a registered C++ class, which is very often hand-written C++ with
 // no `.msg` file at all. So an unresolved `@class` is NOT an error — we never emit
@@ -19,7 +19,6 @@ import type { MsgTypeInfo } from '../msg/msgTypeInfo';
 import {
   NED_TYPE_NODES,
   NedClassRef,
-  fileNamespace,
   nameNode,
   nedClassRefs,
   nedSignalTypeRefs,
@@ -76,7 +75,7 @@ export function nedImplClassName(type: NedTypeInfo): string | null {
 
 /**
  * `ned-impl` edges of a NED file: each type that maps to a C++ implementation
- * class, resolved (via the file `@namespace`) to the class registered with
+ * class, resolved (via the effective `@namespace`) to the class registered with
  * `Define_Module`/`Define_Channel`. Unresolved when the class isn't indexed
  * (hand-written C++ not yet scanned, or a header-only base) — bucketed for drain.
  */
@@ -85,7 +84,7 @@ export function extractNedImplEdges(
   nedCache: NedResourceCache,
   file: NedFileInfo,
 ): XrefEdge[] {
-  const ns = fileNamespace(file.tree) ?? '';
+  const ns = nedCache.cxxNamespace(file);
   const out: XrefEdge[] = [];
   for (const type of nedCache.typesInFile(file.uri)) {
     const className = nedImplClassName(type);
@@ -112,7 +111,7 @@ export function resolveNedClass(
   nedType: NedTypeInfo,
   className: string,
 ): MsgTypeInfo | undefined {
-  const ns = fileNamespace(nedType.file.tree) ?? '';
+  const ns = nedType.cache.cxxNamespace(nedType.file);
   const name = className.replace(/^::/, ''); // leading :: forces global
   return msgCache.lookupType(name, ns);
 }
@@ -176,7 +175,7 @@ export function nedClassDefinition(
 
 /**
  * `ned-class` edges of a NED file: every `@class` / `@signal(type=)` reference of
- * each type in the file, resolved to its MSG type via the file `@namespace`. An
+ * each type in the file, resolved to its MSG type via the effective `@namespace`. An
  * unresolved reference (the backing class is hand-written C++ with no `.msg`)
  * carries `to=null` and is bucketed for drain — it is navigation, never an error.
  */
@@ -185,7 +184,7 @@ export function extractNedClassEdges(
   nedCache: NedResourceCache,
   file: NedFileInfo,
 ): XrefEdge[] {
-  const ns = fileNamespace(file.tree) ?? '';
+  const ns = nedCache.cxxNamespace(file);
   const out: XrefEdge[] = [];
   for (const type of nedCache.typesInFile(file.uri)) {
     const fromSym = nedTypeSym(type.fqName);

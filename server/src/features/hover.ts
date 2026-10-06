@@ -7,7 +7,6 @@ import {
   nedHover,
   nedDocRefResolver,
   nedClassRefAt,
-  fileNamespace,
   msgHover,
   msgDocRefResolver,
   iniHover,
@@ -120,7 +119,7 @@ function computeHoverRaw(
       if (hit.target) {
         md = `\`\`\`msg\n${hit.target.kind} ${hit.target.fqName}\n\`\`\``;
       } else {
-        const ns = fileNamespace(file.tree) ?? '';
+        const ns = ctx.nedCache.cxxNamespace(hit.owner.file);
         const cpp = ctx.db.cppCache.lookupClass(hit.ref.className, ns);
         if (cpp) {
           const where = baseName(cpp.decl.uri);

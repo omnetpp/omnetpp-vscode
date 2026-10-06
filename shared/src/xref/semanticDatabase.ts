@@ -11,7 +11,7 @@
 
 import type { Node as SyntaxNode } from 'web-tree-sitter';
 import type { Location } from '../model/location';
-import type { NedResourceCache } from '../ned/nedResourceCache';
+import { isPackageNedUri, type NedResourceCache } from '../ned/nedResourceCache';
 import type { MsgResourceCache } from '../msg/msgResourceCache';
 import type { IniResourceCache } from '../ini/iniResourceCache';
 import type { ConfigRegistry } from '../ini/configRegistry';
@@ -49,6 +49,8 @@ import type { EdgeKind, XrefEdge } from './xrefModel';
 export class SemanticDatabase {
   /** The cross-reference graph. */
   readonly index = new XrefIndex();
+  /** Package and `@namespace` last seen per indexed `package.ned`. */
+  private packageNedState = new Map<string, { pkg: string; ns: string }>();
 
   constructor(
     readonly nedCache: NedResourceCache,
@@ -202,6 +204,31 @@ export class SemanticDatabase {
     // Draining member names re-resolves any C++ access edges now that this type's
     // members (and their `ned-impl` link) exist; type names cover NED/impl edges.
     this.drainDeclared([...declared.map((t) => t.simpleName), ...memberNames]);
+
+    if (isPackageNedUri(uri)) {
+      const prev = this.packageNedState.get(uri);
+      const cur = { pkg: file.packageName, ns: fileNamespace(file.tree) ?? '' };
+      this.packageNedState.set(uri, cur);
+      const changed = prev ? prev.pkg !== cur.pkg || prev.ns !== cur.ns : cur.ns !== '';
+      if (changed) {
+        if (prev && prev.pkg !== cur.pkg) this.reindexPackageTree(prev.pkg, uri);
+        this.reindexPackageTree(cur.pkg, uri);
+      }
+    }
+  }
+
+  /**
+   * Re-extract the NED files of a package and its sub-packages. Their C++
+   * namespace may come from a `package.ned` that was indexed or edited after
+   * them, which their `ned-impl` / `ned-class` edges do not track.
+   */
+  private reindexPackageTree(pkg: string, exceptUri: string): void {
+    const prefix = pkg + '.';
+    for (const f of this.nedCache.allFiles()) {
+      if (f.uri === exceptUri) continue;
+      if (pkg && f.packageName !== pkg && !f.packageName.startsWith(prefix)) continue;
+      this.onNedFile(f.uri);
+    }
   }
 
   /** (Re)index a MSG file's `extends` / field-type edges. Call after `msgCache.addFile`. */
@@ -350,7 +377,7 @@ export class SemanticDatabase {
     if (!type) return null;
     const impl = nedImplClass(type);
     if (!impl) return null;
-    const ns = fileNamespace(impl.owner.file.tree) ?? '';
+    const ns = this.nedCache.cxxNamespace(impl.owner.file);
     const c = this.cppCache.lookupClass(impl.className, ns);
     return c ? { qualifiedName: c.qualifiedName, decl: c.decl } : null;
   }
@@ -358,10 +385,16 @@ export class SemanticDatabase {
   /** Forget a file's contribution to the cross-reference graph. */
   dropFile(uri: string): void {
     this.index.dropFile(uri);
+    const prev = this.packageNedState.get(uri);
+    if (prev) {
+      this.packageNedState.delete(uri);
+      if (prev.ns) this.reindexPackageTree(prev.pkg, uri);
+    }
   }
 
   clear(): void {
     this.index.clear();
+    this.packageNedState.clear();
   }
 
   // ---- index-backed query primitives -------------------------------------

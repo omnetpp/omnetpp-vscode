@@ -2,6 +2,7 @@ import type { Tree, Node as SyntaxNode } from 'web-tree-sitter';
 import { ResourceCacheBase } from '../model/resourceCacheBase';
 import { NedTypeInfo } from './nedTypeInfo';
 import {
+  fileNamespace,
   filePackage,
   fileImports,
   innerTypes,
@@ -56,6 +57,8 @@ export class NedResourceCache extends ResourceCacheBase<NedFileInfo, NedTypeInfo
    *  hit once per `like`-submodule per module instance during expansion). */
   private likeCandidatesMemo = new Map<string, NedTypeInfo[]>();
   private likeCandidatesMemoGen = -1;
+  private packageNedFiles = new Map<string, NedFileInfo>();
+  private packageNedFilesGen = -1;
 
   /**
    * Register/replace a file's NED types.
@@ -107,6 +110,32 @@ export class NedResourceCache extends ResourceCacheBase<NedFileInfo, NedTypeInfo
     for (const inner of innerTypes(node)) {
       if (isTypeNode(inner))
         this.registerType(inner, file, fqName, true, fqName, registered);
+    }
+  }
+
+  /**
+   * The C++ namespace of the types in a file, as the kernel's
+   * `NedTypeInfo::getCxxNamespace()` resolves it: the file's own `@namespace`,
+   * else the one in the `package.ned` of its package or the nearest parent
+   * package. Empty when none declares it.
+   */
+  cxxNamespace(file: NedFileInfo): string {
+    const own = fileNamespace(file.tree);
+    if (own) return own;
+    if (this.packageNedFilesGen !== this.generation) {
+      this.packageNedFiles.clear();
+      for (const f of this.files.values())
+        if (isPackageNedUri(f.uri)) this.packageNedFiles.set(f.packageName, f);
+      this.packageNedFilesGen = this.generation;
+    }
+    let pkg = file.packageName;
+    while (true) {
+      const pf = this.packageNedFiles.get(pkg);
+      const ns = pf && fileNamespace(pf.tree);
+      if (ns) return ns;
+      if (!pkg) return '';
+      const dot = pkg.lastIndexOf('.');
+      pkg = dot >= 0 ? pkg.slice(0, dot) : '';
     }
   }
 
@@ -216,6 +245,10 @@ export class NedResourceCache extends ResourceCacheBase<NedFileInfo, NedTypeInfo
     const candidates = this.lookupLikeCandidates(name, iface);
     return candidates.length === 1 ? candidates[0] : undefined;
   }
+}
+
+export function isPackageNedUri(uri: string): boolean {
+  return uri === 'package.ned' || uri.endsWith('/package.ned');
 }
 
 /**
