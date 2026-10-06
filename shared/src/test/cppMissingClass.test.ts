@@ -125,3 +125,30 @@ test('a quoted unregistered @class value is reported without its quotes', async 
   // `  @class("Bar");` → the name spans columns 10..13, inside the quotes
   assert.deepEqual(d[0].range, { start: { line: 3, character: 10 }, end: { line: 3, character: 13 } });
 });
+
+test('@class(-) and @class("-") mark an abstract type with no C++ class', async () => {
+  const ctx = await build();
+  ctx.addCpp('file:///x.cc', 'namespace demo { Define_Module(SomethingElse); }');
+  ctx.addNed('file:///Foo.ned', `${HDR}simple Bare { @class(-); }\nsimple Quoted { @class("-"); }`);
+  const d = nedMissingImplClassDiagnostics(ctx.db, ctx.nedCache, 'file:///Foo.ned');
+  assert.equal(d.length, 0);
+});
+
+test('a subtype of an @class(-) type inherits the abstract marker', async () => {
+  const ctx = await build();
+  ctx.addCpp('file:///x.cc', 'namespace demo { Define_Module(SomethingElse); }');
+  ctx.addNed('file:///Base.ned', `${HDR}simple Base { @class(-); }`);
+  ctx.addNed('file:///Derived.ned', `${HDR}simple Derived extends Base { }`);
+  const d = nedMissingImplClassDiagnostics(ctx.db, ctx.nedCache, 'file:///Derived.ned');
+  assert.equal(d.length, 0);
+});
+
+test('a subtype of an @class(-) type is checked when it declares its own @class', async () => {
+  const ctx = await build();
+  ctx.addCpp('file:///x.cc', 'namespace demo { Define_Module(SomethingElse); }');
+  ctx.addNed('file:///Base.ned', `${HDR}simple Base { @class(-); }`);
+  ctx.addNed('file:///Derived.ned', `${HDR}simple Derived extends Base { @class(Impl); }`);
+  const d = nedMissingImplClassDiagnostics(ctx.db, ctx.nedCache, 'file:///Derived.ned');
+  assert.equal(d.length, 1);
+  assert.ok(/C\+\+ class 'Impl'/.test(d[0].message));
+});

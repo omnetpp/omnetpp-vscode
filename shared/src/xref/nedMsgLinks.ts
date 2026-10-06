@@ -21,6 +21,7 @@ import {
   NedClassRef,
   nameNode,
   nedClassRefs,
+  nedHasNoClassMarker,
   nedSignalTypeRefs,
 } from '../ned/nedAst';
 import { cppSym, msgTypeSym, nedTypeSym } from './symbolId';
@@ -35,6 +36,8 @@ import type { CppResourceCache } from '../cpp/cppResourceCache';
  * `@class` inherits Base's implementation class rather than expecting one named
  * `Derived`. Only `simple` and `channel` roots get the default-name; a compound
  * module / network / interface has a C++ class only via an explicit `@class`.
+ * `@class(-)` marks an abstract type: it and the subtypes that inherit it have
+ * no C++ class.
  *
  * Returns the class name plus the NED type whose `@namespace` qualifies it (the
  * one that declared the `@class`, or the root for the default-name case), or null
@@ -45,6 +48,7 @@ export function nedImplClass(type: NedTypeInfo): { className: string; owner: Ned
   let t: NedTypeInfo | undefined = type;
   while (t && !seen.has(t.fqName)) {
     seen.add(t.fqName);
+    if (nedHasNoClassMarker(t.node)) return null;
     const own = nedClassRefs(t.node)[0]?.className;
     if (own) return { className: own, owner: t };
     const base = t.superType();
@@ -67,6 +71,7 @@ export function nedImplClass(type: NedTypeInfo): { className: string; owner: Ned
  * resolution used by navigation and the missing-class check, see `nedImplClass`.
  */
 export function nedImplClassName(type: NedTypeInfo): string | null {
+  if (nedHasNoClassMarker(type.node)) return null;
   const explicit = nedClassRefs(type.node)[0]?.className;
   if (explicit) return explicit;
   if (type.kind === 'simple' || type.kind === 'channel') return type.simpleName;

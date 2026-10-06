@@ -394,8 +394,10 @@ function classRef(tag: NedPropertyTag): NedClassRef | undefined {
   return { className, node: tag.node, range };
 }
 
-/** `@class(...)` backing-class references on a type. */
-export function nedClassRefs(typeNode: SyntaxNode): NedClassRef[] {
+/** `@class(-)` / `@class("-")`: an abstract type that must not be instantiated. */
+const NO_CLASS_MARKER = '-';
+
+function ownClassRefs(typeNode: SyntaxNode): NedClassRef[] {
   const out: NedClassRef[] = [];
   for (const p of propertyNodes(typeNode)) {
     const info = nedPropertyInfo(p);
@@ -403,6 +405,16 @@ export function nedClassRefs(typeNode: SyntaxNode): NedClassRef[] {
     if (ref) out.push(ref);
   }
   return out;
+}
+
+/** `@class(...)` backing-class references on a type (the `-` marker is not one). */
+export function nedClassRefs(typeNode: SyntaxNode): NedClassRef[] {
+  return ownClassRefs(typeNode).filter((r) => r.className !== NO_CLASS_MARKER);
+}
+
+/** The type declares `@class(-)`, i.e. it has no C++ class and is never instantiated. */
+export function nedHasNoClassMarker(typeNode: SyntaxNode): boolean {
+  return ownClassRefs(typeNode)[0]?.className === NO_CLASS_MARKER;
 }
 
 /** `@signal[...](type=Foo)` carried-type references on a type. */
