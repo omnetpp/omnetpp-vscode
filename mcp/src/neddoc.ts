@@ -17,6 +17,7 @@ import {
   generateNeddoc,
   defaultNeddocOptions,
   parseExternalDocsSpec,
+  resolveInstallDir,
   type DocFormat,
   type GeneratedFile,
   type IncludeResolution,
@@ -266,13 +267,14 @@ async function main(): Promise<void> {
     files++;
   };
 
-  // icon search roots: project images/ dirs, OMNETPP_ROOT/images, the bundled
+  // icon search roots: project images/ dirs, <OMNETPP_ROOT>/images, the bundled
   // snapshot next to the CLI bundle (Eclipse order). Referenced icons are
   // copied once into <out>/icons/ and SVGs point at them relatively (SVG
   // files live in images/, or at the root in the material layout).
+  const installDir = resolveInstallDir(undefined, process.env);
   const iconDirs = [
     ...opts.projectDirs.map((d) => join(d, 'images')).filter(existsSync),
-    ...(process.env.OMNETPP_ROOT ? [join(process.env.OMNETPP_ROOT, 'images')] : []),
+    ...(installDir ? [join(installDir, 'images')] : []),
     process.env.OMNETPP_ICONS_DIR || join(__dirname, 'icons'),
   ];
   let bundledIndex: Record<string, [number, number]> | undefined;

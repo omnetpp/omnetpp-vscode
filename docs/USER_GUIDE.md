@@ -20,8 +20,8 @@ config-option registry are bundled.
 
 > **Tip — use the icons of your OMNeT++ install:** set `omnetpp.installDir` (or the
 > `OMNETPP_ROOT` environment variable) to your OMNeT++ root. Icons from
-> `<installDir>/images` are then used in display-string icon completion and in generated
-> documentation, and (`omnetpp.installDir` only) in the graphical NED preview.
+> `<installDir>/images` are then used in display-string icon completion, in the graphical
+> NED preview, and in generated documentation.
 
 ---
 
@@ -711,7 +711,7 @@ results reflect exactly what you're editing right now, unsaved changes included.
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `omnetpp.nedPath` | `""` | Extra NED source-root directories (`;`-separated), in addition to those discovered from `.nedfolders`/`package.ned`. Indexed for cross-file resolution. |
-| `omnetpp.installDir` | `""` | OMNeT++ installation root. Only its `images/` folder is used, as an icon source. The server also honors the `OMNETPP_ROOT` environment variable. |
+| `omnetpp.installDir` | `""` | OMNeT++ installation root. Only its `images/` folder is used, as an icon source. When empty, the `OMNETPP_ROOT` (or `__omnetpp_root_dir`) environment variable is used. |
 | `omnetpp.diagnostics.scope` | `workspace` | `workspace` analyzes every NED/MSG/INI file, so errors in unopened files stay visible; `openFiles` analyzes open editors only. |
 | `omnetpp.codeLens.iniParams` | `true` | Show the "N module parameters" CodeLens on INI assignment lines. |
 | `omnetpp.trace.server` | `off` | Language-server trace level (`off` / `messages` / `verbose`). |

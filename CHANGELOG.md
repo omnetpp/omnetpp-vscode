@@ -27,6 +27,8 @@
 - INI `include` directives are merged and navigable; configs with several `extends=`
   bases use C3 linearization
 - `.ini` files are considered only inside NED folders
+- The graphical NED preview now finds icons via `OMNETPP_ROOT` when `omnetpp.installDir`
+  is not set, like the rest of the extension and `opp_neddoc`
 - NED preview: back/forward history, toolbar with a type search box, Ctrl/Cmd-click
   drill-down into submodule types, drag scrolling, `g` (layout group) display-string tag,
   and richer connection tooltips

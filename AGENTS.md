@@ -10,8 +10,9 @@ on a hand-written port of the IDE's `InifileParser`) — it requires **no OMNeT+
 installation** to parse and analyze files: the `ned.*` types are built in and INI
 validation uses a bundled config-option snapshot. An OMNeT++ install
 (`omnetpp.installDir` / `OMNETPP_ROOT`) is used **only as an icon source**
-(`<installDir>/images`); it is never a NED source root. The NED preview panel reads only
-the setting, not `OMNETPP_ROOT`.
+(`<installDir>/images`); it is never a NED source root. Every host resolves it with
+`resolveInstallDir()` (`shared/src/protocol.ts`): the setting, else `OMNETPP_ROOT`, else
+`__omnetpp_root_dir`.
 
 ## Architecture
 

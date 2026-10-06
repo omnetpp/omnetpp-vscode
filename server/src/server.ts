@@ -17,7 +17,7 @@ import {
 } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { ParserService, workspaceSymbols } from '@omnetpp/shared';
-import type { OmnetppSettings } from '@omnetpp/shared';
+import { resolveInstallDir, type OmnetppSettings } from '@omnetpp/shared';
 import { DocumentModelStore } from './documentModel';
 import { NodeFileSystem } from '@omnetpp/shared/node';
 import { ProjectIndex } from './projectIndex';
@@ -62,9 +62,7 @@ const state = new ServerState();
 /** Read the `omnetpp.*` settings the server cares about from init/config options. */
 function applySettings(opts: OmnetppSettings | undefined): void {
   state.nedPathSetting = opts?.nedPath ?? '';
-  // explicit setting wins; otherwise fall back to the env vars an OMNeT++ shell exports
-  state.installDir =
-    opts?.installDir || process.env.OMNETPP_ROOT || process.env.__omnetpp_root_dir || '';
+  state.installDir = resolveInstallDir(opts?.installDir, process.env);
   state.diagnosticsScope = opts?.diagnostics?.scope === 'openFiles' ? 'openFiles' : 'workspace';
   state.iniParamCodeLensEnabled = opts?.codeLens?.iniParams !== false;
 }

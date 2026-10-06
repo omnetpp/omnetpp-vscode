@@ -4,10 +4,15 @@ import * as vscode from 'vscode';
 import { LanguageClient } from 'vscode-languageclient/node';
 import {
   OmnetppMethods,
+  resolveInstallDir,
   type Position as Pos,
   type PreviewScene,
   type Range,
 } from '@omnetpp/shared/protocol';
+
+function installDir(): string {
+  return resolveInstallDir(vscode.workspace.getConfiguration('omnetpp').get<string>('installDir', ''), process.env);
+}
 
 /**
  * The graphical NED preview: a singleton editor-area webview panel (opened
@@ -110,8 +115,8 @@ export class NedPreviewPanel {
   private static webviewOptions(context: vscode.ExtensionContext): vscode.WebviewOptions & vscode.WebviewPanelOptions {
     const roots = [vscode.Uri.joinPath(context.extensionUri, 'dist')];
     for (const f of vscode.workspace.workspaceFolders ?? []) roots.push(f.uri);
-    const installDir = vscode.workspace.getConfiguration('omnetpp').get<string>('installDir', '');
-    if (installDir) roots.push(vscode.Uri.file(installDir));
+    const dir = installDir();
+    if (dir) roots.push(vscode.Uri.file(dir));
     return {
       enableScripts: true,
       retainContextWhenHidden: true,
@@ -338,8 +343,8 @@ export class NedPreviewPanel {
     for (const f of vscode.workspace.workspaceFolders ?? []) {
       if (f.uri.scheme === 'file') roots.push({ dir: path.join(f.uri.fsPath, 'images'), bundled: false });
     }
-    const installDir = vscode.workspace.getConfiguration('omnetpp').get<string>('installDir', '');
-    if (installDir) roots.push({ dir: path.join(installDir, 'images'), bundled: false });
+    const dir = installDir();
+    if (dir) roots.push({ dir: path.join(dir, 'images'), bundled: false });
     roots.push({ dir: path.join(this.context.extensionUri.fsPath, 'dist', 'icons'), bundled: true });
     return roots;
   }

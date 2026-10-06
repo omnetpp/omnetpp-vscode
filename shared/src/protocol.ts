@@ -225,3 +225,12 @@ export interface OmnetppSettings {
   diagnostics?: { scope?: string };
   codeLens?: { iniParams?: boolean };
 }
+
+/**
+ * The effective OMNeT++ installation root: the `omnetpp.installDir` setting wins,
+ * otherwise the env vars an OMNeT++ shell exports. Shared by every host that reads
+ * the install dir, so they cannot disagree about it.
+ */
+export function resolveInstallDir(setting: string | undefined, env: Record<string, string | undefined>): string {
+  return setting || env.OMNETPP_ROOT || env.__omnetpp_root_dir || '';
+}
