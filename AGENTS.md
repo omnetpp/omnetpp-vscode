@@ -125,7 +125,10 @@ Sequence Chart editor, and the Event Log table; keep any new webview code under
   paths with `fileUri()` and re-spell foreign URIs with `normalizeFileUri()`
   (`shared/src/fs/fileUri.ts`), never with Node's `pathToFileURL`, which encodes
   `+ @ ( ) ~ …` and the Windows drive letter differently, so its keys never match the
-  URIs of open documents and watcher events.
+  URIs of open documents and watcher events. Likewise, the project model compares
+  `/`-separated paths, so every path entering the server's index goes through
+  `indexPath()` / `uriToIndexPath()` (`@omnetpp/shared/node`: `/` and a lowercase
+  drive letter on Windows), never a bare `fileURLToPath`.
 - **Project model discovery**: NED source roots come from `.nedfolders` /
   `.nedexclusions` / `package.ned` (see `shared/src/project/projectModel.ts`), plus the
   `omnetpp.nedPath` setting — not just open workspace folders. The install dir is never

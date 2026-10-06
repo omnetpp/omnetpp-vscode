@@ -1,4 +1,3 @@
-import { fileURLToPath } from 'node:url';
 import {
   BUILTIN_URI,
   ConfigRegistry,
@@ -23,6 +22,7 @@ import {
   rootForPath,
   scanSourceRoots,
 } from '@omnetpp/shared';
+import { uriToIndexPath } from '@omnetpp/shared/node';
 
 /** Outcome of a `revalidate()` pass: whether a full reindex is required and,
  *  if not, which languages had at least one file added/removed/changed. */
@@ -80,6 +80,7 @@ export class ProjectIndex {
     private fs: FileSystem,
     private parsers: ParserService,
     private configDir: string,
+    private platform: NodeJS.Platform = process.platform,
   ) {}
 
   setOpenPredicate(fn: (uri: string) => boolean): void {
@@ -217,7 +218,7 @@ export class ProjectIndex {
     const isCpp = !isMsg && !isIni && !isNed && isCppSourceFile(uri);
     let fsPath: string | undefined;
     try {
-      fsPath = fileURLToPath(uri);
+      fsPath = uriToIndexPath(uri, this.platform);
     } catch {
       return; // not a file uri
     }
@@ -344,7 +345,7 @@ export class ProjectIndex {
    *  elsewhere are ignored, even when open in an editor. */
   isInNedFolder(uri: string): boolean {
     try {
-      return isInNedFolder(this.layout, fileURLToPath(uri));
+      return isInNedFolder(this.layout, uriToIndexPath(uri, this.platform));
     } catch {
       return false;
     }
@@ -352,7 +353,7 @@ export class ProjectIndex {
 
   folderPackageForUri(uri: string): string {
     try {
-      return packageForFile(this.layout.roots, fileURLToPath(uri));
+      return packageForFile(this.layout.roots, uriToIndexPath(uri, this.platform));
     } catch {
       return '';
     }
@@ -382,7 +383,7 @@ export class ProjectIndex {
     const statFor = (uri: string): RootStats | undefined => {
       let fsPath: string;
       try {
-        fsPath = fileURLToPath(uri);
+        fsPath = uriToIndexPath(uri, this.platform);
       } catch {
         return undefined; // non-file uri (e.g. the NED built-ins)
       }

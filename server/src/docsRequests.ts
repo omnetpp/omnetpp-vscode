@@ -4,7 +4,7 @@
 // client. Method names + param/result types live in @omnetpp/shared/protocol.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Connection } from 'vscode-languageserver/node';
 import {
@@ -20,7 +20,7 @@ import {
   type NeddocOptions,
 } from '@omnetpp/shared';
 import { createNodeIconProvider, loadExternalDocSets } from '@omnetpp/shared/node';
-import { iconDirs as computeIconDirs, type ServerState } from './serverState';
+import { iconDirs as computeIconDirs, safeFsPath, type ServerState } from './serverState';
 
 export function registerDocsRequests(connection: Connection, state: ServerState): void {
   connection.onRequest(OmnetppMethods.generateDocs, async (params: GenerateDocsParams, token): Promise<GenerateDocsResult> => {
@@ -31,14 +31,17 @@ export function registerDocsRequests(connection: Connection, state: ServerState)
 
     const projectRelative = (path: string): string | undefined => {
       for (const dir of folders) {
-        if (path === dir || path.startsWith(dir + sep)) return relative(dir, path).split(sep).join('/');
+        if (path === dir) return '';
+        const prefix = dir.endsWith('/') ? dir : `${dir}/`;
+        if (path.startsWith(prefix)) return path.slice(prefix.length);
       }
       return undefined;
     };
     const excludes = (params.excludeDirs ?? []).map(excludePatternRegex);
     const isTargetUri = (uri: string): boolean => {
       if (!uri.startsWith('file:')) return false;
-      const rel = projectRelative(fileURLToPath(uri));
+      const p = safeFsPath(uri);
+      const rel = p === undefined ? undefined : projectRelative(p);
       if (rel === undefined) return false;
       return !excludes.some((re) => re.test(rel));
     };
@@ -64,7 +67,7 @@ export function registerDocsRequests(connection: Connection, state: ServerState)
       externalDocs: loadExternalDocSets(params.externalDocs ?? {}, outputDir),
       format: params.format,
       includeResolver,
-      projectTitle: params.title || folders[0]?.split(sep).filter(Boolean).pop(),
+      projectTitle: params.title || folders[0]?.split('/').filter(Boolean).pop(),
       excludePatterns: params.excludeDirs ?? [],
       typeDiagrams: params.networkDiagrams ?? true,
       usageDiagrams: params.usageDiagrams ?? true,
@@ -153,7 +156,7 @@ export function registerDocsRequests(connection: Connection, state: ServerState)
         nedCache: index.cache,
         msgCache: index.msgCache,
         isTargetUri,
-        displayPath: (uri) => (uri.startsWith('file:') ? (projectRelative(fileURLToPath(uri)) ?? uri) : uri),
+        displayPath: (uri) => (uri.startsWith('file:') ? (projectRelative(safeFsPath(uri) ?? '') ?? uri) : uri),
       },
       optionOverrides,
       emit,

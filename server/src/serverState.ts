@@ -1,10 +1,9 @@
-import { fileURLToPath } from 'node:url';
 import { existsSync, promises as fsp } from 'node:fs';
 import { join } from 'node:path';
 import type { TextDocument } from 'vscode-languageserver-textdocument';
 import { ParserService, parseIni } from '@omnetpp/shared';
 import type { ActiveConfig, IniDocument } from '@omnetpp/shared';
-import { createNodeIconProvider, listIconIds } from '@omnetpp/shared/node';
+import { createNodeIconProvider, indexPath, listIconIds, uriToIndexPath } from '@omnetpp/shared/node';
 import { DocumentModelStore } from './documentModel';
 import { ProjectIndex } from './projectIndex';
 import type { IndexContext } from './features/context';
@@ -115,12 +114,12 @@ export function invalidateIconProvider(state: ServerState): void {
 
 export function currentNedPathDirs(state: ServerState): string[] {
   // The install dir itself is never a NED source root, so it is not added here.
-  return state.nedPathSetting.split(/[;:]/).map((s) => s.trim()).filter(Boolean);
+  return state.nedPathSetting.split(/[;:]/).map((s) => s.trim()).filter(Boolean).map((s) => indexPath(s));
 }
 
 export function safeFsPath(uri: string): string | undefined {
   try {
-    return fileURLToPath(uri);
+    return uriToIndexPath(uri);
   } catch {
     return undefined;
   }
