@@ -1,0 +1,166 @@
+// Generates THIRD_PARTY_NOTICES.md: the license notices of every third-party
+// component that ships in the .vsix and the @omnetpp/opp-tools npm package.
+//
+// npm packages are found by re-running the esbuild targets of esbuild.mjs with a
+// metafile (so only code that really ends up in a dist/ bundle is listed, not
+// devDependencies); copied assets that esbuild does not see are listed in
+// COPIED_ASSETS below and must be kept in sync with scripts/copy-assets.mjs.
+//
+// Usage: bun ./scripts/gen-third-party-notices.mjs [--check]
+//   (after `bun run compile`; --check exits 1 if the file is out of date)
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { build } from 'esbuild';
+import { common, targets } from '../esbuild.mjs';
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const outFile = join(root, 'THIRD_PARTY_NOTICES.md');
+const LICENSE_FILE = /^(licen[cs]e|copying)(-code)?(\.(md|txt))?$/i;
+
+function mit(copyright) {
+  return `MIT License
+
+${copyright}
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.`;
+}
+
+// The full Apache-2.0 text, taken from a dev dependency that ships it verbatim.
+const APACHE_2 = readFileSync(join(root, 'node_modules', 'typescript', 'LICENSE.txt'), 'utf8').trim();
+
+function licenseFiles(dir) {
+  return readdirSync(dir)
+    .filter((f) => LICENSE_FILE.test(f))
+    .sort()
+    .map((f) => readFileSync(join(dir, f), 'utf8').trim());
+}
+
+/** npm packages that esbuild bundles into a dist/ output, keyed by name@version. */
+async function bundledPackages() {
+  const pkgs = new Map();
+  for (const t of targets) {
+    const r = await build({ ...common, ...t, write: false, metafile: true, logLevel: 'silent' });
+    for (const input of Object.keys(r.metafile.inputs)) {
+      const m = input.match(/^(.*node_modules\/(?:@[^/]+\/)?[^/]+)\//);
+      if (!m) continue;
+      const dir = resolve(root, m[1]);
+      const pj = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+      const key = `${pj.name}@${pj.version}`;
+      if (!pkgs.has(key)) pkgs.set(key, { pj, dir, outputs: new Set() });
+      pkgs.get(key).outputs.add(relative(root, resolve(root, t.outfile)));
+    }
+  }
+  return pkgs;
+}
+
+const COPIED_ASSETS = [
+  {
+    name: '@vscode/codicons',
+    dir: join(root, 'node_modules', '@vscode', 'codicons'),
+    usedIn: 'dist/webview/codicons/ (icon font and stylesheet of the eventlog webviews)',
+  },
+  {
+    name: 'tree-sitter-ned, tree-sitter-msg (OpenSim Ltd.)',
+    dir: join(root, 'subprojects', 'tree-sitter-ned'),
+    usedIn: 'dist/wasm/tree-sitter-ned.wasm, dist/wasm/tree-sitter-msg.wasm (NED and MSG grammars)',
+  },
+  {
+    name: 'omnetpp-textmate-ned, omnetpp-textmate-msg (OpenSim Ltd.)',
+    dir: join(root, 'subprojects', 'omnetpp-textmate-ned'),
+    usedIn: 'syntaxes/ (NED and MSG syntax highlighting)',
+  },
+  {
+    name: 'jQuery 1.7.1 (includes Sizzle.js)',
+    usedIn: 'dist/neddoc-material/jquery.js (copied into html-material documentation)',
+    texts: [
+      mit('Copyright 2011, John Resig'),
+      'Sizzle.js — Copyright 2011, The Dojo Foundation. Released under the MIT, BSD, and GPL\nLicenses; used here under the MIT License above.',
+    ],
+    note: 'jQuery is dual licensed under the MIT or GPL Version 2 licenses; it is used here under the MIT License.',
+  },
+  {
+    name: 'Material Design Lite 1.3.0 — Copyright 2015 Google, Inc.',
+    usedIn: 'dist/neddoc-material/material.min.js, material.blue-light_blue.min.css',
+    texts: [APACHE_2],
+  },
+  {
+    name: 'Material Icons font — Copyright Google, Inc.',
+    usedIn: 'dist/neddoc-material/material-icons.woff2, material-icons.css',
+    texts: [APACHE_2],
+  },
+  {
+    name: 'Doxygen navigation tree script',
+    usedIn: 'dist/neddoc-material/navtree.js',
+    note:
+      'navtree.js is adapted from the navtree.js file of HTML output generated by Doxygen\n' +
+      '(https://www.doxygen.nl). Doxygen is copyrighted by Dimitri van Heesch.',
+  },
+  {
+    name: 'Map and background images of the OMNeT++ icon set',
+    usedIn: 'dist/icons/maps/, dist/icons/background/',
+    note:
+      'The originals of the images in maps/ are from the Wikipedia blank maps\n' +
+      '(https://en.wikipedia.org/wiki/Wikipedia:Blank_maps) and are covered by the Creative\n' +
+      'Commons licenses stated on their Wikipedia pages. They have been converted to\n' +
+      'greyscale and scaled. background/terrain.png is from Google Maps "terrain" mode,\n' +
+      '(C) Google and MapData Sciences Pty Ltd, PSMA. background/floorplan.png is derived\n' +
+      'from the "widget" demo of Tcl/Tk (https://www.tcl.tk/software/tcltk/license.html).',
+  },
+];
+
+function section(title, usedIn, texts, note) {
+  let s = `## ${title}\n\nUsed in: ${usedIn}\n\n`;
+  if (note) s += `${note}\n\n`;
+  for (const t of texts) s += '```text\n' + t + '\n```\n\n';
+  return s;
+}
+
+const pkgs = await bundledPackages();
+let md = `# Third-Party Notices
+
+The OMNeT++ Development Environment for VS Code and the @omnetpp/opp-tools package
+include the third-party components listed below. Each component is licensed under its
+own terms, reproduced here; the [LICENSE](LICENSE) of this software does not apply to
+them.
+
+<!-- Generated by scripts/gen-third-party-notices.mjs; do not edit by hand. -->
+
+`;
+for (const [key, { pj, dir, outputs }] of [...pkgs].sort(([a], [b]) => a.localeCompare(b))) {
+  const texts = licenseFiles(dir);
+  const note = texts.length ? `License: ${pj.license}` : `License: ${pj.license} (the package ships no license file)`;
+  md += section(key, [...outputs].sort().join(', '), texts, note);
+}
+for (const a of COPIED_ASSETS) {
+  md += section(a.name, a.usedIn, a.texts ?? (a.dir ? licenseFiles(a.dir) : []), a.note);
+}
+md = md.trimEnd() + '\n';
+
+if (process.argv.includes('--check')) {
+  const current = existsSync(outFile) ? readFileSync(outFile, 'utf8') : '';
+  if (current !== md) {
+    console.error('THIRD_PARTY_NOTICES.md is out of date - run "bun ./scripts/gen-third-party-notices.mjs".');
+    process.exit(1);
+  }
+  console.log('THIRD_PARTY_NOTICES.md is up to date.');
+} else {
+  writeFileSync(outFile, md);
+  console.log(`wrote ${relative(root, outFile)} (${pkgs.size} bundled package(s), ${COPIED_ASSETS.length} copied asset group(s))`);
+}

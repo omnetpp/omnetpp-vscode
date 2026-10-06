@@ -80,4 +80,5 @@ Install from the Marketplace / Open VSX, or install a `.vsix` manually: in the V
 Free for noncommercial use (teaching, academic research, personal non-profit use), on the
 same conditions of use as the OMNeT++ simulation kernel's Academic Public License. Commercial use
 requires a valid commercial [OMNEST](https://omnest.com) license. See [LICENSE](LICENSE)
-for the full terms.
+for the full terms. Third-party components are listed with their licenses in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

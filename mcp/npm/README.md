@@ -42,4 +42,4 @@ environment variable.
 Free for noncommercial use (teaching, academic research, personal non-profit use), on the
 same conditions of use as the OMNeT++ simulation kernel's Academic Public License. Commercial use
 requires a valid commercial [OMNEST](https://omnest.com) license. See the `LICENSE` file
-for the full terms.
+for the full terms, and `THIRD_PARTY_NOTICES.md` for the third-party components.

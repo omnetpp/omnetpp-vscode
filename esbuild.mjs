@@ -10,7 +10,7 @@ const watch = process.argv.includes('--watch');
 const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 
 /** @type {import('esbuild').BuildOptions} */
-const common = {
+export const common = {
   bundle: true,
   platform: 'node',
   target: 'node18',
@@ -23,7 +23,7 @@ const common = {
   define: { __OPP_VERSION__: JSON.stringify(version) },
 };
 
-const targets = [
+export const targets = [
   { entryPoints: ['client/src/extension.ts'], outfile: 'dist/extension.js' },
   { entryPoints: ['server/src/server.ts'], outfile: 'dist/server.js' },
   // standalone MCP stdio server
@@ -70,11 +70,14 @@ const targets = [
   },
 ];
 
-if (watch) {
-  const ctxs = await Promise.all(targets.map((t) => context({ ...common, ...t })));
-  await Promise.all(ctxs.map((c) => c.watch()));
-  console.log('esbuild watching...');
-} else {
-  await Promise.all(targets.map((t) => build({ ...common, ...t })));
-  console.log('esbuild bundle complete.');
+// Imported (not run) by scripts/gen-third-party-notices.mjs, which needs the same targets.
+if (import.meta.main) {
+  if (watch) {
+    const ctxs = await Promise.all(targets.map((t) => context({ ...common, ...t })));
+    await Promise.all(ctxs.map((c) => c.watch()));
+    console.log('esbuild watching...');
+  } else {
+    await Promise.all(targets.map((t) => build({ ...common, ...t })));
+    console.log('esbuild bundle complete.');
+  }
 }

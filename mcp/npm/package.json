@@ -11,7 +11,7 @@
     "opp_neddoc": "dist/opp_neddoc.js",
     "opp_ide_mcp": "dist/opp_ide_mcp.js"
   },
-  "files": ["dist/", "README.md", "LICENSE"],
+  "files": ["dist/", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"],
   "engines": {
     "node": ">=18"
   },

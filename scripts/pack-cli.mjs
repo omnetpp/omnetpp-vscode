@@ -38,6 +38,7 @@ manifest.version = version;
 writeFileSync(join(stage, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 copyFileSync(join(template, 'README.md'), join(stage, 'README.md'));
 copyFileSync(join(root, 'LICENSE'), join(stage, 'LICENSE'));
+copyFileSync(join(root, 'THIRD_PARTY_NOTICES.md'), join(stage, 'THIRD_PARTY_NOTICES.md'));
 
 for (const f of TOOLS) {
   copyFileSync(join(dist, f), join(stage, 'dist', f));
