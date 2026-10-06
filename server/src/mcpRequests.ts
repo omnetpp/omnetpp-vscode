@@ -1,7 +1,7 @@
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import type { Connection, TextDocuments } from 'vscode-languageserver/node';
 import type { TextDocument } from 'vscode-languageserver-textdocument';
-import { OMNETPP_TOOLS, handleTool, OmnetppMethods } from '@omnetpp/shared';
+import { OMNETPP_TOOLS, fileUri, handleTool, normalizeFileUri, OmnetppMethods } from '@omnetpp/shared';
 import type { FileSystem, McpCallToolParams, ToolContext } from '@omnetpp/shared';
 import { NodeFileSystem } from '@omnetpp/shared/node';
 import { ServerState } from './serverState';
@@ -20,7 +20,7 @@ export function registerMcpRequests(
   /** FileSystem that serves open editor buffers first, falling back to disk. */
   const mcpLiveFs: FileSystem = {
     async readFile(path) {
-      const doc = documents.get(pathToFileURL(path).toString());
+      const doc = documents.get(fileUri(path));
       return doc ? doc.getText() : mcpNodeFs.readFile(path);
     },
     readDirectory: (p) => mcpNodeFs.readDirectory(p),
@@ -38,7 +38,7 @@ export function registerMcpRequests(
       iniCache: state.index.iniCache,
       fs: mcpLiveFs,
       parsers: state.parsers,
-      toUri: (p) => (/^[a-z][a-z0-9+.-]*:\/\//i.test(p) ? p : pathToFileURL(p).toString()),
+      toUri: (p) => (/^[a-z][a-z0-9+.-]*:\/\//i.test(p) ? normalizeFileUri(p) : fileUri(p)),
       toPath: (u) => (u.startsWith('file:') ? fileURLToPath(u) : u),
     };
   }

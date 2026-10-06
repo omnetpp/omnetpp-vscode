@@ -1,4 +1,4 @@
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import {
   BUILTIN_URI,
   ConfigRegistry,
@@ -13,6 +13,7 @@ import {
   collectIndexableFiles,
   configSummaries,
   discoverProjectLayout,
+  fileUri,
   isCppSourceFile,
   isExcludedPackage,
   isInNedFolder,
@@ -118,7 +119,7 @@ export class ProjectIndex {
 
   /** Index an INI file into the workspace INI cache + record its config count. */
   async indexIniFile(fsPath: string): Promise<void> {
-    const uri = pathToFileURL(fsPath).toString();
+    const uri = fileUri(fsPath);
     if (this.isOpen(uri)) return; // open buffer owns the cache entry
     if (!isInNedFolder(this.layout, fsPath)) return;
     let text: string;
@@ -142,7 +143,7 @@ export class ProjectIndex {
 
   /** Read and index a single C++ (.cc/.h) file from disk (by absolute fs path). */
   async indexCppFile(fsPath: string): Promise<void> {
-    const uri = pathToFileURL(fsPath).toString();
+    const uri = fileUri(fsPath);
     let text: string;
     try {
       text = await this.fs.readFile(fsPath);
@@ -156,7 +157,7 @@ export class ProjectIndex {
 
   /** Read and index a single MSG file from disk (by absolute fs path). */
   async indexMsgFile(fsPath: string): Promise<void> {
-    const uri = pathToFileURL(fsPath).toString();
+    const uri = fileUri(fsPath);
     if (this.isOpen(uri)) return; // open buffer owns the cache entry
     let text: string;
     try {
@@ -171,7 +172,7 @@ export class ProjectIndex {
 
   /** Read and index a single NED file from disk (by absolute fs path). */
   async indexFile(fsPath: string): Promise<void> {
-    const uri = pathToFileURL(fsPath).toString();
+    const uri = fileUri(fsPath);
     if (this.isOpen(uri)) return; // open buffer owns the cache entry
     const pkg = packageForFile(this.layout.roots, fsPath);
     if (pkg && isExcludedPackage(this.layout.excludedPackages, pkg)) return;
@@ -306,7 +307,7 @@ export class ProjectIndex {
 
     const onDisk = await collectIndexableFiles(this.fs, this.layout);
     const disk = new Map<string, { mtimeMs: number; size: number }>();
-    for (const [p, meta] of onDisk) disk.set(pathToFileURL(p).toString(), meta);
+    for (const [p, meta] of onDisk) disk.set(fileUri(p), meta);
 
     const result: RevalidateResult = {
       needsReindex: false,

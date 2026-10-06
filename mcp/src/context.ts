@@ -4,8 +4,8 @@
 // the shared tool layer runs against.
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { ParserService, ToolContext } from '@omnetpp/shared';
+import { fileURLToPath } from 'node:url';
+import { ParserService, ToolContext, fileUri, normalizeFileUri } from '@omnetpp/shared';
 import { NodeFileSystem } from '@omnetpp/shared/node';
 import { buildDiskIndex, DiskIndex } from './indexBuilder.js';
 
@@ -50,7 +50,7 @@ export async function createDiskToolSetup(
     iniCache: index.iniCache,
     fs,
     parsers,
-    toUri: (p) => (/^[a-z][a-z0-9+.-]*:\/\//i.test(p) ? p : pathToFileURL(resolve(p)).toString()),
+    toUri: (p) => (/^[a-z][a-z0-9+.-]*:\/\//i.test(p) ? normalizeFileUri(p) : fileUri(resolve(p))),
     toPath: (u) => (u.startsWith('file:') ? fileURLToPath(u) : u),
   };
 

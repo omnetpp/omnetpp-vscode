@@ -1,6 +1,5 @@
 import type { Connection, TextDocuments } from 'vscode-languageserver/node';
 import type { TextDocument } from 'vscode-languageserver-textdocument';
-import { pathToFileURL } from 'node:url';
 import { existsSync } from 'node:fs';
 import { effectiveNetwork, configSummaries, findCounterparts, OmnetppMethods, unquotePropertyValue } from '@omnetpp/shared';
 import type {
@@ -103,13 +102,11 @@ export function registerViewRequests(
   });
 
   // Served from the index, not the open-document store: C++ editors are not LSP
-  // documents. The URI is re-encoded the way the disk indexer keys files.
+  // documents.
   connection.onRequest(OmnetppMethods.counterparts, async (params: CounterpartParams): Promise<CounterpartResult> => {
     const c = ctx(state);
-    const fsPath = safeFsPath(params.uri);
-    const uri = fsPath ? pathToFileURL(fsPath).toString() : params.uri;
     if (!c) return { kind: null, cc: [], h: [], ned: [] };
-    return findCounterparts(c.db, uri, params.position, async (u) => {
+    return findCounterparts(c.db, params.uri, params.position, async (u) => {
       const p = safeFsPath(u);
       return p !== undefined && existsSync(p);
     });

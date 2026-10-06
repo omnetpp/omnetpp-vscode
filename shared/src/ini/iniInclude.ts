@@ -1,4 +1,5 @@
 import { Diagnostic, DiagnosticSeverity } from '../model/location';
+import { normalizeFileUri } from '../fs/fileUri';
 import type { IniDocument, IniEntry, IniSection } from './iniDocument';
 import { sectionCanonicalName } from './iniDocument';
 
@@ -29,7 +30,7 @@ export function resolveIncludeUri(fromUri: string, includePath: string): string 
   const p = includePath.trim().replace(/^["']|["']$/g, '').trim();
   if (!p) return undefined;
   try {
-    return new URL(p, fromUri).toString();
+    return normalizeFileUri(new URL(p, fromUri).toString());
   } catch {
     return undefined;
   }

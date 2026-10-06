@@ -51,6 +51,7 @@
     }
   },
   "dependencies": {
+    "vscode-uri": "^3.0.8",
     "web-tree-sitter": "0.25.10"
   }
 }

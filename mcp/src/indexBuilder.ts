@@ -1,4 +1,3 @@
-import { pathToFileURL } from 'node:url';
 import {
   ConfigRegistry,
   CppResourceCache,
@@ -9,6 +8,7 @@ import {
   ParserService,
   SemanticDatabase,
   discoverProjectLayout,
+  fileUri,
   loadBuiltins,
   packageForFile,
   populateDatabase,
@@ -51,28 +51,28 @@ export async function buildDiskIndex(
     ned: async (p) => {
       const pkg = packageForFile(layout.roots, p);
       try {
-        nedCache.addFile(pathToFileURL(p).toString(), parsers.parse('ned', await fs.readFile(p)), pkg);
+        nedCache.addFile(fileUri(p), parsers.parse('ned', await fs.readFile(p)), pkg);
       } catch {
         /* unreadable file */
       }
     },
     msg: async (p) => {
       try {
-        msgCache.addFile(pathToFileURL(p).toString(), parsers.parse('msg', await fs.readFile(p)));
+        msgCache.addFile(fileUri(p), parsers.parse('msg', await fs.readFile(p)));
       } catch {
         /* unreadable file */
       }
     },
     ini: async (p) => {
       try {
-        iniCache.addFile(pathToFileURL(p).toString(), await fs.readFile(p));
+        iniCache.addFile(fileUri(p), await fs.readFile(p));
       } catch {
         /* unreadable file */
       }
     },
     cpp: async (p) => {
       try {
-        cppCache.addFile(pathToFileURL(p).toString(), await fs.readFile(p));
+        cppCache.addFile(fileUri(p), await fs.readFile(p));
       } catch {
         /* unreadable file */
       }

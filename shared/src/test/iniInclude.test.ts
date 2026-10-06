@@ -65,6 +65,11 @@ test('resolveIncludeUri resolves relative paths against the including file', () 
   assert.equal(resolveIncludeUri('file:///proj/main.ini', '   '), undefined);
 });
 
+test('resolveIncludeUri spells the result like the editor and the index do', () => {
+  assert.equal(resolveIncludeUri('file:///proj/main.ini', 'x+y (1).ini'), 'file:///proj/x%2By%20%281%29.ini');
+  assert.equal(resolveIncludeUri('file:///c%3A/proj/main.ini', 'base.ini'), 'file:///c%3A/proj/base.ini');
+});
+
 test('expandIncludes merges included sections and tags entry origin', () => {
   const merged = expandIncludes(MAIN_URI, docMap({ [MAIN_URI]: MAIN, [BASE_URI]: BASE }));
   // [General] (from base), [Config Base] (from base), [Config Derived] (from main)

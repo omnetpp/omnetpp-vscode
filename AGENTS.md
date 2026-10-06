@@ -121,6 +121,11 @@ Sequence Chart editor, and the Event Log table; keep any new webview code under
   only under `import.meta.main`; copied assets from its hand-kept `COPIED_ASSETS`, which
   must follow `scripts/copy-assets.mjs`). `prepackage` fails via `--check` when it is
   stale: regenerate and commit it after any dependency or asset change.
+- **File URIs have one spelling**: VS Code's (vscode-uri). Build index keys from
+  paths with `fileUri()` and re-spell foreign URIs with `normalizeFileUri()`
+  (`shared/src/fs/fileUri.ts`), never with Node's `pathToFileURL`, which encodes
+  `+ @ ( ) ~ …` and the Windows drive letter differently, so its keys never match the
+  URIs of open documents and watcher events.
 - **Project model discovery**: NED source roots come from `.nedfolders` /
   `.nedexclusions` / `package.ned` (see `shared/src/project/projectModel.ts`), plus the
   `omnetpp.nedPath` setting — not just open workspace folders. The install dir is never

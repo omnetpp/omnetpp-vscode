@@ -1,4 +1,3 @@
-import { pathToFileURL } from 'node:url';
 import {
   FileChangeType,
   CodeLensRefreshRequest,
@@ -9,7 +8,7 @@ import {
   type Disposable,
 } from 'vscode-languageserver/node';
 import type { TextDocument } from 'vscode-languageserver-textdocument';
-import { isCppSourceFile, OmnetppMethods } from '@omnetpp/shared';
+import { fileUri, isCppSourceFile, OmnetppMethods } from '@omnetpp/shared';
 import { ServerState, currentNedPathDirs } from './serverState';
 import type { WorkspaceDiagnosticsApi } from './workspaceDiagnostics';
 
@@ -88,7 +87,7 @@ export function registerIndexLifecycle(
     if (!dirs.length) return;
     const watchers = dirs.map((dir) => ({
       globPattern: {
-        baseUri: pathToFileURL(dir).toString(),
+        baseUri: fileUri(dir),
         pattern: '**/*.{ned,msg,ini,cc,cpp,cxx,h,hpp,hxx,hh}',
       },
       kind: WatchKind.Create | WatchKind.Change | WatchKind.Delete,
