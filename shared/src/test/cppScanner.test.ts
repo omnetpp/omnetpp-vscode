@@ -120,3 +120,36 @@ test('non-literal par() arguments are (intentionally) not captured', () => {
     ['kept'],
   );
 });
+
+test('class head with export macro, final and base clause names the class', () => {
+  const src = `
+namespace inet {
+class INET_API Foo final : public cSimpleModule, public cListener {
+  void initialize() override { par("x"); }
+};
+}
+`;
+  const { definitions, accesses } = scanCpp('file:///Foo.h', src);
+  assert.deepEqual(definitions.map((d) => d.qualifiedName), ['inet::Foo']);
+  assert.equal(definitions[0].simpleName, 'Foo');
+  assert.deepEqual(definitions[0].decl.range.start, { line: 2, character: 15 });
+  assert.equal(accesses[0].ownerClass, 'inet::Foo');
+});
+
+test('class definitions: templates, nesting, attributes; non-definitions ignored', () => {
+  const src = `
+namespace a { namespace b {
+class Fwd;
+template<typename T, class U = int> class alignas(16) Box : public Base<T> {
+  struct Inner { int v; };
+};
+struct [[deprecated]] Old {};
+enum class Color { RED };
+struct tm *makeTime() { return nullptr; }
+void f() { struct timeval tv = {0}; }
+template<class T> void Box<T>::get() { par("p"); }
+}}
+`;
+  const { definitions } = scanCpp('file:///x.h', src);
+  assert.deepEqual(definitions.map((d) => d.qualifiedName), ['a::b::Box', 'a::b::Box::Inner', 'a::b::Old']);
+});

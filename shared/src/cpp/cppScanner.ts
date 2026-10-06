@@ -47,8 +47,17 @@ export interface CppMemberAccess {
   src: Location;
 }
 
+/** A `class X { ... }` / `struct X { ... }` definition (a body, not a forward declaration). */
+export interface CppClassDef {
+  qualifiedName: string;
+  simpleName: string;
+  /** Location of the class-name token in the class head. */
+  decl: Location;
+}
+
 export interface CppScanResult {
   classes: CppClassDecl[];
+  definitions: CppClassDef[];
   accesses: CppMemberAccess[];
 }
 
@@ -213,6 +222,11 @@ function qualify(name: string, nsStack: string[]): string {
   return `${nsStack.join('::')}::${stripped}`;
 }
 
+function simpleOf(qname: string): string {
+  const i = qname.lastIndexOf('::');
+  return i >= 0 ? qname.slice(i + 2) : qname;
+}
+
 /** Read a (possibly `::`-qualified) name starting at token `k`; returns text + next index. */
 function readQualifiedName(toks: Tok[], k: number): { name: string; next: number } | null {
   let name = '';
@@ -234,6 +248,8 @@ function readQualifiedName(toks: Tok[], k: number): { name: string; next: number
 interface Frame {
   namespace?: string;
   class?: string;
+  /** Set when the brace opens a class body: the class-name token in its head. */
+  defTok?: Tok;
 }
 
 /**
@@ -241,7 +257,7 @@ interface Frame {
  * a function definition (which carries the owning class). Returns the frame to
  * push; an "other" block returns `{}` and inherits the enclosing class.
  */
-function classifyBrace(toks: Tok[], braceIdx: number, nsStack: string[]): Frame {
+function classifyBrace(toks: Tok[], braceIdx: number, nsStack: string[], outerClass: string): Frame {
   // Gather the statement header: tokens back to the previous `;`/`{`/`}` at paren
   // depth 0 (so `for(;;)` semicolons and call parens are skipped).
   let start = braceIdx - 1;
@@ -284,17 +300,57 @@ function classifyBrace(toks: Tok[], braceIdx: number, nsStack: string[]): Frame 
     }
   }
 
-  // class/struct definition: `class X`, `struct X`, `template<...> class X final : ...`
-  for (let h = 0; h < header.length; h++) {
-    const v = header[h].value;
-    if ((v === 'class' || v === 'struct') && header[h + 1]?.type === 'id') {
-      // skip `class alignas(...) X` etc. by taking the id right before ':' / end
-      const nm = header[h + 1].value;
-      return { class: qualify(nm, nsStack) };
-    }
-  }
+  const head = classHead(header);
+  if (head) return { class: outerClass ? `${outerClass}::${head.name}` : qualify(head.name, nsStack), defTok: head.tok };
 
   return {};
+}
+
+const isMacroName = (v: string): boolean => /^[A-Z][A-Z0-9_]*$/.test(v);
+
+/**
+ * The class name of a class/struct definition head, e.g. `Foo` in
+ * `template<class T> class INET_API Foo final : public Base<T>`. The name is the
+ * last identifier before the base clause, so export macros (`INET_API`),
+ * attributes and `final` in front of it are skipped. Returns undefined for
+ * heads that are not class definitions: `enum class`, `struct tm *f()`,
+ * `struct timeval tv = {...}`, and `class` inside a template parameter list.
+ */
+function classHead(header: Tok[]): { name: string; tok: Tok } | undefined {
+  let depth = 0;
+  let kw = -1;
+  for (let h = 0; h < header.length; h++) {
+    const v = header[h].value;
+    if (v === '<' || v === '(' || v === '[') depth++;
+    else if (v === '>' || v === ')' || v === ']') depth--;
+    else if (depth === 0 && (v === 'class' || v === 'struct')) {
+      if (header[h - 1]?.value !== 'enum') kw = h;
+      break;
+    }
+  }
+  if (kw < 0) return undefined;
+
+  let name = '';
+  let tok: Tok | undefined;
+  depth = 0;
+  for (let j = kw + 1; j < header.length; j++) {
+    const t = header[j];
+    const v = t.value;
+    if (v === '(' && depth === 0 && !(header[j - 1]?.value === 'alignas' || isMacroName(header[j - 1]?.value ?? ''))) {
+      return undefined;
+    }
+    if (v === '<' || v === '(' || v === '[') depth++;
+    else if (v === '>' || v === ')' || v === ']') depth--;
+    else if (depth === 0) {
+      if (v === '=') return undefined;
+      if (v === ':') break;
+      if (t.type === 'id' && v !== 'final' && v !== 'alignas') {
+        name = header[j - 1]?.value === '::' && name ? `${name}::${v}` : v;
+        tok = t;
+      }
+    }
+  }
+  return tok ? { name, tok } : undefined;
 }
 
 /** Scan C++ source for OMNeT++ class registrations and member accesses. */
@@ -307,6 +363,7 @@ export function scanCpp(uri: string, text: string): CppScanResult {
   });
 
   const classes: CppClassDecl[] = [];
+  const definitions: CppClassDef[] = [];
   const accesses: CppMemberAccess[] = [];
   const frames: Frame[] = [];
   const nsStack = (): string[] =>
@@ -319,7 +376,13 @@ export function scanCpp(uri: string, text: string): CppScanResult {
   for (let i = 0; i < toks.length; i++) {
     const t = toks[i];
     if (t.type === 'punct') {
-      if (t.value === '{') frames.push(classifyBrace(toks, i, nsStack()));
+      if (t.value === '{') {
+        const frame = classifyBrace(toks, i, nsStack(), currentClass());
+        if (frame.defTok && frame.class) {
+          definitions.push({ qualifiedName: frame.class, simpleName: simpleOf(frame.class), decl: loc(frame.defTok) });
+        }
+        frames.push(frame);
+      }
       else if (t.value === '}') frames.pop();
       continue;
     }
@@ -331,8 +394,7 @@ export function scanCpp(uri: string, text: string): CppScanResult {
       const read = readQualifiedName(toks, i + 2);
       if (read && nameTok) {
         const qn = qualify(read.name, nsStack());
-        const simple = qn.includes('::') ? qn.slice(qn.lastIndexOf('::') + 2) : qn;
-        classes.push({ qualifiedName: qn, simpleName: simple, kind: reg, macro: t.value, decl: loc(nameTok) });
+        classes.push({ qualifiedName: qn, simpleName: simpleOf(qn), kind: reg, macro: t.value, decl: loc(nameTok) });
       }
       continue;
     }
@@ -346,5 +408,5 @@ export function scanCpp(uri: string, text: string): CppScanResult {
     }
   }
 
-  return { classes, accesses };
+  return { classes, definitions, accesses };
 }

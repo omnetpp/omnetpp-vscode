@@ -6,11 +6,12 @@
 // values, so there is nothing to `delete()`. Each file's contribution is tracked
 // so `removeFile` fully forgets it.
 
-import { scanCpp, type CppClassDecl, type CppMemberAccess } from './cppScanner';
+import { scanCpp, type CppClassDecl, type CppClassDef, type CppMemberAccess } from './cppScanner';
 
 export interface CppFileInfo {
   uri: string;
   classes: CppClassDecl[];
+  definitions: CppClassDef[];
   accesses: CppMemberAccess[];
 }
 
@@ -28,17 +29,20 @@ export class CppResourceCache {
   private bySimple = new Map<string, Set<string>>();
   /** qualified class name → accesses that class makes (across all files). */
   private accessesByClass = new Map<string, CppMemberAccess[]>();
+  /** qualified class name → its class-body definitions (usually one, in a header). */
+  private definitionsByClass = new Map<string, CppClassDef[]>();
 
   addFile(uri: string, text: string): void {
     this.removeFile(uri, false);
-    const { classes, accesses } = scanCpp(uri, text);
-    this.files.set(uri, { uri, classes, accesses });
+    const { classes, definitions, accesses } = scanCpp(uri, text);
+    this.files.set(uri, { uri, classes, definitions, accesses });
     for (const c of classes) {
       push(this.byQualified, c.qualifiedName, c);
       let set = this.bySimple.get(c.simpleName);
       if (!set) this.bySimple.set(c.simpleName, (set = new Set()));
       set.add(c.qualifiedName);
     }
+    for (const d of definitions) push(this.definitionsByClass, d.qualifiedName, d);
     for (const a of accesses) {
       if (a.ownerClass) push(this.accessesByClass, a.ownerClass, a);
     }
@@ -58,6 +62,7 @@ export class CppResourceCache {
           }
         }
       }
+      for (const d of info.definitions) remove(this.definitionsByClass, d.qualifiedName, d);
       for (const a of info.accesses) if (a.ownerClass) remove(this.accessesByClass, a.ownerClass, a);
       this.files.delete(uri);
     }
@@ -69,6 +74,7 @@ export class CppResourceCache {
     this.byQualified.clear();
     this.bySimple.clear();
     this.accessesByClass.clear();
+    this.definitionsByClass.clear();
     this.generation++;
   }
 
@@ -106,6 +112,11 @@ export class CppResourceCache {
     const set = this.bySimple.get(n);
     if (set && set.size) return this.classByQualifiedName([...set][0]);
     return undefined;
+  }
+
+  /** The class-body definitions of a qualified class name (where its `class X {` is). */
+  definitionsOf(qualifiedName: string): readonly CppClassDef[] {
+    return this.definitionsByClass.get(qualifiedName) ?? [];
   }
 
   /** Every literal member access made by a given qualified class. */
