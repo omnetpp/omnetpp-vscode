@@ -1,7 +1,10 @@
 # Change Log
 
-## Unreleased
+## 1.0.0
 
+- **License change:** from 1.0.0 on, the extension and the command-line tools are licensed
+  like the OMNeT++ / OMNEST simulation kernel — free for noncommercial use, commercial use
+  with an OMNEST license (see `LICENSE`). Earlier versions remain under the MIT License
 - **Sequence Chart and Event Log** for `.elog` eventlog files — a port of the Eclipse-based
   IDE's tools: a zoomable Sequence Chart custom editor (module axes, message arrows,
   timeline modes, axis vector data, rubber-band zoom) and a virtual Event Log table panel.
