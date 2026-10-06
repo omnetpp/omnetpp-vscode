@@ -27,11 +27,8 @@ import { nedLocalDiagnostics } from '../ned/nedLocalChecks';
 import { nedValueDiagnostics } from '../ned/nedValueChecks';
 import { nedSemanticDiagnostics } from '../ned/nedSemanticChecks';
 import { msgLocalDiagnostics, msgSemanticDiagnostics } from '../msg/msgChecks';
-import { iniLocalDiagnostics } from '../ini/iniLocalChecks';
-import { iniVariableDiagnostics } from '../ini/iniVariables';
-import { iniConfigDiagnostics } from '../ini/iniConfigChecks';
-import { iniStructureDiagnostics } from '../ini/iniStructureChecks';
-import { iniParamDiagnostics } from '../ini/iniParamChecks';
+import { iniFileDiagnostics } from '../ini/iniFileDiagnostics';
+import { resolveIncludeUri } from '../ini/iniInclude';
 import {
   effectiveNetwork,
   resolveNetworkType,
@@ -40,7 +37,7 @@ import {
 } from '../ini/iniParamResolution';
 import { findParamAssignments } from '../ini/iniParamNavigation';
 import { expandNetwork, paramSlots } from '../ini/moduleTree';
-import { parseIni, configSummaries } from '../ini/iniDocument';
+import { parseIni, configSummaries, type IniDocument } from '../ini/iniDocument';
 import { resolveNedClass, nedClassReferences } from '../xref/nedMsgLinks';
 import { nedMissingImplClassDiagnostics } from '../xref/xrefDiagnostics';
 import { impactOf } from '../xref/impact';
@@ -152,6 +149,33 @@ async function readText(uri: string, ctx: ToolContext): Promise<string> {
   return ctx.fs.readFile(ctx.toPath(uri));
 }
 
+/** `root` plus every INI file it transitively includes that can be read: from
+ *  the index, else from disk (includes outside the NED folders are not indexed). */
+async function loadIncludeClosure(root: IniDocument, ctx: ToolContext): Promise<Map<string, IniDocument>> {
+  const docs = new Map<string, IniDocument>();
+  if (root.uri) docs.set(root.uri, root);
+  const pending = [root];
+  const unreadable = new Set<string>();
+  for (let doc = pending.pop(); doc; doc = pending.pop()) {
+    for (const inc of doc.includes) {
+      const uri = doc.uri ? resolveIncludeUri(doc.uri, inc.path) : undefined;
+      if (!uri || docs.has(uri) || unreadable.has(uri)) continue;
+      let included = ctx.iniCache.getDoc(uri);
+      if (!included) {
+        try {
+          included = parseIni(await readText(uri, ctx), uri);
+        } catch {
+          unreadable.add(uri);
+          continue;
+        }
+      }
+      docs.set(uri, included);
+      pending.push(included);
+    }
+  }
+  return docs;
+}
+
 /**
  * Run the analyzers on a single NED/MSG/INI file and return its diagnostics with
  * inline `suppress(...)` directives already applied. Shared by the `get_diagnostics`
@@ -197,12 +221,14 @@ export async function lintFile(uri: string, ctx: ToolContext): Promise<{ uri: st
   } else if (uri.endsWith('.ini')) {
     const text = await readText(uri, ctx);
     const doc = parseIni(text, uri);
+    const included = await loadIncludeClosure(doc, ctx);
     diags.push(
-      ...iniLocalDiagnostics(doc),
-      ...iniVariableDiagnostics(doc),
-      ...iniConfigDiagnostics(doc, ctx.configRegistry),
-      ...iniStructureDiagnostics(doc, ctx.nedCache, ctx.configRegistry),
-      ...iniParamDiagnostics(doc, ctx.nedCache, ctx.configRegistry),
+      ...iniFileDiagnostics(doc, uri, {
+        nedCache: ctx.nedCache,
+        registry: ctx.configRegistry,
+        getIniDoc: (u) => included.get(u),
+        includeExists: (u) => included.has(u),
+      }),
     );
     filtered = filterSuppressedDiagnostics(diags, { language: 'ini', text });
   } else {

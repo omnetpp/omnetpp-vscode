@@ -67,8 +67,8 @@ tsc projects inside the `client` workspace):
   `neddoc-material/`) next to the script. The linter reuses the shared `lintFile`, the
   same per-file analysis the `get_diagnostics` MCP tool uses, suppression included.
   **The IDE does not use `lintFile`**: `server/src/features/diagnostics.ts`
-  (`computeDiagnostics`) is a separate list that also follows INI `include`s and reports
-  `unused-network`. All projects inherit `node16` module resolution from
+  (`computeDiagnostics`) is a separate list that also reports `unused-network`; only
+  the INI checks are shared, through `iniFileDiagnostics`. All projects inherit `node16` module resolution from
   `tsconfig.base.json` (web-tree-sitter and the MCP SDK ship subpaths via `exports`
   maps); `client/` and `client/webview/` override it to `bundler`.
 - **CLI distribution** (the source is not released): the npm package
@@ -252,7 +252,8 @@ checklist is `docs/eventlog-manual-tests.md`.
   filename, and the program name shown in their `--help`/usage. A new tool also needs an
   entry in `mcp/npm/package.json` `bin` and in the `TOOLS` lists of
   `scripts/pack-cli.mjs` and `client/src/cliTools.ts`.
-- A new analyzer must be wired into **both** `computeDiagnostics`
+- A new NED/MSG analyzer must be wired into **both** `computeDiagnostics`
   (`server/src/features/diagnostics.ts`, the IDE) and `lintFile`
-  (`shared/src/mcp/tools.ts`, CLI + MCP `get_diagnostics`); the lists are separate.
+  (`shared/src/mcp/tools.ts`, CLI + MCP `get_diagnostics`); the lists are separate. A
+  new INI analyzer goes into `iniFileDiagnostics` (`shared/src/ini/`), which both use.
 - Keep each new feature developed in a separate commit with a well written description.

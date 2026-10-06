@@ -211,6 +211,7 @@ export {
   matchedParamModules,
 } from './ini/iniParamResolution';
 export { iniParamDiagnostics } from './ini/iniParamChecks';
+export { type IniFileDiagnosticsDeps, iniFileDiagnostics } from './ini/iniFileDiagnostics';
 export { addMissingKeys } from './ini/iniParamCodeActions';
 export {
   typenameTypeTargets,
