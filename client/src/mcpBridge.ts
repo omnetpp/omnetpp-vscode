@@ -15,6 +15,9 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import type { LanguageClient } from 'vscode-languageclient/node';
 import { OmnetppMethods, type McpCallToolParams, type ToolDef } from '@omnetpp/shared/protocol';
 
+/** Injected by esbuild from package.json. */
+declare const __OPP_VERSION__: string;
+
 export interface McpBridge {
   /** The URL VS Code should POST to (Streamable HTTP). */
   uri: Uri;
@@ -33,7 +36,7 @@ export async function startMcpBridge(getClient: () => LanguageClient | undefined
 
   const buildServer = (): Server => {
     const server = new Server(
-      { name: 'omnetpp-ned-msg-ini', version: '0.2.1' },
+      { name: 'omnetpp-ned-msg-ini', version: __OPP_VERSION__ },
       { capabilities: { tools: {} } },
     );
     server.setRequestHandler(ListToolsRequestSchema, async () => {

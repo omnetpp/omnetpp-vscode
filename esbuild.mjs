@@ -2,10 +2,12 @@
 // web-tree-sitter (and its emscripten glue) is bundled too; the runtime
 // tree-sitter.wasm and grammar .wasm files are copied separately (copy-assets.mjs)
 // and located at runtime via an absolute path / locateFile.
+import { readFileSync } from 'node:fs';
 import { build, context } from 'esbuild';
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
+const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 
 /** @type {import('esbuild').BuildOptions} */
 const common = {
@@ -17,6 +19,8 @@ const common = {
   minify: production,
   external: ['vscode'],
   logLevel: 'info',
+  // Single source of truth for the version the bundles report (e.g. MCP server info).
+  define: { __OPP_VERSION__: JSON.stringify(version) },
 };
 
 const targets = [

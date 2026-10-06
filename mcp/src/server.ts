@@ -16,6 +16,9 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { createDiskToolSetup, parseNedPathDirs } from './context.js';
 
+/** Injected by esbuild from package.json. */
+declare const __OPP_VERSION__: string;
+
 /** Log to stderr only — stdout is reserved for the JSON-RPC stdio transport. */
 function log(...args: unknown[]): void {
   console.error('[opp_ide_mcp]', ...args);
@@ -72,7 +75,7 @@ async function main(): Promise<void> {
   log(`${ELOG_TOOLS.length} elog tool(s) available`);
 
   const server = new Server(
-    { name: 'omnetpp-ned-msg-ini', version: '0.1.0' },
+    { name: 'omnetpp-ned-msg-ini', version: __OPP_VERSION__ },
     { capabilities: { tools: {} } },
   );
 
