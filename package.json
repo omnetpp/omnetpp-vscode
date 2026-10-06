@@ -43,7 +43,9 @@
     "prepackage": "bun run compile && bun run build:wasm && bun run copy:assets && bun ./esbuild.mjs --production",
     "test": "bun run compile && bun test ./shared/src/test ./server/src/test ./client/webview/src/test ./client/worker/src/test",
     "package": "bun run prepackage && bun ./node_modules/@vscode/vsce/vsce package --no-dependencies",
-    "deploy": "bun run prepackage && bun ./node_modules/@vscode/vsce/vsce publish --no-dependencies"
+    "deploy": "bun run prepackage && bun ./node_modules/@vscode/vsce/vsce publish --no-dependencies",
+    "package:cli": "bun run prepackage && bun ./scripts/pack-cli.mjs",
+    "deploy:cli": "bun run prepackage && bun ./scripts/pack-cli.mjs --publish"
   },
   "contributes": {
     "mcpServerDefinitionProviders": [
