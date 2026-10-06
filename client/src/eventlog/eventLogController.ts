@@ -153,6 +153,11 @@ export class EventLogController {
       onFilterChanged: (params) => void this.setPersistedFilterParams(key, params),
       openOptions: readOpenOptions(),
       onLog: this.log,
+      onWorkerStopped: (crashes) =>
+        void vscode.window.showErrorMessage(
+          `OMNeT++: the event log worker for ${vscode.workspace.asRelativePath(uri)} crashed ${crashes} times in a row and was stopped. ` +
+            'See the "OMNeT++ Event Log Diagnostics" output for its error output; close and reopen the file to try again.',
+        ),
     });
     this.sessions.set(key, session);
     this.syncOpenContext();

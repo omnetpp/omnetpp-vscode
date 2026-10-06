@@ -19,7 +19,10 @@
  * -- deliberately kept simple per the E8 task list ("keep it simple"); it does not
  * attempt to restore in-flight requests (those reject) or exact viewport/table
  * scroll position (that's the session/webview's job to re-request once the
- * `restarted` event fires).
+ * `restarted` event fires). A worker that dies again within `stableAfterMs` of its
+ * respawn counts as a consecutive crash; after `maxRestarts` such respawns the next crash
+ * stops respawning (a file that reliably kills the worker would otherwise respawn a process
+ * every few seconds for as long as the editor stays open) and fires `stopped`.
  *
  * Live follow (phase E9): `rawRequest()` (every typed method below funnels through
  * it) automatically retries a request ONCE if it fails with `ContentChanged` (the
@@ -88,6 +91,15 @@ export interface WorkerClientOptions {
   spawnOptions?: SpawnOptions;
   /** Backoff schedule (ms) for automatic restart after an unexpected crash; the last entry repeats. Default `[200, 1000, 5000]`. */
   restartBackoffMs?: number[];
+  /** Respawns allowed in a run of consecutive crashes; the next crash stops the client. Default 5. */
+  maxRestarts?: number;
+  /** A worker that ran at least this long (ms) before crashing was healthy: its crash starts a new count. Default 60 000. */
+  stableAfterMs?: number;
+}
+
+/** Fired once when the client gives up respawning after `crashes` consecutive crashes. */
+export interface StoppedEvent {
+  crashes: number;
 }
 
 /** Fired after a crash-triggered restart has finished re-establishing state (see this file's header). `summary` is `null` if there was nothing to reopen (the worker had never successfully opened a file) or the reopen itself failed. */
@@ -100,6 +112,8 @@ export class WorkerClient {
   private connection: MessageConnection | null = null;
   private disposed = false;
   private restartAttempt = 0;
+  private spawnedAt = 0;
+  private stoppedAfter: number | undefined;
 
   private lastOpenParams: OpenParams | null = null;
   private lastFilterParams: FilterParams | null = null;
@@ -108,6 +122,7 @@ export class WorkerClient {
   private readonly changedListeners = new Set<(p: ElogChangedParams) => void>();
   private readonly stderrListeners = new Set<(chunk: string) => void>();
   private readonly restartedListeners = new Set<(e: RestartedEvent) => void>();
+  private readonly stoppedListeners = new Set<(e: StoppedEvent) => void>();
 
   constructor(
     private readonly bundlePath: string,
@@ -134,6 +149,7 @@ export class WorkerClient {
       stdio: ['pipe', 'pipe', 'pipe'],
     }) as ChildProcessWithoutNullStreams;
     this.child = child;
+    this.spawnedAt = Date.now();
     child.stderr.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf8');
       for (const listener of this.stderrListeners) listener(text);
@@ -158,6 +174,12 @@ export class WorkerClient {
     this.connection = null;
     this.child = null;
 
+    if (Date.now() - this.spawnedAt >= (this.options.stableAfterMs ?? 60_000)) this.restartAttempt = 0;
+    if (this.restartAttempt >= (this.options.maxRestarts ?? 5)) {
+      this.stoppedAfter = this.restartAttempt + 1;
+      for (const listener of this.stoppedListeners) listener({ crashes: this.stoppedAfter });
+      return;
+    }
     const backoff = this.options.restartBackoffMs ?? [200, 1000, 5000];
     const delay = backoff[Math.min(this.restartAttempt, backoff.length - 1)];
     this.restartAttempt++;
@@ -213,6 +235,12 @@ export class WorkerClient {
     return { dispose: () => this.restartedListeners.delete(listener) };
   }
 
+  /** Fires once when the client gives up respawning a worker that keeps crashing (see this file's header); every later request rejects. */
+  onStopped(listener: (e: StoppedEvent) => void): Disposable {
+    this.stoppedListeners.add(listener);
+    return { dispose: () => this.stoppedListeners.delete(listener) };
+  }
+
   // ---- typed request wrappers -----------------------------------------------------------
 
   /**
@@ -245,12 +273,20 @@ export class WorkerClient {
    */
   private sendRequestSafely<R>(method: string, params: unknown, token: CancellationToken | undefined): Promise<R> {
     const connection = this.connection;
-    if (connection === null) return Promise.reject(new Error(`WorkerClient: not connected (worker restarting after a crash?), method=${method}`));
+    if (connection === null) return Promise.reject(this.notConnectedError(method));
     return token === undefined ? connection.sendRequest<R>(method, params) : connection.sendRequest<R>(method, params, token);
   }
 
+  private notConnectedError(method: string): Error {
+    return new Error(
+      this.stoppedAfter === undefined
+        ? `WorkerClient: not connected (worker restarting after a crash?), method=${method}`
+        : `WorkerClient: worker stopped after ${this.stoppedAfter} consecutive crashes, method=${method}`,
+    );
+  }
+
   private rawRequest<P, R>(method: string, params: P, token?: CancellationToken): Promise<R> {
-    if (this.connection === null) return Promise.reject(new Error(`WorkerClient: not connected (worker restarting after a crash?), method=${method}`));
+    if (this.connection === null) return Promise.reject(this.notConnectedError(method));
     return this.sendRequestSafely<R>(method, params, token).catch((err: unknown) => {
       if (!isContentChangedError(err)) throw err;
       if (this.connection === null) throw err; // disconnected between the failed attempt and this retry (e.g. a crash) -- nothing sensible to retry against

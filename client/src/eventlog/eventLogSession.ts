@@ -98,6 +98,8 @@ export interface EventLogSessionOptions {
    * inside VS Code without attaching a debugger.
    */
   onLog?: (line: string) => void;
+  /** Called once when the worker crashed `crashes` times in a row and is no longer respawned (`WorkerClient.onStopped`). */
+  onWorkerStopped?: (crashes: number) => void;
 }
 
 export class EventLogSession {
@@ -132,6 +134,10 @@ export class EventLogSession {
       this.handleRestarted(e);
     });
     this.workerClientInstance.onStderr((chunk) => this.options.onLog?.(`[worker stderr] ${chunk.trimEnd()}`));
+    this.workerClientInstance.onStopped((e) => {
+      this.options.onLog?.(`worker for ${this.filePath} stopped after ${e.crashes} consecutive crashes`);
+      this.options.onWorkerStopped?.(e.crashes);
+    });
   }
 
   /** Direct access to the underlying `WorkerClient`, for callers that want a
