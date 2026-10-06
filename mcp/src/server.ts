@@ -4,7 +4,7 @@
 // (produced by esbuild); assets (wasm/, config/) live next to it, as for the LSP
 // server bundle.
 //
-// Usage:  node dist/opp_ide_mcp.js [projectDir ...] [--ned-path=a;b]
+// Usage:  opp_ide_mcp [projectDir ...] [--ned-path=a;b]
 // Env:    OMNETPP_NED_PATH, OMNETPP_WASM_DIR, OMNETPP_CONFIG_DIR
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,11 +21,30 @@ function log(...args: unknown[]): void {
   console.error('[opp_ide_mcp]', ...args);
 }
 
+const USAGE = `opp_ide_mcp — MCP stdio server for the OMNeT++ NED/MSG/INI model and eventlogs
+
+Usage:
+  opp_ide_mcp [options] [projectDir ...]
+
+Speaks the Model Context Protocol (newline-delimited JSON-RPC) on stdin/stdout;
+start it from an MCP client, not interactively. Logs go to stderr.
+
+Arguments:
+  projectDir          Project directories to index. Defaults to the current directory.
+
+Options:
+  --ned-path=<dirs>   Extra NED source roots (libraries), ';'- or ':'-separated.
+                      Defaults to the OMNETPP_NED_PATH environment variable.
+  -h, --help          Show this help.`;
+
 function parseArgs(argv: string[]): { roots: string[]; nedPathDirs: string[] } {
   const roots: string[] = [];
   let nedPath = process.env.OMNETPP_NED_PATH ?? '';
   for (const a of argv) {
-    if (a.startsWith('--ned-path=')) nedPath = a.slice('--ned-path='.length);
+    if (a === '-h' || a === '--help') {
+      process.stdout.write(`${USAGE}\n`);
+      process.exit(0);
+    } else if (a.startsWith('--ned-path=')) nedPath = a.slice('--ned-path='.length);
     else if (a.startsWith('--')) continue;
     else roots.push(resolve(a));
   }

@@ -22,7 +22,8 @@ const common = {
 const targets = [
   { entryPoints: ['client/src/extension.ts'], outfile: 'dist/extension.js' },
   { entryPoints: ['server/src/server.ts'], outfile: 'dist/server.js' },
-  { entryPoints: ['mcp/src/server.ts'], outfile: 'dist/opp_ide_mcp.js' },
+  // standalone MCP stdio server
+  { entryPoints: ['mcp/src/server.ts'], outfile: 'dist/opp_ide_mcp.js', banner: { js: '#!/usr/bin/env node' } },
   // standalone CLI linter — runnable directly (node shebang) and via the `bin` entry
   { entryPoints: ['mcp/src/lint.ts'], outfile: 'dist/opp_lint.js', banner: { js: '#!/usr/bin/env node' } },
   // standalone CLI documentation generator

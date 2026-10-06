@@ -17,7 +17,8 @@
   "main": "./dist/extension.js",
   "bin": {
     "opp_lint": "./dist/opp_lint.js",
-    "opp_neddoc": "./dist/opp_neddoc.js"
+    "opp_neddoc": "./dist/opp_neddoc.js",
+    "opp_ide_mcp": "./dist/opp_ide_mcp.js"
   },
   "activationEvents": [
     "workspaceContains:**/*.ned",
