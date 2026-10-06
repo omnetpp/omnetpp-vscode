@@ -772,7 +772,7 @@
         "omnetpp.installDir": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Path to an OMNeT++ installation root. When set (or auto-detected), enables enriched features such as a live config-option registry and bundled NED libraries."
+          "markdownDescription": "Path to an OMNeT++ installation root. Its `images/` folder is used as an icon source for display-string icon completion, the graphical NED preview, and generated documentation (except for the preview, the `OMNETPP_ROOT` environment variable also works). Not needed otherwise: the built-in NED types and the config-option registry are bundled."
         },
         "omnetpp.neddoc.format": {
           "type": "string",

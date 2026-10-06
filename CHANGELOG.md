@@ -1,5 +1,36 @@
 # Change Log
 
+## Unreleased
+
+- **Sequence Chart and Event Log** for `.elog` eventlog files — a port of the Eclipse-based
+  IDE's tools: a zoomable Sequence Chart custom editor (module axes, message arrows,
+  timeline modes, axis vector data, rubber-band zoom) and a virtual Event Log table panel.
+  Handles multi-gigabyte logs with bounded memory, live-follows a running simulation, and
+  supports event filtering, cause/consequence tracing, bookmarks, and SVG export
+- **7 `elog_*` MCP tools** for reading eventlog files (standalone `opp_ide_mcp` server)
+- **Command-line tools for everyone**: "OMNeT++: Install Command-Line Tools" puts
+  `opp_lint`, `opp_neddoc` and `opp_ide_mcp` on the `PATH` (launchers that run on VS
+  Code's own runtime, refreshed on updates), and the npm package `@omnetpp/opp-tools`
+  installs them without VS Code (Node.js 18+). `opp_ide_mcp` is now a command with
+  `--help`, like the other two
+- **NED documentation generation** — "Generate NED Documentation" command and the
+  standalone `opp_neddoc` CLI: HTML (classic, Read the Docs, and Material styles),
+  Markdown, or reStructuredText output with module figures, usage/inheritance diagrams,
+  Doxygen tag-file links to C++ docs, and links to separately generated documentation
+  of dependencies; configurable via `omnetpp.neddoc.*` settings
+- **Switch between corresponding `.cc`/`.h`/`.ned` files** (`Alt+O`)
+- **`find_member_accesses` MCP tool** — where NED parameters, gates, and submodules are
+  accessed from C++ (23 NED/MSG/INI tools in total)
+- NED type-name strings (e.g. `typename = "..."`) take part in navigation, references,
+  rename, and diagnostics; INI `typename` values resolve against the slot's `like`
+  interface
+- INI `include` directives are merged and navigable; configs with several `extends=`
+  bases use C3 linearization
+- `.ini` files are considered only inside NED folders
+- NED preview: back/forward history, toolbar with a type search box, Ctrl/Cmd-click
+  drill-down into submodule types, drag scrolling, `g` (layout group) display-string tag,
+  and richer connection tooltips
+
 ## 0.4.0
 
 - **Graphical NED preview** — a read-only rendering of the NED type under the cursor,
