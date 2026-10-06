@@ -1,7 +1,7 @@
 /**
  * miniMarkdown.ts (PURE) - a hand-rolled minimal Markdown-to-HTML subset for "Bookmark Info"
  * note bodies. No external dependency: this webview bundle is architecturally limited to
- * @omnetpp/shared/preview plus type-only imports (see CLAUDE.md's client/webview/ notes), so
+ * @omnetpp/shared/preview plus type-only imports (see AGENTS.md's client/webview/ notes), so
  * a real CommonMark library is out of scope -- this covers the common note-taking constructs
  * instead: bold (**x**), italic (*x*), code (backtick x backtick), links ([text](url), http(s)
  * or mailto only), headers (# / ##), lists (- / 1.), and blank-line paragraph breaks /
