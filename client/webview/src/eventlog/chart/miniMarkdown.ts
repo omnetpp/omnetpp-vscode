@@ -8,14 +8,20 @@
  * single-newline line breaks. Anything else (unsupported syntax) passes through as literal
  * escaped text, never stripped or mangled.
  *
- * Safety: every raw text run is escaped via escapeHtml() (mirrors labelProvider.ts's own
- * 3-entity escaper) BEFORE any markdown substitution inserts real tags, so the result is
- * always safe to assign to innerHTML -- the exact "provider-controlled/pre-escaped HTML"
- * pattern tooltip.ts already documents and relies on for its own hand-built tooltip HTML.
+ * Safety: every raw text run is escaped via escapeHtml() BEFORE any markdown substitution
+ * inserts real tags, so the result is always safe to assign to innerHTML -- the exact
+ * "provider-controlled/pre-escaped HTML" pattern tooltip.ts already documents and relies on
+ * for its own hand-built tooltip HTML. Quotes are escaped too, because link URLs end up
+ * inside an href="..." attribute.
  */
 
 function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 const HEADER_RE = /^(#{1,2})\s+(.*)$/;
@@ -29,11 +35,15 @@ const NUMBERED_RE = /^\d+\.\s+/;
  * collide with real content.
  */
 const PLACEHOLDER_CHAR = String.fromCharCode(1);
+/** Start and end markers of a link whose URL waits in a side table (same idea as above). */
+const LINK_START_CHAR = String.fromCharCode(2);
+const LINK_END_CHAR = String.fromCharCode(3);
 
 /**
  * Inline spans within one already-block-classified line/run of text: code first (protects
- * its content from the bold/italic/link rules below behind the placeholder), then bold, then
- * italic, then links. text must already be escapeHtml()-escaped.
+ * its content from the rules below behind the placeholder), then links (their URLs move to a
+ * side table so bold/italic never rewrite them; the link text stays in place and still gets
+ * them), then bold, then italic. text must already be escapeHtml()-escaped.
  */
 function renderInline(text: string): string {
   const codeSpans: string[] = [];
@@ -42,10 +52,16 @@ function renderInline(text: string): string {
     codeSpans.push(code);
     return PLACEHOLDER_CHAR + String(codeSpans.length - 1) + PLACEHOLDER_CHAR;
   });
+  const restorePattern = new RegExp(PLACEHOLDER_CHAR + '(\\d+)' + PLACEHOLDER_CHAR, 'g');
+  const urls: string[] = [];
+  out = out.replace(/\[([^\]\n]+?)\]\(((?:https?:\/\/|mailto:)[^\s)]+)\)/g, (_m, label: string, url: string) => {
+    urls.push(url.replace(restorePattern, (_c, i: string) => '`' + codeSpans[Number(i)] + '`'));
+    return LINK_START_CHAR + String(urls.length - 1) + LINK_START_CHAR + label + LINK_END_CHAR;
+  });
   out = out.replace(/\*\*([^\n]+?)\*\*/g, '<strong>$1</strong>');
   out = out.replace(/\*([^\n*]+?)\*/g, '<em>$1</em>');
-  out = out.replace(/\[([^\]\n]+?)\]\(((?:https?:\/\/|mailto:)[^\s)]+)\)/g, '<a href="$2">$1</a>');
-  const restorePattern = new RegExp(PLACEHOLDER_CHAR + '(\\d+)' + PLACEHOLDER_CHAR, 'g');
+  const linkPattern = new RegExp(`${LINK_START_CHAR}(\\d+)${LINK_START_CHAR}([^${LINK_END_CHAR}]*)${LINK_END_CHAR}`, 'g');
+  out = out.replace(linkPattern, (_m, i: string, label: string) => `<a href="${urls[Number(i)]}">${label}</a>`);
   out = out.replace(restorePattern, (_m, i: string) => `<code>${codeSpans[Number(i)]}</code>`);
   return out;
 }

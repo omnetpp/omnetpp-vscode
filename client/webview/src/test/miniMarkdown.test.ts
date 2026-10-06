@@ -66,3 +66,28 @@ test('renderMiniMarkdown: raw < > & are escaped, never passed through as real ta
 test('renderMiniMarkdown: unsupported syntax passes through literally, not stripped', () => {
   assert.strictEqual(renderMiniMarkdown('~~strikethrough~~ stays literal'), '<p>~~strikethrough~~ stays literal</p>');
 });
+
+test('renderMiniMarkdown: a quote in a link URL cannot end the href attribute', () => {
+  assert.strictEqual(
+    renderMiniMarkdown('[x](https://a"onmouseover="alert(1))'),
+    '<p><a href="https://a&quot;onmouseover=&quot;alert(1">x</a>)</p>',
+  );
+  assert.strictEqual(renderMiniMarkdown("[x](https://a'b)"), '<p><a href="https://a&#39;b">x</a></p>');
+});
+
+test('renderMiniMarkdown: quotes in plain text are escaped', () => {
+  assert.strictEqual(renderMiniMarkdown(`say "hi" it's`), '<p>say &quot;hi&quot; it&#39;s</p>');
+});
+
+test('renderMiniMarkdown: bold/italic/code syntax inside a link URL is left alone', () => {
+  assert.strictEqual(renderMiniMarkdown('[x](https://a/*b*/c)'), '<p><a href="https://a/*b*/c">x</a></p>');
+  assert.strictEqual(renderMiniMarkdown('[x](https://a/**b**)'), '<p><a href="https://a/**b**">x</a></p>');
+  assert.strictEqual(renderMiniMarkdown('[x](https://a/`b`)'), '<p><a href="https://a/`b`">x</a></p>');
+});
+
+test('renderMiniMarkdown: link text still gets bold/italic', () => {
+  assert.strictEqual(
+    renderMiniMarkdown('[**docs** here](https://e.org) and *more*'),
+    '<p><a href="https://e.org"><strong>docs</strong> here</a> and <em>more</em></p>',
+  );
+});
