@@ -76,6 +76,9 @@ export class ProjectIndex {
    *  the document store, so the disk scanner must not overwrite them. */
   private isOpen: (uri: string) => boolean = () => false;
 
+  /** True while `initialize`/`reindex` rebuilds the index, which is incomplete until then. */
+  scanning = false;
+
   constructor(
     private fs: FileSystem,
     private parsers: ParserService,
@@ -89,23 +92,28 @@ export class ProjectIndex {
 
   /** Discover source roots and index all NED and MSG files on disk. */
   async initialize(workspaceFolders: string[], nedPathDirs: string[]): Promise<void> {
-    this.iniConfigCounts.clear();
-    this.fileMeta.clear();
+    this.scanning = true;
+    try {
+      this.iniConfigCounts.clear();
+      this.fileMeta.clear();
 
-    await loadBuiltins(this.fs, this.parsers, this.configDir, {
-      nedCache: this.cache,
-      msgCache: this.msgCache,
-      configRegistry: this.configRegistry,
-    });
-    this.db.onNedFile(BUILTIN_URI);
+      await loadBuiltins(this.fs, this.parsers, this.configDir, {
+        nedCache: this.cache,
+        msgCache: this.msgCache,
+        configRegistry: this.configRegistry,
+      });
+      this.db.onNedFile(BUILTIN_URI);
 
-    this.layout = await discoverProjectLayout(this.fs, workspaceFolders, nedPathDirs);
-    await scanSourceRoots(this.fs, this.layout, {
-      ned: (p) => this.indexFile(p),
-      msg: (p) => this.indexMsgFile(p),
-      ini: (p) => this.indexIniFile(p),
-      cpp: (p) => this.indexCppFile(p),
-    });
+      this.layout = await discoverProjectLayout(this.fs, workspaceFolders, nedPathDirs);
+      await scanSourceRoots(this.fs, this.layout, {
+        ned: (p) => this.indexFile(p),
+        msg: (p) => this.indexMsgFile(p),
+        ini: (p) => this.indexIniFile(p),
+        cpp: (p) => this.indexCppFile(p),
+      });
+    } finally {
+      this.scanning = false;
+    }
   }
 
   /** Stat `fsPath` and remember its {mtimeMs,size} for `revalidate()`. */
@@ -248,6 +256,7 @@ export class ProjectIndex {
 
   /** Re-discover the project layout and rebuild the index from scratch. */
   async reindex(workspaceFolders: string[], nedPathDirs: string[]): Promise<void> {
+    this.scanning = true;
     this.cache.clear();
     this.msgCache.clear();
     this.iniCache.clear();

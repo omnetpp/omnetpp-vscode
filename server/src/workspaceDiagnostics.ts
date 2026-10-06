@@ -106,36 +106,48 @@ export function registerWorkspaceDiagnostics(
    *  scope change or an edit cancels the running one, whose results would be stale. */
   function publishWorkspaceDiagnostics(): void {
     const gen = ++passGeneration;
-    if (!state.index || state.diagnosticsScope !== 'workspace') return;
+    if (!state.index || state.index.scanning || state.diagnosticsScope !== 'workspace') return;
     const index = state.index;
     const c = ctx(state);
     // Pass the real source `text` (not '') so inline `suppress(...)` directives are
     // honored for closed files too — the suppress filter reads directives from it
     // (and short-circuits on `text` lacking "suppress"). NED/MSG text comes free from
-    // the tree; INI text is retained by the cache. Snapshot the file lists up front:
-    // the caches change while the pass is suspended.
-    const work: (() => ParsedDocument)[] = [];
-    for (const f of index.cache.allFiles()) {
-      if (f.uri === BUILTIN_URI || !isUnderWorkspace(state, f.uri)) continue;
-      work.push(() => ({ uri: f.uri, language: 'ned', version: 0, text: f.tree.rootNode.text, tree: f.tree }));
+    // the tree; INI text is retained by the cache. Only the URIs are snapshotted:
+    // between slices the caches may replace or drop a file and free its tree, so
+    // each item reads the current entry within its own slice.
+    const work: (() => ParsedDocument | undefined)[] = [];
+    for (const { uri } of index.cache.allFiles()) {
+      if (uri === BUILTIN_URI || !isUnderWorkspace(state, uri)) continue;
+      work.push(() => {
+        const f = index.cache.getFile(uri);
+        return f && { uri, language: 'ned', version: 0, text: f.tree.rootNode.text, tree: f.tree };
+      });
     }
-    for (const f of index.msgCache.allFiles()) {
-      if (!isUnderWorkspace(state, f.uri)) continue;
-      work.push(() => ({ uri: f.uri, language: 'msg', version: 0, text: f.tree.rootNode.text, tree: f.tree }));
-    }
-    for (const { uri, doc, text } of index.iniCache.allDocs()) {
+    for (const { uri } of index.msgCache.allFiles()) {
       if (!isUnderWorkspace(state, uri)) continue;
-      work.push(() => ({ uri, language: 'ini', version: 0, text, ini: doc }));
+      work.push(() => {
+        const f = index.msgCache.getFile(uri);
+        return f && { uri, language: 'msg', version: 0, text: f.tree.rootNode.text, tree: f.tree };
+      });
+    }
+    for (const { uri } of index.iniCache.allDocs()) {
+      if (!isUnderWorkspace(state, uri)) continue;
+      work.push(() => {
+        const doc = index.iniCache.getDoc(uri);
+        const text = index.iniCache.getText(uri);
+        return doc && text !== undefined ? { uri, language: 'ini', version: 0, text, ini: doc } : undefined;
+      });
     }
 
     const nextNonEmpty = new Set<string>();
     let next = 0;
     const step = (): void => {
-      if (gen !== passGeneration || state.index !== index) return;
+      if (gen !== passGeneration || state.index !== index || index.scanning) return;
       const deadline = performance.now() + SLICE_MS;
-      while (next < work.length && performance.now() < deadline) {
+      // at least one item per slice, so the pass always moves on
+      for (let first = true; next < work.length && (first || performance.now() < deadline); first = false) {
         const parsed = work[next++]();
-        if (documents.get(parsed.uri)) continue;
+        if (!parsed || documents.get(parsed.uri)) continue;
         const diags = computeDiagnostics(parsed, c) as LspDiagnostic[];
         if (!diags.length) continue;
         nextNonEmpty.add(parsed.uri);
