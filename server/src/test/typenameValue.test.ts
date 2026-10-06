@@ -95,3 +95,12 @@ test('renaming a NED type renames the INI typename values that can denote it', a
   const line = INI.split('\n')[2];
   assert.equal(line.slice(iniEdits[0].range.start.character, iniEdits[0].range.end.character), 'Twin');
 });
+
+test('renaming a NED network renames the INI network= value that runs it', async () => {
+  const { ctx, nedCache } = await setup();
+  const edit = computeRename(nedDoc(nedCache, 'file:///net.ned', NED), posOf(NED, 'TNet {'), 'Lan', ctx)!;
+  const iniEdits = edit.changes!['file:///omnetpp.ini'];
+  assert.equal(iniEdits?.length, 1);
+  assert.equal(iniEdits[0].range.start.line, 1);
+  assert.equal(iniEdits[0].newText, 'Lan');
+});

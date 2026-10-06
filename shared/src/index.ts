@@ -48,7 +48,14 @@ export {
   nedReferences,
 } from './ned/nedNavigation';
 export { nedCompletion } from './ned/nedCompletion';
-export { nedPrepareRename, nedPrepareMemberRename, nedRename } from './ned/nedRename';
+export { nedPrepareRename, nedPrepareMemberRename, nedRename, resolveRenameMember, type RenameMemberKind } from './ned/nedRename';
+export {
+  type RenameChanges,
+  trailingNameEdit,
+  addRenameEdit,
+  addIniTypeRenameEdits,
+  addIniParamRenameEdits,
+} from './xref/renameIniEdits';
 export {
   type NedHierarchyItem,
   prepareTypeHierarchy,

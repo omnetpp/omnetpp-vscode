@@ -219,6 +219,34 @@ test('rename_member renames a parameter project-wide', async () => {
   }
 });
 
+const INI_URI = pathToFileURL(INI_PATH).toString();
+const editedText = (edits: any[], line: number) =>
+  edits.filter((e) => e.range.start.line === line).map((e) => {
+    const src = INI_TEXT.split('\n')[line];
+    return src.slice(0, e.range.start.character) + e.newText + src.slice(e.range.end.character);
+  });
+
+test('rename_ned_type also rewrites INI network= values', async () => {
+  const ctx = await buildCtx();
+  const edit = (await handleTool('rename_ned_type', { fqName: 'Net', newName: 'Lan' }, ctx)) as any;
+  assert.ok(edit.changes['file:///proj/Net.ned'], 'declaration');
+  assert.deepEqual(editedText(edit.changes[INI_URI] ?? [], 1), ['network = Lan']);
+});
+
+test('rename_member of a parameter also rewrites INI assignment keys', async () => {
+  const ctx = await buildCtx();
+  const edit = (await handleTool('rename_member', { typeFqName: 'Host', member: 'mode', newName: 'style' }, ctx)) as any;
+  assert.ok(edit.changes['file:///proj/Host.ned'], 'declaration');
+  assert.deepEqual(editedText(edit.changes[INI_URI] ?? [], 4), ['**.host.style = "fast"']);
+});
+
+test('rename_member of an inherited parameter uses its canonical owner', async () => {
+  const ctx = await buildCtx();
+  // Server inherits mode from Host; the INI key targets host (a Host), so it must still be found
+  const edit = (await handleTool('rename_member', { typeFqName: 'Server', member: 'mode', newName: 'style' }, ctx)) as any;
+  assert.deepEqual(editedText(edit.changes[INI_URI] ?? [], 4), ['**.host.style = "fast"']);
+});
+
 test('get_diagnostics flags a malformed NED file', async () => {
   const ctx = await buildCtx();
   // add a file with a syntax error directly to the cache

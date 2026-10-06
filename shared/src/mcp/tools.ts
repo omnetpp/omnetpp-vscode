@@ -18,7 +18,8 @@ import type { IniResourceCache } from '../ini/iniResourceCache';
 import { ConfigRegistry } from '../ini/configRegistry';
 import { nameNode } from '../ned/nedAst';
 import { nodeRange } from '../parser/treeUtils';
-import { nedRenameType, nedRenameMember } from '../ned/nedRename';
+import { nedRenameType, nedRenameMember, resolveRenameMember } from '../ned/nedRename';
+import { addIniParamRenameEdits, addIniTypeRenameEdits } from '../xref/renameIniEdits';
 import { edgeKindLabel } from '../xref/xrefGrouping';
 import { organizeImports } from '../ned/nedOrganizeImports';
 import { syntaxDiagnostics } from '../features/syntaxDiagnostics';
@@ -543,18 +544,24 @@ const TOOLS: ToolDef[] = [
   {
     name: 'rename_ned_type',
     description:
-      'Rename a NED type project-wide. Returns a WorkspaceEdit (changes keyed by file URI) covering the declaration and every reference. Does not write files.',
+      'Rename a NED type project-wide. Returns a WorkspaceEdit (changes keyed by file URI) covering the declaration, every NED reference, and the INI `network =` and `typename` values that name it. Does not write files.',
     inputSchema: {
       type: 'object',
       properties: { fqName: { type: 'string' }, newName: { type: 'string' } },
       required: ['fqName', 'newName'],
     },
-    handler: (a, ctx) => nedRenameType(ctx.nedCache, a.fqName, a.newName) ?? { error: `type not found: ${a.fqName}` },
+    handler: (a, ctx) => {
+      const target = ctx.nedCache.getType(a.fqName);
+      const edit = nedRenameType(ctx.nedCache, a.fqName, a.newName);
+      if (!target || !edit) return { error: `type not found: ${a.fqName}` };
+      addIniTypeRenameEdits((edit.changes ??= {}), ctx, target, a.newName);
+      return edit;
+    },
   },
   {
     name: 'rename_member',
     description:
-      'Rename a parameter, gate, or submodule of a NED type project-wide (kind auto-detected if omitted). Returns a WorkspaceEdit. Does not write files.',
+      'Rename a parameter, gate, or submodule of a NED type project-wide (kind auto-detected if omitted). Returns a WorkspaceEdit; a parameter rename also covers the INI assignment keys that set it. Does not write files.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -565,10 +572,21 @@ const TOOLS: ToolDef[] = [
       },
       required: ['typeFqName', 'member', 'newName'],
     },
-    handler: (a, ctx) =>
-      nedRenameMember(ctx.nedCache, a.typeFqName, a.member, a.newName, a.kind) ?? {
-        error: `member not found: ${a.member} on ${a.typeFqName}`,
-      },
+    handler: (a, ctx) => {
+      const member = resolveRenameMember(ctx.nedCache, a.typeFqName, a.member, a.kind);
+      const edit = nedRenameMember(ctx.nedCache, a.typeFqName, a.member, a.newName, a.kind);
+      if (!member || !edit) return { error: `member not found: ${a.member} on ${a.typeFqName}` };
+      if (member.kind === 'param') {
+        addIniParamRenameEdits(
+          (edit.changes ??= {}),
+          { iniCache: ctx.iniCache, nedCache: ctx.nedCache, registry: ctx.configRegistry },
+          member.owner.fqName,
+          a.member,
+          a.newName,
+        );
+      }
+      return edit;
+    },
   },
   {
     name: 'organize_imports',

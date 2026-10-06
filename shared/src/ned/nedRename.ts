@@ -150,24 +150,27 @@ export function nedRenameType(
  * fully-qualified name, across the whole project. `kind` may be omitted to
  * auto-detect from the type's members (param → gate → submodule precedence).
  */
-export function nedRenameMember(
+export type RenameMemberKind = 'param' | 'gate' | 'submodule';
+
+/** The kind (auto-detected unless given) and canonical owner of member `memberName`
+ *  as seen from type `typeFqName`, or undefined if there is no such member. */
+export function resolveRenameMember(
   cache: NedResourceCache,
   typeFqName: string,
   memberName: string,
-  newName: string,
-  kind?: 'param' | 'gate' | 'submodule',
-): WorkspaceEdit | null {
+  kind?: RenameMemberKind,
+): { kind: RenameMemberKind; owner: NedTypeInfo } | undefined {
   const type = cache.getType(typeFqName);
-  if (!type) return null;
+  if (!type) return undefined;
 
-  const detectKind = (): 'param' | 'gate' | 'submodule' | undefined => {
+  const detectKind = (): RenameMemberKind | undefined => {
     if (type.findParam(memberName)) return 'param';
     if (type.findGate(memberName)) return 'gate';
     if (type.getSubmodule(memberName)) return 'submodule';
     return undefined;
   };
   const memberKind = kind ?? detectKind();
-  if (!memberKind) return null;
+  if (!memberKind) return undefined;
 
   // The canonical owner is the most-base type that locally declares the member.
   const has = (t: NedTypeInfo) =>
@@ -176,10 +179,20 @@ export function nedRenameMember(
     : t.localSubmodules().has(memberName);
   let owner: NedTypeInfo | undefined;
   for (const t of [type, ...type.ancestors()]) if (has(t)) owner = t; // keep most-base
-  if (!owner) return null;
+  return owner && { kind: memberKind, owner };
+}
 
+export function nedRenameMember(
+  cache: NedResourceCache,
+  typeFqName: string,
+  memberName: string,
+  newName: string,
+  kind?: RenameMemberKind,
+): WorkspaceEdit | null {
+  const member = resolveRenameMember(cache, typeFqName, memberName, kind);
+  if (!member) return null;
   const changes: Record<string, TextEdit[]> = {};
-  for (const loc of memberReferences(cache, { kind: memberKind, ownerFq: owner.fqName, name: memberName })) {
+  for (const loc of memberReferences(cache, { kind: member.kind, ownerFq: member.owner.fqName, name: memberName })) {
     (changes[loc.uri] ??= []).push({ range: loc.range, newText: newName });
   }
   return { changes };
