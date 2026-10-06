@@ -1,21 +1,170 @@
-MIT License
+            OMNeT++ DEVELOPMENT ENVIRONMENT FOR VS CODE — LICENSE AGREEMENT
 
-Copyright (c) 2024 OpenSim Ltd.
+               Copyright (C) 2024-2026 OpenSim Ltd. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+                                    Summary
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+  You may use this software on the same conditions of use as the OMNeT++ /
+OMNEST simulation kernel: free of charge for noncommercial purposes, as the
+Academic Public License of OMNeT++ allows; for commercial purposes only if you
+hold a valid commercial OMNEST license, within the scope of that license. This
+summary is for convenience only; the terms below govern.
+
+
+                             TERMS AND CONDITIONS
+
+  0. Definitions
+
+  "Software" means the OMNeT++ Development Environment extension for Visual
+Studio Code and the @omnetpp/opp-tools package, including the command-line
+tools opp_lint, opp_neddoc and opp_ide_mcp, their documentation, and all
+other files distributed with them, except the Third-Party Components.
+
+  "Third-Party Components" means the software components, libraries, fonts
+and images included in the Software that are copyrighted by others and are
+licensed under their own license terms.
+
+  "Simulation Kernel" means the OMNeT++ or OMNEST discrete event simulation
+framework, which is distributed separately from the Software.
+
+  "Noncommercial Purposes" means teaching and academic research at
+universities, colleges and other educational institutions, and personal
+non-profit purposes. If research is developed for later use by, or in
+co-operation with an industry partner at an Academic Institution, that
+research is considered to be Commercial and requires a commercial license.
+
+  "Commercial Purposes" means every use that is not for Noncommercial
+Purposes, including but not limited to consulting activities, design of
+commercial hardware or software networking products, joint research with a
+commercial entity, and government-funded, EU-funded, military or similar
+research projects. Co-operation between Academic Institutions and Industry
+partners is considered Commercial Research for the purposes of this license
+and requires a paid commercial license for all individuals partaking in such
+research.
+
+  "OMNEST License" means a valid commercial license for the Simulation Kernel
+obtained from OpenSim Ltd. or its authorized resellers.
+
+  Each licensee is addressed as "you".
+
+  1. Noncommercial use
+
+  You may install and use the Software free of charge for Noncommercial
+Purposes. You may also use the Software for a reasonably limited period of
+time for the purpose of evaluating its usefulness for a particular purpose.
+These permissions correspond to the permission that Section 1 of the Academic
+Public License (version 1.1) grants for noncommercial use of OMNeT++.
+
+  2. Commercial use
+
+  You may use the Software for Commercial Purposes only if you, or the
+organization on whose behalf you use the Software, hold an OMNEST License
+and such a license is designated for your exclusive use.
+Such use is permitted within the scope of that OMNEST License (for example
+its licensed users, sites and term), and it ends when the OMNEST License
+ends. For an OMNEST License, contact OpenSim Ltd. or visit www.omnest.com.
+
+  3. Redistribution
+
+  You may copy and distribute verbatim, unmodified copies of the Software as
+you received it (for example, the .vsix file or the npm package), in any
+medium, provided that:
+
+    a) you distribute the complete Software, including this license and all
+    copyright and license notices, unaltered;
+
+    b) you charge no fee for the Software itself, beyond the cost of
+    physically making the copy; and
+
+    c) you distribute it for Noncommercial Purposes, or, for Commercial
+    Purposes, only within the scope of an OMNEST License.
+
+  Every recipient receives the Software under this license, and no other.
+
+  4. Restrictions
+
+  Except as expressly permitted in this license, or to the extent that
+applicable law does not allow this restriction, you may not:
+
+    a) modify the Software, or create works derived from it;
+
+    b) decompile, disassemble or otherwise reverse engineer the Software;
+
+    c) remove or alter any copyright, trademark or license notice in the
+    Software;
+
+    d) sell, rent, lease or sublicense the Software;
+
+    e) operate a web or remote-access service where users can remotely access
+    and use instances of the Software.
+
+  5. Your files and generated output
+
+  This license does not claim any rights in the models, source files and
+other files that you process with the Software, or in the output that the
+Software generates from them (for example lint reports and generated
+documentation). Generated documentation can contain copies of
+Third-Party Components (for example style sheets, scripts and fonts), which
+remain under their own licenses.
+
+  6. Third-Party Components
+
+  The Third-Party Components are licensed to you under their own license
+terms, which are included with them or referenced in the Software. This
+license does not limit any right that those terms grant to you.
+
+  7. Termination
+
+  This license ends automatically if you do not abide by its terms. When it
+ends, you must stop using the Software and destroy all copies in your
+possession. Persons who have received copies from you under this license
+keep their rights as long as they abide by its terms.
+
+  8. Earlier versions
+
+  This license applies to version 1.0.0 of the Software and all later versions.
+Copies of earlier versions that were distributed under the MIT License remain
+under the MIT License.
+
+  9. NO WARRANTY
+
+  OPENSIM LTD. HEREBY EXCLUDES AND DISCLAIMS ALL IMPLIED OR STATUTORY
+WARRANTIES, INCLUDING ANY WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE, QUALITY, NON-INFRINGEMENT, TITLE, RESULTS, EFFORTS OR
+QUIET ENJOYMENT. THERE IS NO WARRANTY THAT THE PRODUCT WILL BE ERROR-FREE OR
+WILL FUNCTION WITHOUT INTERRUPTION. YOU ASSUME THE ENTIRE RISK FOR THE RESULTS
+OBTAINED USING THE PRODUCT. TO THE EXTENT THAT OPENSIM LTD. MAY NOT DISCLAIM
+ANY WARRANTY AS A MATTER OF APPLICABLE LAW, THE SCOPE AND DURATION OF SUCH
+WARRANTY WILL BE THE MINIMUM PERMITTED UNDER SUCH LAW.
+
+  SOME STATES DO NOT ALLOW THE EXCLUSION OF IMPLIED WARRANTIES, SO THE ABOVE
+EXCLUSION MAY NOT APPLY TO YOU. THIS LIMITED WARRANTY GIVES YOU SPECIFIC LEGAL
+RIGHTS, AND YOU MAY ALSO HAVE OTHER LEGAL RIGHTS, WHICH VARY FROM STATE TO
+STATE.
+
+  10. Confidentiality
+
+  You acknowledge that the PRODUCT in source code form remains a confidential
+trade secret of OPENSIM LTD. You agree to hold this information in confidence,
+not disclose it to any person, and not use it for any purpose other than the
+use and operation of the PRODUCT as permitted under this License.
+
+  11. LIMITATION OF LIABILITY
+
+  IN NO EVENT WILL OPENSIM LTD. BE LIABLE TO ANY PARTY FOR ANY INDIRECT,
+INCIDENTAL, CONSEQUENTIAL, EXEMPLARY, SPECIAL OR PUNITIVE DAMAGES, INCLUDING
+ANY LOSS OF PROFIT, REVENUE, BUSINESS OPPORTUNITY OR DATA, ARISING FROM OR
+RELATING TO THIS LICENSE OR THE PRODUCT, WHETHER IN CONTRACT, IN TORT OR
+OTHERWISE, EVEN IF OPENSIM LTD. KNEW, SHOULD HAVE KNOWN OR HAS BEEN ADVISED OF
+THE POSSIBILITY OF SUCH DAMAGES. OPENSIM LTD.'S TOTAL CUMULATIVE LIABILITY
+ARISING FROM OR RELATED TO THIS LICENSE OR THE PRODUCT, WHETHER IN CONTRACT,
+IN TORT OR OTHERWISE, WILL NOT EXCEED THE FEES ACTUALLY PAID BY YOU UNDER THIS
+LICENSE. THIS SECTION 11 WILL APPLY EVEN IF AN EXCLUSIVE REMEDY HEREUNDER HAS
+FAILED OF ITS ESSENTIAL PURPOSE.
+
+  SOME STATES DO NOT ALLOW THE EXCLUSION OR LIMITATION OF INCIDENTAL OR
+CONSEQUENTIAL DAMAGES, SO THE ABOVE LIMITATION OR EXCLUSION MAY NOT APPLY TO
+YOU.
+
+                            END OF TERMS AND CONDITIONS

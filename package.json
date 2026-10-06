@@ -5,6 +5,7 @@
   "version": "0.0.4",
   "publisher": "opensim",
   "repository": "https://github.com/omnetpp/omnetpp-vscode",
+  "license": "SEE LICENSE IN LICENSE",
   "icon": "logo128.png",
   "engines": {
     "vscode": "^1.92.0"
