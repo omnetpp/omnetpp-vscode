@@ -114,7 +114,7 @@ export function registerIndexLifecycle(
         logIndexStatus();
         await registerExternalWatchers(); // roots may have changed → re-scope watchers
         // re-apply open buffers (the scan skips them) then refresh everything
-        for (const doc of documents.all()) wsDiag.refresh(doc);
+        wsDiag.refreshOpenDocuments();
         wsDiag.publishWorkspaceDiagnostics();
       } catch (e) {
         connection.console.error(`OMNeT++ reindex failed: ${(e as Error).message}`);
@@ -147,7 +147,7 @@ export function registerIndexLifecycle(
         scheduleReindex(); // roots/exclusions changed → full rebuild
       } else if (r.nedChanged || r.msgChanged || r.iniChanged || r.cppChanged) {
         // reconciled closed files may change cross-file diagnostics for open docs
-        if (r.nedChanged) wsDiag.refreshAll('ned');
+        if (r.nedChanged || r.iniChanged) wsDiag.refreshAll('ned');
         if (r.msgChanged) wsDiag.refreshAll('msg');
         // a C++ change alters NED reverse counts (CodeLens) — re-pull lenses and
         // re-lint NED (unused-member hints depend on C++ accesses)
@@ -201,7 +201,7 @@ export function registerIndexLifecycle(
     if (layoutChanged) {
       scheduleReindex(); // re-discovers .nedfolders/.nedexclusions/package.ned
     } else {
-      if (nedChanged) wsDiag.refreshAll('ned');
+      if (nedChanged || iniChanged) wsDiag.refreshAll('ned');
       if (msgChanged) wsDiag.refreshAll('msg');
       // a C++ change alters NED reverse counts (CodeLens) + unused-member hints
       if (cppChanged) {

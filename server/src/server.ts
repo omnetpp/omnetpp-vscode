@@ -152,7 +152,7 @@ connection.onInitialized(async () => {
   }
   // refresh diagnostics for any already-open documents, then publish markers for
   // every other indexed file so the Problems view reflects the whole workspace.
-  for (const doc of documents.all()) wsDiag.refresh(doc);
+  wsDiag.refreshOpenDocuments();
   wsDiag.publishWorkspaceDiagnostics();
 });
 
@@ -176,7 +176,9 @@ documents.onDidClose((e) => {
   wsDiag.forgetDiagUri(e.document.uri);
   // re-sync the index to the on-disk version of the now-closed file
   const lang = languageOfDoc(e.document);
-  if (state.index && (lang === 'ned' || lang === 'msg')) {
+  if (state.index && lang === 'ini') {
+    void state.index.onFileChanged(e.document.uri, false).then(() => wsDiag.refreshAll('ned'));
+  } else if (state.index && (lang === 'ned' || lang === 'msg')) {
     void state.index.onFileChanged(e.document.uri, false);
   }
   // the file stays in the index (now disk-backed) — re-publish its markers

@@ -209,6 +209,8 @@ in debug mode the server listens on inspector port `6009` ("Attach to Server").
 
 `scripts/` holds standalone smoke/check scripts (e.g. `lsp-smoke.mjs`,
 `workspace-diag-smoke.mjs` (asserts unopened workspace files still get diagnostics),
+`ini-open-smoke.mjs` (asserts an open INI buffer, not its disk text, drives the INI
+index: unused-network hints at startup, after an edit, and after close),
 `semantic-check.mjs`, `ini-param-check.mjs`, `dump-tree.mjs`) useful for exercising the
 parser/analyzers or an LSP feature outside VS Code. Run them with `bun scripts/<file>.mjs`
 after `bun run compile` (the analyzer-only checks) or `bun run compile && bun run dev:build`

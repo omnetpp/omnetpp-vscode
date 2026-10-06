@@ -13,6 +13,8 @@ import { ServerState, ctx, isIgnoredDoc, isUnderWorkspace } from './serverState'
 export interface WorkspaceDiagnosticsApi {
   /** Recompute + publish diagnostics for a single (just-parsed) open document. */
   refresh(doc: TextDocument): void;
+  /** `refresh` every open document, after all of them have reached the index. */
+  refreshOpenDocuments(): void;
   /** Recompute diagnostics for all open docs of a language (cross-file changed). */
   refreshAll(language: 'ned' | 'msg', exceptUri?: string): void;
   /** Start a pass that computes + publishes diagnostics for every indexed NED/MSG/INI file under the workspace; it runs in yielding slices and returns before it finishes. */
@@ -21,7 +23,7 @@ export interface WorkspaceDiagnosticsApi {
   clearWorkspaceDiagnostics(): void;
   /** Debounced trigger for `publishWorkspaceDiagnostics`. */
   scheduleWorkspaceDiagnostics(): void;
-  /** Debounced diagnostics recompute for one (heavier, INI) document. */
+  /** Debounced index update + diagnostics recompute for one (heavier, INI) document. */
   scheduleIni(uri: string): void;
   /** Stop tracking a uri's published markers (e.g. once its document closes). */
   forgetDiagUri(uri: string): void;
@@ -44,21 +46,38 @@ export function registerWorkspaceDiagnostics(
    *  markers once a file becomes clean or drops out of the index. */
   const workspaceDiagUris = new Set<string>();
 
-  function refresh(doc: TextDocument): void {
-    if (!state.store) return;
+  /** Parse an open buffer into the store and the index; undefined if ignored. */
+  function sync(doc: TextDocument): ParsedDocument | undefined {
+    if (!state.store) return undefined;
     if (isIgnoredDoc(state, doc)) {
       state.store.remove(doc.uri);
       connection.sendDiagnostics({ uri: doc.uri, diagnostics: [] });
-      return;
+      return undefined;
     }
     const parsed = state.store.update(doc);
-    if (state.index && parsed.tree) {
-      if (parsed.language === 'ned') state.index.updateOpenDocument(doc.uri, parsed.text);
-      else if (parsed.language === 'msg') state.index.updateOpenMsgDocument(doc.uri, parsed.text);
-      else if (parsed.language === 'ini') state.index.updateOpenIniDocument(doc.uri, parsed.text);
+    if (state.index) {
+      if (parsed.language === 'ini') state.index.updateOpenIniDocument(doc.uri, parsed.text);
+      else if (parsed.language === 'ned' && parsed.tree) state.index.updateOpenDocument(doc.uri, parsed.text);
+      else if (parsed.language === 'msg' && parsed.tree) state.index.updateOpenMsgDocument(doc.uri, parsed.text);
     }
+    return parsed;
+  }
+
+  function publish(parsed: ParsedDocument): void {
     const diags = computeDiagnostics(parsed, ctx(state)) as LspDiagnostic[];
-    connection.sendDiagnostics({ uri: doc.uri, diagnostics: diags });
+    connection.sendDiagnostics({ uri: parsed.uri, diagnostics: diags });
+  }
+
+  function refresh(doc: TextDocument): void {
+    const parsed = sync(doc);
+    if (parsed) publish(parsed);
+  }
+
+  // Open files depend on each other (NED types, INI networks), and the disk scan
+  // skips them, so diagnostics must wait until every buffer is in the index.
+  function refreshOpenDocuments(): void {
+    const synced = documents.all().map(sync);
+    for (const parsed of synced) if (parsed) publish(parsed);
   }
 
   function refreshAll(language: 'ned' | 'msg', exceptUri?: string): void {
@@ -172,8 +191,11 @@ export function registerWorkspaceDiagnostics(
         iniTimers.delete(uri);
         const parsed = state.store?.get(uri);
         if (!parsed) return;
-        const diags = computeDiagnostics(parsed, ctx(state)) as LspDiagnostic[];
-        connection.sendDiagnostics({ uri, diagnostics: diags });
+        state.index?.updateOpenIniDocument(uri, parsed.text);
+        publish(parsed);
+        // unused-network markers and cross-file INI references follow the buffer
+        refreshAll('ned');
+        scheduleWorkspaceDiagnostics();
       }, 300),
     );
   }
@@ -184,6 +206,7 @@ export function registerWorkspaceDiagnostics(
 
   return {
     refresh,
+    refreshOpenDocuments,
     refreshAll,
     publishWorkspaceDiagnostics,
     clearWorkspaceDiagnostics,
