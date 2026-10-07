@@ -13,7 +13,6 @@ import {
   TypeHierarchyItem,
   SymbolKind,
   CodeLens as LspCodeLens,
-  CodeLensRefreshRequest,
 } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { ParserService, workspaceSymbols } from '@omnetpp/shared';
@@ -46,6 +45,7 @@ import {
   invalidateIconProvider,
   isIgnoredDoc,
   languageOfDoc,
+  refreshCodeLenses,
   safeFsPath,
 } from './serverState';
 import { registerWorkspaceDiagnostics } from './workspaceDiagnostics';
@@ -83,6 +83,7 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
   }
   applySettings(params.initializationOptions);
   state.canRegisterWatchers = !!params.capabilities.workspace?.didChangeWatchedFiles?.dynamicRegistration;
+  state.canRefreshCodeLenses = !!params.capabilities.workspace?.codeLens?.refreshSupport;
 
   const wasmDir = join(__dirname, 'wasm');
   state.parsers = await ParserService.create({
@@ -210,7 +211,7 @@ connection.onDidChangeConfiguration((change) => {
     else wsDiag.clearWorkspaceDiagnostics();
   }
   // toggle the ini param lenses live (pull-based: ask the client to re-query)
-  if (state.iniParamCodeLensEnabled !== beforeIniLens) void connection.sendRequest(CodeLensRefreshRequest.type);
+  if (state.iniParamCodeLensEnabled !== beforeIniLens) refreshCodeLenses(connection, state);
 });
 
 connection.onDocumentSymbol((params) => {

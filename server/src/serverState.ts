@@ -1,5 +1,6 @@
 import { existsSync, promises as fsp } from 'node:fs';
 import { join } from 'node:path';
+import { CodeLensRefreshRequest, type Connection } from 'vscode-languageserver/node';
 import type { TextDocument } from 'vscode-languageserver-textdocument';
 import { ParserService, parseIni } from '@omnetpp/shared';
 import type { ActiveConfig, IniDocument } from '@omnetpp/shared';
@@ -27,6 +28,8 @@ export class ServerState {
   iniParamCodeLensEnabled = true;
   /** Whether the client declared dynamic-registration support for watched files. */
   canRegisterWatchers = false;
+  /** Whether the client declared support for `workspace/codeLens/refresh`. */
+  canRefreshCodeLenses = false;
   /** Lazily-computed, cached icon-id list for display-string image completion
    *  (`i=`/`i2=`/`bgi=`, see `iconIds()`/`invalidateIconIds()` below) — undefined
    *  means "not computed yet"; recomputed on first use after a cache clear. */
@@ -157,4 +160,13 @@ export async function iniDocFor(state: ServerState, uri: string): Promise<IniDoc
   } catch {
     return undefined;
   }
+}
+
+/** Asks the client to re-pull code lenses. Clients without refresh support answer
+ *  with an error, which must not become an unhandled rejection that ends the server. */
+export function refreshCodeLenses(connection: Connection, state: ServerState): void {
+  if (!state.canRefreshCodeLenses) return;
+  connection.sendRequest(CodeLensRefreshRequest.type).catch((e: Error) => {
+    connection.console.warn(`OMNeT++ code lens refresh failed: ${e.message}`);
+  });
 }

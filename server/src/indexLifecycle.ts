@@ -1,6 +1,5 @@
 import {
   FileChangeType,
-  CodeLensRefreshRequest,
   DidChangeWatchedFilesNotification,
   WatchKind,
   type Connection,
@@ -9,7 +8,7 @@ import {
 } from 'vscode-languageserver/node';
 import type { TextDocument } from 'vscode-languageserver-textdocument';
 import { fileUri, isCppSourceFile, OmnetppMethods } from '@omnetpp/shared';
-import { ServerState, currentNedPathDirs } from './serverState';
+import { ServerState, currentNedPathDirs, refreshCodeLenses } from './serverState';
 import type { WorkspaceDiagnosticsApi } from './workspaceDiagnostics';
 
 /** The operations the rest of the server (and `onDidChangeConfiguration`) trigger
@@ -153,7 +152,7 @@ export function registerIndexLifecycle(
         // re-lint NED (unused-member hints depend on C++ accesses)
         if (r.cppChanged) {
           wsDiag.refreshAll('ned');
-          void connection.sendRequest(CodeLensRefreshRequest.type);
+          refreshCodeLenses(connection, state);
         }
         logIndexStatus();
         wsDiag.scheduleWorkspaceDiagnostics();
@@ -206,7 +205,7 @@ export function registerIndexLifecycle(
       // a C++ change alters NED reverse counts (CodeLens) + unused-member hints
       if (cppChanged) {
         wsDiag.refreshAll('ned');
-        void connection.sendRequest(CodeLensRefreshRequest.type);
+        refreshCodeLenses(connection, state);
       }
       // closed INI files have no open-doc refresh path; the workspace pass covers them
       if (nedChanged || msgChanged || iniChanged || cppChanged) wsDiag.scheduleWorkspaceDiagnostics();
