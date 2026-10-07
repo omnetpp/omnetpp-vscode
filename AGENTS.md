@@ -23,14 +23,15 @@ tsc projects inside the `client` workspace):
 - **`shared/`** — the host-agnostic semantic core: tree-sitter parser wrapper, AST/type
   model, and all analyzers for NED/MSG/INI (diagnostics, navigation, completion, rename,
   hierarchy, INI param resolution), plus the xref graph, C++ scanner, neddoc generator,
-  match expressions and eventlog engine. **It must never import `vscode` or Node-specific
-  APIs**, except `shared/src/node/` (`NodeFileSystem`, `NodeRandomAccessFile`, …), which
-  is published only as the `@omnetpp/shared/node` subpath and imported explicitly by Node
+  match expressions, eventlog engine, and the AI agent setup generators
+  (`shared/src/agents/`: the agent plugin files and the AGENTS.md / extensions.json
+  mergers). **It must never import `vscode` or Node-specific APIs**, except
+  `shared/src/node/` (`NodeFileSystem`, `NodeRandomAccessFile`, …), which is published only as the `@omnetpp/shared/node` subpath and imported explicitly by Node
   hosts. File access goes through the `FileSystem` interface in
   `shared/src/fs/fileSystem.ts`, which callers inject. The main surface is re-exported from
   `shared/src/index.ts`; curated subpaths (`/node`, `/protocol`, `/preview`, `/eventlog`,
   `/elog-protocol`, `/ui-protocol`, `/entry-proposals`, `/style-rules`, `/match`,
-  `/elog-tools`) are listed in `shared/package.json` `exports`. Also hosts the **MCP tool layer** (`shared/src/mcp/tools.ts`):
+  `/elog-tools`, `/agents`) are listed in `shared/package.json` `exports`. Also hosts the **MCP tool layer** (`shared/src/mcp/tools.ts`):
   `OMNETPP_TOOLS` + `handleTool(name, args, ctx)`, pure functions over a `ToolContext`
   (the caches + a `FileSystem`), with **no MCP-SDK dependency** — the SDK glue lives only
   in the adapters below.

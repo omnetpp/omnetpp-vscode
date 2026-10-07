@@ -2,13 +2,14 @@
 // trailing commas. These are the only extensions handled here.
 
 /** End index (exclusive) of the string literal that starts at `i`. */
-function stringEnd(text: string, i: number): number {
+export function stringEnd(text: string, i: number): number {
   let j = i + 1;
   while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
   return Math.min(j + 1, text.length);
 }
 
-function stripComments(text: string): string {
+/** `text` with every comment replaced by spaces (newlines kept), so offsets still match. */
+export function blankComments(text: string): string {
   let out = '';
   let i = 0;
   while (i < text.length) {
@@ -17,7 +18,9 @@ function stripComments(text: string): string {
       out += text.slice(i, j);
       i = j;
     } else if (text.startsWith('//', i)) {
+      const start = i;
       while (i < text.length && text[i] !== '\n') i++;
+      out += ' '.repeat(i - start);
     } else if (text.startsWith('/*', i)) {
       const end = text.indexOf('*/', i + 2);
       const stop = end < 0 ? text.length : end + 2;
@@ -50,7 +53,7 @@ function stripTrailingCommas(text: string): string {
 
 /** Return `text` as plain JSON: comments become spaces, trailing commas are dropped. */
 export function stripJsonc(text: string): string {
-  return stripTrailingCommas(stripComments(text));
+  return stripTrailingCommas(blankComments(text));
 }
 
 /** Parse JSONC. Throws a SyntaxError like `JSON.parse` on malformed input. */

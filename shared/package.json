@@ -48,6 +48,10 @@
     "./style-rules": {
       "types": "./out/eventlog/styleRules.d.ts",
       "default": "./out/eventlog/styleRules.js"
+    },
+    "./agents": {
+      "types": "./out/agents/index.d.ts",
+      "default": "./out/agents/index.js"
     }
   },
   "dependencies": {
