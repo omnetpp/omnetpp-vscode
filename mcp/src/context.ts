@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ParserService, ToolContext, fileUri, normalizeFileUri } from '@omnetpp/shared';
 import { NodeFileSystem, readNedPathSetting, resolveNedPath, splitNedPath } from '@omnetpp/shared/node';
-import { buildDiskIndex, DiskIndex } from './indexBuilder.js';
+import { buildDiskIndex, DiskIndex, refreshDiskIndex } from './indexBuilder.js';
 
 export interface DiskToolSetup {
   ctx: ToolContext;
@@ -15,6 +15,10 @@ export interface DiskToolSetup {
   parsers: ParserService;
   wasmDir: string;
   configDir: string;
+  /** Run `fn` after catching up with the files changed on disk since the last scan
+   *  (`ctx` and `index` are updated in place). Runs one at a time, so a rebuild
+   *  never frees parse trees that another call still uses. */
+  withFreshIndex: <T>(fn: () => Promise<T>) => Promise<T>;
 }
 
 /**
@@ -40,7 +44,7 @@ export async function createDiskToolSetup(
   });
 
   const fs = new NodeFileSystem();
-  const index = await buildDiskIndex(fs, parsers, configDir, roots, nedPathDirs);
+  let index = await buildDiskIndex(fs, parsers, configDir, roots, nedPathDirs);
 
   const ctx: ToolContext = {
     nedCache: index.nedCache,
@@ -54,7 +58,39 @@ export async function createDiskToolSetup(
     toPath: (u) => (u.startsWith('file:') ? fileURLToPath(u) : u),
   };
 
-  return { ctx, index, parsers, wasmDir, configDir };
+  const refresh = async (): Promise<void> => {
+    if (await refreshDiskIndex(fs, parsers, index, roots, nedPathDirs)) return;
+    const old = index;
+    index = await buildDiskIndex(fs, parsers, configDir, roots, nedPathDirs);
+    setup.index = index;
+    Object.assign(ctx, {
+      nedCache: index.nedCache,
+      msgCache: index.msgCache,
+      configRegistry: index.configRegistry,
+      db: index.db,
+      iniCache: index.iniCache,
+    });
+    // The caches own wasm parse trees, which are not garbage-collected.
+    old.nedCache.clear();
+    old.msgCache.clear();
+  };
+  let pending: Promise<unknown> = Promise.resolve();
+  const setup: DiskToolSetup = {
+    ctx,
+    index,
+    parsers,
+    wasmDir,
+    configDir,
+    withFreshIndex: (fn) => {
+      const run = pending.then(async () => {
+        await refresh();
+        return fn();
+      });
+      pending = run.catch(() => {});
+      return run;
+    },
+  };
+  return setup;
 }
 
 /**

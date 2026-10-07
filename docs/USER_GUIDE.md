@@ -895,7 +895,11 @@ to be run interactively (logs go to stderr). For example:
 ```
 
 It indexes the given project directories (default: the current directory) at startup.
-The eventlog tools open `.elog` files by path on demand.
+Before each tool call it re-reads the NED/MSG/INI/C++ files that were added, changed or
+deleted on disk since the previous call, and rebuilds the index when the project layout
+changed (for example a new `package.ned`), so an agent that edits files between calls
+always queries their saved state. The eventlog tools open `.elog` files by path on
+demand.
 
 **Advantage.** Use the OMNeT++ model tools from any MCP-capable client, in headless/CI
 contexts, with no editor running.

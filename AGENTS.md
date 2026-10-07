@@ -66,7 +66,8 @@ tsc projects inside the `client` workspace):
   plus the `elog_*` tools, (b) the **CLI linter** (`mcp/src/lint.ts` →
   `dist/opp_lint.js`), and (c) the **documentation generator** (`mcp/src/docgen.ts` →
   `dist/opp_docgen.js`). All build their index from disk via `shared`
-  (`indexBuilder.ts`) and find their assets (`wasm/`, `config/`, `icons/`,
+  (`indexBuilder.ts`; `opp_ide_mcp` catches up with disk changes before each tool call
+  via `refreshDiskIndex`, since it has no watcher) and find their assets (`wasm/`, `config/`, `icons/`,
   `neddoc-material/`) next to the script. The linter reuses the shared `lintFile`, the
   same per-file analysis the `get_diagnostics` MCP tool uses, suppression included.
   **The IDE does not use `lintFile`**: `server/src/features/diagnostics.ts`
@@ -225,6 +226,8 @@ after `bun run compile` (the analyzer-only checks) or `bun run compile && bun ru
 (everything that spawns a `dist/` bundle via `process.execPath`, i.e. bun).
 For the MCP feature (after `bun run dev:build`):
 `mcp-smoke.mjs <projectDir>` drives the standalone `dist/opp_ide_mcp.js` over MCP stdio;
+`mcp-refresh-smoke.mjs` edits a throwaway project between its tool calls (added, changed,
+deleted files, a new `package.ned`, the NED path from `.vscode/settings.json`);
 `mcp-live-smoke.mjs <projectDir>` drives `dist/opp_lsp.js` and exercises the
 `omnetpp/mcp/*` live-index requests (incl. unsaved-buffer reflection);
 `preview-smoke.mjs` checks the `omnetpp/nedPreview` scene request shape the same way.

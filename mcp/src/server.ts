@@ -62,7 +62,7 @@ async function main(): Promise<void> {
   const { roots, nedPathDirs } = parseArgs(process.argv.slice(2));
 
   // A missing grammar wasm is not fatal here: report it and limp on.
-  const { ctx, index } = await createDiskToolSetup(roots, nedPathDirs, log);
+  const { ctx, index, withFreshIndex } = await createDiskToolSetup(roots, nedPathDirs, log);
   log(
     `indexed ${index.nedCache.allTypes().length} NED type(s), ` +
       `${index.msgCache.allTypes().length} MSG type(s) from: ${roots.join(', ')}`,
@@ -86,9 +86,13 @@ async function main(): Promise<void> {
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     try {
-      const result = req.params.name.startsWith('elog_')
-        ? handleElogTool(req.params.name, req.params.arguments ?? {}, elogCtx)
-        : await handleTool(req.params.name, req.params.arguments ?? {}, ctx);
+      let result: unknown;
+      if (req.params.name.startsWith('elog_')) {
+        result = handleElogTool(req.params.name, req.params.arguments ?? {}, elogCtx);
+      } else {
+        // Agents edit files between calls, and this server has no file watcher.
+        result = await withFreshIndex(() => handleTool(req.params.name, req.params.arguments ?? {}, ctx));
+      }
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
     } catch (e) {
       return {
