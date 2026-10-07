@@ -90,7 +90,15 @@ function currentState(context: vscode.ExtensionContext, binDir: string): Install
   return { binDir, runtime: process.execPath, distDir: context.asAbsolutePath('dist') };
 }
 
-async function install(context: vscode.ExtensionContext): Promise<void> {
+/** Install the shims unless all of them exist. Returns the bin directory and whether it is on
+ *  PATH, or undefined when the user declined or the install failed. */
+export async function ensureCliTools(context: vscode.ExtensionContext): Promise<{ binDir: string; onPath: boolean } | undefined> {
+  const binDir = context.globalState.get<InstalledState>(STATE_KEY)?.binDir ?? defaultBinDir();
+  if (TOOLS.every((t) => fs.existsSync(shimPath(binDir, t)))) return { binDir, onPath: isOnPath(binDir) };
+  return (await install(context)) ? { binDir: defaultBinDir(), onPath: isOnPath(defaultBinDir()) } : undefined;
+}
+
+async function install(context: vscode.ExtensionContext): Promise<boolean> {
   const binDir = defaultBinDir();
   const foreign = TOOLS.map((t) => shimPath(binDir, t)).filter((f) => fs.existsSync(f) && !isOurs(f));
   if (foreign.length) {
@@ -99,27 +107,29 @@ async function install(context: vscode.ExtensionContext): Promise<void> {
       { modal: true, detail: 'They may come from the @omnetpp/opp-tools npm package. Overwrite them?' },
       'Overwrite',
     );
-    if (answer !== 'Overwrite') return;
+    if (answer !== 'Overwrite') return false;
   }
   const state = currentState(context, binDir);
   try {
     writeShims(state, TOOLS);
   } catch (e) {
     void vscode.window.showErrorMessage(`OMNeT++: could not install the command-line tools into ${binDir}: ${(e as Error).message}`);
-    return;
+    return false;
   }
   await context.globalState.update(STATE_KEY, state);
   const installed = `Installed ${TOOLS.join(', ')} into ${binDir}.`;
   if (isOnPath(binDir)) {
     void vscode.window.showInformationMessage(`OMNeT++: ${installed}`);
-    return;
+    return true;
   }
   const copy = 'Copy Folder Path';
-  const answer = await vscode.window.showWarningMessage(
-    `OMNeT++: ${installed} This folder is not on your PATH yet — add it to use the tools from a shell (open a new terminal afterwards).`,
-    copy,
-  );
-  if (answer === copy) await vscode.env.clipboard.writeText(binDir);
+  void vscode.window
+    .showWarningMessage(
+      `OMNeT++: ${installed} This folder is not on your PATH yet — add it to use the tools from a shell (open a new terminal afterwards).`,
+      copy,
+    )
+    .then((answer) => (answer === copy ? vscode.env.clipboard.writeText(binDir) : undefined));
+  return true;
 }
 
 async function uninstall(context: vscode.ExtensionContext): Promise<void> {

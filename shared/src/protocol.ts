@@ -88,7 +88,19 @@ export const OmnetppMethods = {
   generateDocs: 'omnetpp/generateDocs',
   /** notification server→client during generateDocs: GenerateDocsProgress */
   generateDocsProgress: 'omnetpp/generateDocsProgress',
+  /** request: void → ProjectFactsResult (for the AI agent setup) */
+  projectFacts: 'omnetpp/projectFacts',
 } as const;
+
+/** Result of `omnetpp/projectFacts`: what the index scanned, as absolute index paths / URIs. */
+export interface ProjectFactsResult {
+  /** False while the index is still being built; the lists may then be incomplete. */
+  ready: boolean;
+  /** Effective NED source root directories (workspace-discovered roots plus nedPath entries). */
+  nedRoots: string[];
+  /** URIs of the indexed INI files. */
+  iniFiles: string[];
+}
 
 /** Parameters of the omnetpp/generateDocs request. All option fields are
  *  optional and default to the generator defaults (the client resolves the

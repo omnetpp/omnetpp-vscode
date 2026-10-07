@@ -261,6 +261,11 @@
         "category": "OMNeT++"
       },
       {
+        "command": "omnetpp.setupAiAgents",
+        "title": "Set Up AI Agents…",
+        "category": "OMNeT++"
+      },
+      {
         "command": "omnetpp.uninstallCliTools",
         "title": "Uninstall Command-Line Tools",
         "category": "OMNeT++"

@@ -53,6 +53,7 @@ import { registerIndexLifecycle } from './indexLifecycle';
 import { registerViewRequests } from './viewRequests';
 import { registerMcpRequests } from './mcpRequests';
 import { registerDocsRequests } from './docsRequests';
+import { registerAgentRequests } from './agentRequests';
 import { effectiveNedPath, parseCommandLine } from './commandLine';
 import type { NedHierarchyItem } from '@omnetpp/shared';
 
@@ -74,6 +75,7 @@ const indexLifecycle = registerIndexLifecycle(connection, documents, state, wsDi
 registerViewRequests(connection, documents, state);
 registerMcpRequests(connection, documents, state);
 registerDocsRequests(connection, state);
+registerAgentRequests(connection, state);
 
 connection.onInitialize(async (params: InitializeParams): Promise<InitializeResult> => {
   state.workspaceFolders = (params.workspaceFolders ?? [])

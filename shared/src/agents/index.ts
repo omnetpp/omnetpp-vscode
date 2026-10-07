@@ -3,3 +3,4 @@
 export * from './plugin';
 export * from './projectFiles';
 export { editedFiles } from './hookInput';
+export { parseJsonc } from '../project/jsonc';
