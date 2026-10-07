@@ -456,7 +456,7 @@ THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ## vscode-uri@3.1.0
 
-Used in: dist/opp_ide_mcp.js, dist/opp_lint.js, dist/opp_neddoc.js, dist/server.js
+Used in: dist/opp_docgen.js, dist/opp_ide_mcp.js, dist/opp_lint.js, dist/server.js
 
 License: MIT
 
@@ -474,7 +474,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ## web-tree-sitter@0.25.10
 
-Used in: dist/opp_ide_mcp.js, dist/opp_lint.js, dist/opp_neddoc.js, dist/server.js
+Used in: dist/opp_docgen.js, dist/opp_ide_mcp.js, dist/opp_lint.js, dist/server.js
 
 License: MIT
 

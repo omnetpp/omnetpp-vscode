@@ -51,11 +51,11 @@ Alternatively, [download the latest release](https://github.com/omnetpp/omnetpp-
   supports event filtering, bookmarks, and SVG export.
 - **NED documentation**: "Generate NED Documentation" builds HTML (three styles),
   Markdown, or reStructuredText documentation with module figures and usage/inheritance
-  diagrams. The same generator runs standalone as `opp_neddoc`.
+  diagrams. The same generator runs standalone as `opp_docgen`.
 - **Activity-bar views**: Configurations, Module Hierarchy, Module Parameters, NED
   Inheritance, and Used By.
 - **Command-line tools** — `opp_lint` (linter for CI, pre-commit hooks, and scripts),
-  `opp_neddoc` (documentation generator), and `opp_ide_mcp` (MCP server). Install them
+  `opp_docgen` (documentation generator), and `opp_ide_mcp` (MCP server). Install them
   with the **OMNeT++: Install Command-Line Tools** command, or with
   `npm install -g @omnetpp/opp-tools` (Node.js 18+). No OMNeT++ install needed.
 - **MCP tools** — 23 read/refactor tools that let an AI agent query and safely refactor

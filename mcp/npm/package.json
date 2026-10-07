@@ -8,7 +8,7 @@
   "keywords": ["omnetpp", "ned", "msg", "ini", "lint", "neddoc", "mcp", "simulation"],
   "bin": {
     "opp_lint": "dist/opp_lint.js",
-    "opp_neddoc": "dist/opp_neddoc.js",
+    "opp_docgen": "dist/opp_docgen.js",
     "opp_ide_mcp": "dist/opp_ide_mcp.js"
   },
   "files": ["dist/", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"],

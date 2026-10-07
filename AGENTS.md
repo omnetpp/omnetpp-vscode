@@ -61,8 +61,8 @@ tsc projects inside the `client` workspace):
   artifacts, each bundled with a node shebang and listed as a `bin`: (a) a stdio MCP
   server (`mcp/src/server.ts` → `dist/opp_ide_mcp.js`) serving the same `OMNETPP_TOOLS`
   plus the `elog_*` tools, (b) the **CLI linter** (`mcp/src/lint.ts` →
-  `dist/opp_lint.js`), and (c) the **documentation generator** (`mcp/src/neddoc.ts` →
-  `dist/opp_neddoc.js`). All build their index from disk via `shared`
+  `dist/opp_lint.js`), and (c) the **documentation generator** (`mcp/src/docgen.ts` →
+  `dist/opp_docgen.js`). All build their index from disk via `shared`
   (`indexBuilder.ts`) and find their assets (`wasm/`, `config/`, `icons/`,
   `neddoc-material/`) next to the script. The linter reuses the shared `lintFile`, the
   same per-file analysis the `get_diagnostics` MCP tool uses, suppression included.

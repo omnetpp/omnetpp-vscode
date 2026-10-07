@@ -14,8 +14,8 @@ const template = join(root, 'mcp', 'npm');
 const outRoot = join(root, 'build');
 const stage = join(outRoot, 'opp-tools');
 
-const TOOLS = ['opp_lint.js', 'opp_neddoc.js', 'opp_ide_mcp.js'];
-// Only what the CLI bundles resolve next to themselves (mcp/src/context.ts, neddoc.ts).
+const TOOLS = ['opp_lint.js', 'opp_docgen.js', 'opp_ide_mcp.js'];
+// Only what the CLI bundles resolve next to themselves (mcp/src/context.ts, docgen.ts).
 const ASSET_DIRS = ['wasm', 'config', 'icons', 'neddoc-material'];
 
 function fail(msg) {

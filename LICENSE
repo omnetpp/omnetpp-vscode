@@ -18,7 +18,7 @@ summary is for convenience only; the terms below govern.
 
   "Software" means the OMNeT++ Development Environment extension for Visual
 Studio Code and the @omnetpp/opp-tools package, including the command-line
-tools opp_lint, opp_neddoc and opp_ide_mcp, their documentation, and all
+tools opp_lint, opp_docgen and opp_ide_mcp, their documentation, and all
 other files distributed with them, except the Third-Party Components.
 
   "Third-Party Components" means the software components, libraries, fonts

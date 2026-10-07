@@ -9,12 +9,12 @@
   supports event filtering, cause/consequence tracing, bookmarks, and SVG export
 - **7 `elog_*` MCP tools** for reading eventlog files (standalone `opp_ide_mcp` server)
 - **Command-line tools for everyone**: "OMNeT++: Install Command-Line Tools" puts
-  `opp_lint`, `opp_neddoc` and `opp_ide_mcp` on the `PATH` (launchers that run on VS
+  `opp_lint`, `opp_docgen` and `opp_ide_mcp` on the `PATH` (launchers that run on VS
   Code's own runtime, refreshed on updates), and the npm package `@omnetpp/opp-tools`
   installs them without VS Code (Node.js 18+). `opp_ide_mcp` is now a command with
   `--help`, like the other two
 - **NED documentation generation** — "Generate NED Documentation" command and the
-  standalone `opp_neddoc` CLI: HTML (classic, Read the Docs, and Material styles),
+  standalone `opp_docgen` CLI: HTML (classic, Read the Docs, and Material styles),
   Markdown, or reStructuredText output with module figures, usage/inheritance diagrams,
   Doxygen tag-file links to C++ docs, and links to separately generated documentation
   of dependencies; configurable via `omnetpp.neddoc.*` settings
@@ -28,7 +28,7 @@
   bases use C3 linearization
 - `.ini` files are considered only inside NED folders
 - The graphical NED preview now finds icons via `OMNETPP_ROOT` when `omnetpp.installDir`
-  is not set, like the rest of the extension and `opp_neddoc`
+  is not set, like the rest of the extension and `opp_docgen`
 - NED preview: back/forward history, toolbar with a type search box, Ctrl/Cmd-click
   drill-down into submodule types, drag scrolling, `g` (layout group) display-string tag,
   and richer connection tooltips

@@ -1,6 +1,6 @@
 // Regenerates the vendored Eclipse-neddoc "material" template snapshot at
 // resources/neddoc-material/ from an OMNeT++ source tree. The snapshot is what
-// the html-material output format of opp_neddoc ships (same look & feel as the
+// the html-material output format of opp_docgen ships (same look & feel as the
 // Eclipse IDE's generated documentation).
 //
 // Usage: bun scripts/gen-neddoc-material-assets.mjs <omnetpp-src-dir>
@@ -42,7 +42,7 @@ for (const f of FILES) {
 writeFileSync(
   join(outDir, 'README.md'),
   `Snapshot of the Eclipse neddoc "material" template (org.omnetpp.neddoc,\n` +
-    `templates/material/), used by opp_neddoc's html-material output format.\n` +
+    `templates/material/), used by opp_docgen's html-material output format.\n` +
     `Regenerate with: bun scripts/gen-neddoc-material-assets.mjs <omnetpp-src-dir>\n`,
 );
 console.log(`snapshot written to ${outDir}`);

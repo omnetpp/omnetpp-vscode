@@ -1,4 +1,4 @@
-// Drives the bundled CLI documentation generator (dist/opp_neddoc.js) against
+// Drives the bundled CLI documentation generator (dist/opp_docgen.js) against
 // a throwaway project and asserts: pages/assets are produced, type references
 // resolve to links, tables contain the expected rows, options and exit codes
 // behave. Run after `bun run dev:build`.
@@ -9,7 +9,7 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const cli = join(root, 'dist', 'opp_neddoc.js');
+const cli = join(root, 'dist', 'opp_docgen.js');
 
 const proj = mkdtempSync(join(tmpdir(), 'opp-neddoc-'));
 mkdirSync(join(proj, 'src'));
@@ -161,11 +161,11 @@ try {
   assert(run([join(proj, 'nonexistent-dir')]).code === 2, 'missing project dir should exit 2');
   console.log('exit codes: OK');
 
-  console.log('NEDDOC CLI SMOKE PASSED');
+  console.log('DOCGEN CLI SMOKE PASSED');
   cleanup();
   process.exit(0);
 } catch (e) {
-  console.error('NEDDOC CLI SMOKE ERROR:', e.message);
+  console.error('DOCGEN CLI SMOKE ERROR:', e.message);
   cleanup();
   process.exit(1);
 }

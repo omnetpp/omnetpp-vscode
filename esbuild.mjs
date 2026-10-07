@@ -31,7 +31,7 @@ export const targets = [
   // standalone CLI linter — runnable directly (node shebang) and via the `bin` entry
   { entryPoints: ['mcp/src/lint.ts'], outfile: 'dist/opp_lint.js', banner: { js: '#!/usr/bin/env node' } },
   // standalone CLI documentation generator
-  { entryPoints: ['mcp/src/neddoc.ts'], outfile: 'dist/opp_neddoc.js', banner: { js: '#!/usr/bin/env node' } },
+  { entryPoints: ['mcp/src/docgen.ts'], outfile: 'dist/opp_docgen.js', banner: { js: '#!/usr/bin/env node' } },
   // the dedicated per-.elog eventlog worker process (client/worker/): a single CJS
   // bundle re-entered both as the main process script (JSON-RPC over stdio) and,
   // via `new Worker(__filename)`, as its own engine worker_thread -- see

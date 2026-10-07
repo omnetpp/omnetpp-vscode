@@ -8,7 +8,7 @@ command-line tools:
    Sequence Chart and Event Log, documentation generation, and the in-editor bridge for
    AI agents.
 2. [**Command-line tools**](#2-command-line-tools) — how to install them, and the
-   `opp_lint` linter, the `opp_neddoc` documentation generator, and the `opp_ide_mcp`
+   `opp_lint` linter, the `opp_docgen` documentation generator, and the `opp_ide_mcp`
    MCP server for AI agents.
 3. [**MCP tool reference**](#3-mcp-tool-reference) — the tools that AI agents can call.
 
@@ -641,7 +641,7 @@ its documentation comment, parameters, gates, module figure, usage and inheritan
 diagrams, and source listing. Output formats: **HTML** (a static site with navigation and
 search), **HTML (Read the Docs)**, **HTML (Material)** (the Eclipse IDE's neddoc look),
 **Markdown**, and **reStructuredText** (Sphinx-ready). The same generator runs on the
-command line as [`opp_neddoc`](#opp_neddoc--documentation-generator).
+command line as [`opp_docgen`](#opp_docgen--documentation-generator).
 
 **How to use it.** Run the command from the Command Palette and pick a format (the
 `omnetpp.neddoc.format` setting preselects one). A progress notification shows the
@@ -666,7 +666,7 @@ Map NED package prefixes to the location of their documentation:
 
 - **VS Code:** the `omnetpp.neddoc.externalDocs` setting, e.g.
   `{ "inet": "https://inet.omnetpp.org/doc/neddoc" }`.
-- **`opp_neddoc`:** `-l inet=https://inet.omnetpp.org/doc/neddoc` (the Eclipse IDE's
+- **`opp_docgen`:** `-l inet=https://inet.omnetpp.org/doc/neddoc` (the Eclipse IDE's
   syntax: `<package>=<location>` items, comma- or space-separated; repeatable).
 
 The location is a URL, or a path relative to the output directory (e.g. `../inet`). For a
@@ -702,7 +702,7 @@ results reflect exactly what you're editing right now, unsaved changes included.
 
 ### Installing the command-line tools from VS Code
 
-**"OMNeT++: Install Command-Line Tools"** puts `opp_lint`, `opp_neddoc` and
+**"OMNeT++: Install Command-Line Tools"** puts `opp_lint`, `opp_docgen` and
 `opp_ide_mcp` on your `PATH` without a separate download — see
 [Installation](#installation).
 
@@ -754,7 +754,7 @@ installation.
 | Command | Purpose |
 | --- | --- |
 | [`opp_lint`](#opp_lint--linter) | Lint NED, MSG, and INI files. |
-| [`opp_neddoc`](#opp_neddoc--documentation-generator) | Generate documentation from NED and MSG files. |
+| [`opp_docgen`](#opp_docgen--documentation-generator) | Generate documentation from NED and MSG files. |
 | [`opp_ide_mcp`](#opp_ide_mcp--mcp-server-for-ai-agents) | MCP stdio server for AI agents (NED/MSG/INI model and eventlogs). |
 
 ### Installation
@@ -825,7 +825,7 @@ at/above `--fail-on`; `2` — usage or runtime error.
 the IDE uses — no OMNeT++ install on the build agent, machine-readable JSON, and precise
 exit-code control.
 
-### `opp_neddoc` — documentation generator
+### `opp_docgen` — documentation generator
 
 **Feature.** The documentation generator of
 [Generate NED Documentation](#ned-documentation), for scripts and CI. It documents the
@@ -835,11 +835,11 @@ NED and MSG types of the given project directories, honoring `.nedfolders` and
 **How to use it.**
 
 ```bash
-opp_neddoc [options] [projectdir ...]    # defaults to the current dir
+opp_docgen [options] [projectdir ...]    # defaults to the current dir
 
-opp_neddoc .                                       # HTML into ./doc/neddoc
-opp_neddoc -o public/doc --format=markdown .       # Markdown into public/doc
-opp_neddoc --ned-path=../inet/src \
+opp_docgen .                                       # HTML into ./doc/neddoc
+opp_docgen -o public/doc --format=markdown .       # Markdown into public/doc
+opp_docgen --ned-path=../inet/src \
            -l inet=https://inet.omnetpp.org/doc/neddoc .   # link to the INET docs
 ```
 

@@ -8,7 +8,7 @@ and need **no OMNeT++ installation**.
 | Command | Purpose |
 | --- | --- |
 | `opp_lint` | Lint NED, MSG, and INI files — for CI, pre-commit hooks, and scripts. |
-| `opp_neddoc` | Generate documentation (HTML, Markdown, or reStructuredText) from NED and MSG files. |
+| `opp_docgen` | Generate documentation (HTML, Markdown, or reStructuredText) from NED and MSG files. |
 | `opp_ide_mcp` | MCP (Model Context Protocol) stdio server that lets AI agents query and refactor an OMNeT++ model and read eventlog (`.elog`) files. |
 
 ## Install
@@ -24,7 +24,7 @@ npm install -g @omnetpp/opp-tools
 ```bash
 opp_lint src/                                   # lint a project; exit code 1 on errors
 opp_lint --format=json --fail-on=warning src/   # machine-readable, stricter
-opp_neddoc -o doc/neddoc src/                   # generate HTML documentation
+opp_docgen -o doc/neddoc src/                   # generate HTML documentation
 ```
 
 To use `opp_ide_mcp`, register it as a stdio MCP server in your AI client, for example:

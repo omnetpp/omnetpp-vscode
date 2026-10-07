@@ -3,10 +3,10 @@
 // and generates browsable documentation for all NED/MSG types — the same
 // feature the Eclipse-based IDE offers, with switchable output formats.
 //
-// The runtime artifact is dist/opp_neddoc.js (produced by esbuild); the
+// The runtime artifact is dist/opp_docgen.js (produced by esbuild); the
 // grammar wasm/, config/ and icons/ assets live next to it.
 //
-// Usage:  opp_neddoc [options] [projectdir ...]
+// Usage:  opp_docgen [options] [projectdir ...]
 // Env:    OMNETPP_NED_PATH, OMNETPP_WASM_DIR, OMNETPP_CONFIG_DIR
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
@@ -43,10 +43,10 @@ interface CliOptions {
 
 const FORMATS: DocFormat[] = ['html', 'html-readthedocs', 'html-material', 'markdown', 'rst'];
 
-const USAGE = `opp_neddoc — generate documentation for OMNeT++ NED/MSG files
+const USAGE = `opp_docgen — generate documentation for OMNeT++ NED/MSG files
 
 Usage:
-  opp_neddoc [options] [projectdir ...]
+  opp_docgen [options] [projectdir ...]
 
 Arguments:
   projectdir          One or more project directories to document (scanned
@@ -96,7 +96,7 @@ Exit codes:
   2  usage or runtime error`;
 
 function fail(msg: string): never {
-  process.stderr.write(`opp_neddoc: ${msg}\n`);
+  process.stderr.write(`opp_docgen: ${msg}\n`);
   process.exit(2);
 }
 
@@ -196,7 +196,7 @@ async function main(): Promise<void> {
   const outputDir = opts.outputDir ?? join(opts.projectDirs[0], 'doc', 'neddoc');
 
   const log = (msg: string) => {
-    if (opts.verbose) process.stderr.write(`opp_neddoc: ${msg}\n`);
+    if (opts.verbose) process.stderr.write(`opp_docgen: ${msg}\n`);
   };
 
   log(`indexing ${opts.projectDirs.join(', ')} ...`);
@@ -331,8 +331,8 @@ async function main(): Promise<void> {
   );
   if (statusLine) process.stderr.write(`\r${' '.repeat(statusWidth)}\r`);
 
-  for (const w of result.warnings) process.stderr.write(`opp_neddoc: warning: ${w}\n`);
-  for (const w of result.externalWarnings) process.stderr.write(`opp_neddoc: warning: ${w}\n`);
+  for (const w of result.warnings) process.stderr.write(`opp_docgen: warning: ${w}\n`);
+  for (const w of result.externalWarnings) process.stderr.write(`opp_docgen: warning: ${w}\n`);
   const entry = opts.format === 'markdown' ? 'index.md' : opts.format === 'rst' ? 'index.rst' : 'index.html';
   process.stdout.write(
     `Generated ${result.pages} page(s), ${result.diagrams} diagram(s), ${files} file(s) into ${outputDir}\n` +
@@ -342,6 +342,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((e) => {
-  process.stderr.write(`opp_neddoc: ${e instanceof Error ? e.stack : String(e)}\n`);
+  process.stderr.write(`opp_docgen: ${e instanceof Error ? e.stack : String(e)}\n`);
   process.exit(2);
 });

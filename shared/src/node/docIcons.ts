@@ -1,5 +1,5 @@
 // Node-backed icon resolution for rendering NED figures outside the webview
-// (the opp_neddoc CLI and the LSP server). Replicates the Eclipse search
+// (the opp_docgen CLI and the LSP server). Replicates the Eclipse search
 // rules the preview panel uses (client/src/nedPreviewPanel.ts): ordered
 // search roots, .png-then-.gif lookup, `name_<size>` variant fallback with
 // the Eclipse scale percentages, and the bundled index.json natural sizes

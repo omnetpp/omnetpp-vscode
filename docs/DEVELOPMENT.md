@@ -16,7 +16,7 @@ install (`omnetpp.installDir` / `OMNETPP_ROOT`) is used only as an icon source
 (`<installDir>/images`).
 
 The same semantic core also powers three non-editor surfaces: a standalone
-**command-line linter** (`opp_lint`), a **documentation generator** (`opp_neddoc`), and an
+**command-line linter** (`opp_lint`), a **documentation generator** (`opp_docgen`), and an
 **MCP server** for AI agents (`opp_ide_mcp`). The CLI linter and the MCP `get_diagnostics`
 tool share `lintFile`. The IDE runs the same `shared` analyzers through
 `server/src/features/diagnostics.ts`, plus a few checks that need the live index (unused
@@ -98,7 +98,7 @@ the Extension Development Host. In debug mode the server listens on inspector po
 - **`tsc --build`** type-checks and emits `.d.ts` / `out/` for the TypeScript project
   references (and feeds esbuild, which bundles from `shared/out`).
 - **`esbuild`** (`esbuild.mjs`) produces the actual runtime bundles in `dist/`:
-  `extension.js`, `server.js`, `opp_ide_mcp.js`, `opp_lint.js`, `opp_neddoc.js`,
+  `extension.js`, `server.js`, `opp_ide_mcp.js`, `opp_lint.js`, `opp_docgen.js`,
   `eventlogWorker.js` (Node/CJS), and the browser IIFEs `webview/nedPreview.js`,
   `webview/sequenceChart.js`, `webview/eventLogTable.js`. `copy:assets` adds
   `dist/wasm/`, `dist/config/`, `dist/icons/`, `dist/webview/codicons/` and
@@ -175,10 +175,10 @@ bundled with a node shebang and listed as a `bin`:
 - **CLI linter** — `mcp/src/lint.ts` → `dist/opp_lint.js`. It reuses the shared
   `lintFile`, the same per-file analysis the `get_diagnostics` MCP tool uses, suppression
   included.
-- **CLI documentation generator** — `mcp/src/neddoc.ts` → `dist/opp_neddoc.js`. It runs
+- **CLI documentation generator** — `mcp/src/docgen.ts` → `dist/opp_docgen.js`. It runs
   the shared `generateNeddoc` with `--format=html|html-readthedocs|html-material|markdown|rst`.
 
-All three find their assets (`wasm/`, `config/`, and for `opp_neddoc` also `icons/` and
+All three find their assets (`wasm/`, `config/`, and for `opp_docgen` also `icons/` and
 `neddoc-material/`) next to the script, overridable with `OMNETPP_WASM_DIR`,
 `OMNETPP_CONFIG_DIR`, `OMNETPP_ICONS_DIR` and `OMNETPP_NEDDOC_MATERIAL_DIR`.
 
@@ -238,8 +238,8 @@ needs `ELECTRON_RUN_AS_NODE` (`workerClient.ts`), which no headless script can c
 
 `shared/src/neddoc/` extracts a `DocModel` and renders it with format-specific renderers
 (html, html-readthedocs, html-material, markdown, rst). Output goes through an `emit`
-callback, so `shared/` stays filesystem-free. It has two hosts: the `opp_neddoc` CLI
-(`mcp/src/neddoc.ts`, disk index) and the **OMNeT++: Generate NED Documentation** command
+callback, so `shared/` stays filesystem-free. It has two hosts: the `opp_docgen` CLI
+(`mcp/src/docgen.ts`, disk index) and the **OMNeT++: Generate NED Documentation** command
 (`client/src/docsCommand.ts`, configured by the `omnetpp.neddoc.*` settings), which calls
 the `omnetpp/generateDocs` request (`server/src/docsRequests.ts`) against the live index
 with `omnetpp/generateDocsProgress` notifications.
@@ -340,7 +340,7 @@ directly and need only `bun run compile` (and built WASM).
 | `mcp-smoke.mjs <projectDir>` | the standalone `dist/opp_ide_mcp.js` over MCP stdio |
 | `mcp-live-smoke.mjs <projectDir>` | the `omnetpp/mcp/*` live-index requests on `dist/server.js` (incl. unsaved-buffer reflection) |
 | `lint-cli-smoke.mjs` | the bundled CLI linter (`dist/opp_lint.js`) — diagnostics, suppression, JSON shape, exit codes |
-| `neddoc-cli-smoke.mjs` | the bundled `dist/opp_neddoc.js` — pages, links, options, exit codes |
+| `docgen-cli-smoke.mjs` | the bundled `dist/opp_docgen.js` — pages, links, options, exit codes |
 | `neddoc-live-smoke.mjs` | the `omnetpp/generateDocs` request on the live index (incl. unsaved buffer, progress) |
 | `elog-worker-smoke.mjs` | the bundled `dist/eventlogWorker.js` over its JSON-RPC transport, incl. mid-scan cancellation |
 | `eventlog-ui-smoke.mjs` | the client eventlog session layer, headless, against the real worker |

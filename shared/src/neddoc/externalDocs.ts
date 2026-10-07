@@ -1,6 +1,6 @@
 /**
  * Links to separately generated documentation of dependencies (the Eclipse
- * generator's "External documentation" option / `opp_neddoc -l`). Types that
+ * generator's "External documentation" option / `opp_docgen -l`). Types that
  * are indexed but not documented in this run belong to a dependency; the
  * longest matching NED package prefix in the configured mapping says where its
  * documentation lives.
