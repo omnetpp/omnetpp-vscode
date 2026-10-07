@@ -5,8 +5,8 @@ command-line tools:
 
 1. [**Editor GUI (VS Code)**](#1-editor-gui-vs-code) — language support, diagnostics,
    navigation, refactoring, the activity-bar views, the graphical NED preview, the
-   Sequence Chart and Event Log, documentation generation, and the in-editor bridge for
-   AI agents.
+   Sequence Chart and Event Log, documentation generation, the in-editor bridge for
+   AI agents, and the setup of a project for AI agents.
 2. [**Command-line tools**](#2-command-line-tools) — how to install them, and the
    `opp_lint` linter, the `opp_docgen` documentation generator, the `opp_ide_mcp`
    MCP server for AI agents, and the `opp_lsp` language server for other editors.
@@ -694,11 +694,85 @@ the standalone [`opp_ide_mcp`](#opp_ide_mcp--mcp-server-for-ai-agents).)
 per-session bearer token automatically. In your AI agent's MCP server list (e.g. Copilot
 Chat agent mode), enable/allow the **"OMNeT++ NED/MSG/INI (live)"** server. (Requires a VS
 Code version that provides the `registerMcpServerDefinitionProvider` MCP API; if it's
-absent the rest of the extension still works, the bridge just isn't offered.)
+absent the rest of the extension still works, the bridge just isn't offered.) Only
+Copilot in VS Code uses this API: the agents of VS Code forks (Devin Desktop, Cursor) and
+terminal agents (Claude Code, Codex) do not see the bridge — set them up with
+[Set Up AI Agents](#ai-agents-set-up-ai-agents), which gives them the standalone
+`opp_ide_mcp` server.
+
+The extension also gives Copilot the OMNeT++ [skills](#ai-agents-set-up-ai-agents)
+(`omnetpp-tooling`, `omnetpp-modeling`, `omnetpp-model-development`,
+`omnetpp-coding-conventions`, `omnetpp-sim-debugging`) through VS Code's skill
+contribution point, so Copilot needs no setup at all.
 
 **Advantage.** An AI assistant can *query your actual model* (resolved types, parameters,
 topology, cross-references, diagnostics) instead of guessing from raw text, and tool
 results reflect exactly what you're editing right now, unsaved changes included.
+
+### AI agents: Set Up AI Agents
+
+**Feature.** **"OMNeT++: Set Up AI Agents…"** prepares a project, and the AI agent CLIs on
+your machine, for OMNeT++ work. It supports **Claude Code**, **Codex** and **Devin**
+(terminal agents, and their VS Code extensions or desktop apps, which use the same
+configuration). For each selected agent it installs, at user level:
+
+- the **OMNeT++ agent plugin**, with
+  - the **skills**: `omnetpp-tooling` (when to use the MCP tools and `opp_lint`),
+    `omnetpp-modeling`, `omnetpp-model-development`, `omnetpp-coding-conventions`,
+    `omnetpp-sim-debugging`, and optionally `omnetpp-fingerprint-testing` and
+    `omnetpp-model-refactoring`;
+  - a **post-edit lint hook**: after every edit of a `.ned`, `.msg` or `.ini` file, the
+    agent gets the [`opp_lint --agent-hook`](#opp_lint--linter) diagnostics of that file;
+  - for Claude Code, the **NED/MSG/INI language server** (`opp_lsp`);
+- the **`omnetpp` MCP server** ([`opp_ide_mcp`](#opp_ide_mcp--mcp-server-for-ai-agents)),
+  which indexes the directory the agent session runs in.
+
+In the project folder it writes, after it shows you the list of files:
+
+- **`AGENTS.md`** — a section between `<!-- omnetpp:begin` and `<!-- omnetpp:end -->`
+  markers that describes the project (NED folders, NED path, INI files, build command)
+  and tells agents how to use the tools. Your own text in the file is kept; a later run
+  replaces only this section. If the folder has a `CLAUDE.md`, `@AGENTS.md` is added to
+  it, because Claude Code reads `AGENTS.md` on its own only when there is no `CLAUDE.md`.
+- **`.vscode/extensions.json`** — the **clangd** C++ extension as a recommendation.
+  clangd (unlike the Microsoft C/C++ extension) also works in VS Code forks. It needs a
+  `compile_commands.json`; OMNeT++ makefiles do not write one, but
+  `bear -- make -B MODE=debug` in the project folder does. For Claude Code, the summary
+  also suggests the `clangd-lsp@claude-plugins-official` plugin.
+
+**How to use it.**
+
+1. Run **OMNeT++: Set Up AI Agents…** from the Command Palette (in a multi-root
+   workspace, pick the project folder).
+2. If the [command-line tools](#installation) are not installed yet, the command installs
+   them first: the agents start `opp_lint`, `opp_lsp` and `opp_ide_mcp` by name, so their
+   folder must be on your `PATH`.
+3. Pick the agents. An agent is listed as *not available*, with the reason, when its CLI
+   is not on `PATH` or is too old to install a plugin from a local folder (for Devin:
+   run `devin update`).
+4. Pick the project files and the optional skills, check the list of changes, and
+   confirm. **Show Details** opens the log with every agent command and its output.
+5. Restart running agent sessions. In **Codex**, trust the plugin's hook once with
+   `/hooks`; Codex does not run untrusted hooks.
+
+The command uses only the agents' own CLIs (`claude plugin install` / `claude mcp add`,
+`codex plugin marketplace add` / `codex plugin add` / `codex mcp add`,
+`devin plugins install --local` / `devin mcp add`) and never edits their configuration
+files directly. An existing MCP server named `omnetpp` is left unchanged. The plugin
+itself lives in `~/.local/share/omnetpp/agent-plugins` (macOS:
+`~/Library/Application Support/omnetpp/agent-plugins`, Windows:
+`%LOCALAPPDATA%\omnetpp\agent-plugins`); after an extension update it is rewritten on the
+next start, and the agents are brought up to the new version.
+
+**The NED path.** Agents and the command-line tools read `omnetpp.nedPath` only from the
+project folder's `.vscode/settings.json`. The command warns when the setting comes from
+somewhere else (user or `.code-workspace` settings), or when it holds absolute paths,
+which do not work for teammates who commit the file.
+
+**Advantage.** One command gives every agent the same OMNeT++ knowledge and tools: the
+agent asks the semantic model instead of grepping, gets lint feedback on its NED/MSG/INI
+edits without being told to, and the committed `AGENTS.md` lets teammates' agents start
+with the same project description.
 
 ### Installing the command-line tools from VS Code
 

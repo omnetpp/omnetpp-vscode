@@ -6,6 +6,21 @@
   editors (Neovim, Helix, Emacs, …). It speaks LSP over stdio by default and takes
   library NED roots from `--ned-path` or `OMNETPP_NED_PATH`. Installed with the other
   command-line tools and by `@omnetpp/opp-tools`
+- **"OMNeT++: Set Up AI Agents…"**: installs an OMNeT++ agent plugin (skills, a post-edit
+  lint hook, and for Claude Code the language server) and the `opp_ide_mcp` MCP server
+  into Claude Code, Codex and Devin through their own CLIs, writes a managed project
+  section into `AGENTS.md`, and recommends the clangd C++ extension. Copilot in VS Code
+  gets the OMNeT++ skills through the extension itself
+- **OMNeT++ agent skills**: `omnetpp-tooling`, `omnetpp-modeling`,
+  `omnetpp-model-development`, `omnetpp-coding-conventions`, `omnetpp-sim-debugging`,
+  plus the optional `omnetpp-fingerprint-testing` and `omnetpp-model-refactoring`
+- **`opp_lint --agent-hook`**: runs as an agent post-edit hook and reports the
+  diagnostics of the edited NED/MSG/INI files back to the agent
+- **`opp_ide_mcp` follows file changes**: before each tool call it re-reads the files
+  that changed on disk, so an agent's edits show up without a server restart
+- **Shared NED path**: the command-line tools read `omnetpp.nedPath` from the project's
+  `.vscode/settings.json` when no `--ned-path` / `OMNETPP_NED_PATH` is given, and
+  relative entries of the setting are resolved against the workspace folder
 
 ## 1.0.0
 
