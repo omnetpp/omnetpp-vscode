@@ -14,7 +14,7 @@ import { NodeRandomAccessFileProvider } from '@omnetpp/shared/node';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { createDiskToolSetup, parseNedPathDirs } from './context.js';
+import { createDiskToolSetup, nedPathDirsFor } from './context.js';
 
 /** Injected by esbuild from package.json. */
 declare const __OPP_VERSION__: string;
@@ -38,12 +38,14 @@ Arguments:
 Options:
   --ned-path=<dirs>   Extra NED source roots (libraries), ';'-separated
                       (or ':' outside Windows).
-                      Defaults to the OMNETPP_NED_PATH environment variable.
+                      Defaults to the OMNETPP_NED_PATH environment variable,
+                      then to "omnetpp.nedPath" in the first project's
+                      .vscode/settings.json (relative to that project).
   -h, --help          Show this help.`;
 
 function parseArgs(argv: string[]): { roots: string[]; nedPathDirs: string[] } {
   const roots: string[] = [];
-  let nedPath = process.env.OMNETPP_NED_PATH ?? '';
+  let nedPath = process.env.OMNETPP_NED_PATH;
   for (const a of argv) {
     if (a === '-h' || a === '--help') {
       process.stdout.write(`${USAGE}\n`);
@@ -53,7 +55,7 @@ function parseArgs(argv: string[]): { roots: string[]; nedPathDirs: string[] } {
     else roots.push(resolve(a));
   }
   if (!roots.length) roots.push(process.cwd());
-  return { roots, nedPathDirs: parseNedPathDirs(nedPath) };
+  return { roots, nedPathDirs: nedPathDirsFor(nedPath, roots[0]) };
 }
 
 async function main(): Promise<void> {

@@ -710,7 +710,7 @@ and `opp_lsp` on your `PATH` without a separate download — see
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `omnetpp.nedPath` | `""` | Extra NED source-root directories (`;`-separated; on Linux/macOS `:` also works), in addition to those discovered from `.nedfolders`/`package.ned`. Indexed for cross-file resolution. |
+| `omnetpp.nedPath` | `""` | Extra NED source-root directories (`;`-separated; on Linux/macOS `:` also works), in addition to those discovered from `.nedfolders`/`package.ned`. Indexed for cross-file resolution. Relative entries are resolved against the (first) workspace folder; prefer them in a committed `.vscode/settings.json`, which the CLI tools and AI agents read too. |
 | `omnetpp.installDir` | `""` | OMNeT++ installation root. Only its `images/` folder is used, as an icon source. When empty, the `OMNETPP_ROOT` (or `__omnetpp_root_dir`) environment variable is used. |
 | `omnetpp.diagnostics.scope` | `workspace` | `workspace` analyzes every NED/MSG/INI file, so errors in unopened files stay visible; `openFiles` analyzes open editors only. |
 | `omnetpp.codeLens.iniParams` | `true` | Show the "N module parameters" CodeLens on INI assignment lines. |
@@ -787,7 +787,11 @@ npm install -g @omnetpp/opp-tools
 **Common options.** All four tools take `--ned-path=<dirs>` — extra NED source roots
 (libraries such as INET) that are indexed for cross-file resolution but not linted or
 documented, separated by `;` or `:`. Its default is the `OMNETPP_NED_PATH` environment
-variable. Quote the value in a shell if it contains `;`. Run any tool with `-h` /
+variable. When neither is given, the tools use `omnetpp.nedPath` from the project's
+`.vscode/settings.json` (the project directory for `opp_ide_mcp` and `opp_docgen`, the
+current directory for `opp_lint`), with relative entries resolved against that
+directory. A team can therefore commit one NED path that the IDE, the CLI tools and AI
+agents share. Quote the value in a shell if it contains `;`. Run any tool with `-h` /
 `--help` for its full usage.
 
 ### `opp_lint` — linter
@@ -913,8 +917,10 @@ The server recognizes the files by their extension, so the editor's language id 
 not matter. The workspace root that the editor sends is the project directory.
 
 Library NED folders come from the `nedPath` initialization option, else from
-`--ned-path=<dirs>`, else from `OMNETPP_NED_PATH`. Relative `--ned-path` entries are
-resolved against the server's working directory. Optional initialization options:
+`--ned-path=<dirs>`, else from `OMNETPP_NED_PATH`, else from `omnetpp.nedPath` in the
+project's `.vscode/settings.json`. Relative `--ned-path` entries are resolved against the
+server's working directory; relative entries of the other two against the (first)
+workspace folder. Optional initialization options:
 
 ```json
 {

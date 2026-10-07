@@ -775,7 +775,7 @@
         "omnetpp.nedPath": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Semicolon-separated list of additional NED source root directories (like the `ned-path` config option; on Linux/macOS `:` also separates). Used in addition to source roots discovered from `.nedfolders`/`package.ned`."
+          "markdownDescription": "Semicolon-separated list of additional NED source root directories (like the `ned-path` config option; on Linux/macOS `:` also separates). Used in addition to source roots discovered from `.nedfolders`/`package.ned`. Relative entries are resolved against the (first) workspace folder; the command-line tools read this setting from `.vscode/settings.json` too."
         },
         "omnetpp.installDir": {
           "type": "string",

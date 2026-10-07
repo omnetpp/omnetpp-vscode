@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ParserService, ToolContext, fileUri, normalizeFileUri } from '@omnetpp/shared';
-import { NodeFileSystem, splitNedPath } from '@omnetpp/shared/node';
+import { NodeFileSystem, readNedPathSetting, resolveNedPath, splitNedPath } from '@omnetpp/shared/node';
 import { buildDiskIndex, DiskIndex } from './indexBuilder.js';
 
 export interface DiskToolSetup {
@@ -57,7 +57,12 @@ export async function createDiskToolSetup(
   return { ctx, index, parsers, wasmDir, configDir };
 }
 
-/** Split a NED path list (see `splitNedPath`) into absolute directories. */
-export function parseNedPathDirs(nedPath: string): string[] {
-  return splitNedPath(nedPath).map((s) => resolve(s));
+/**
+ * The NED path directories of a standalone tool. An explicit list (`--ned-path`, else
+ * OMNETPP_NED_PATH, even when empty) is resolved against the current directory;
+ * without one, `omnetpp.nedPath` from `projectDir`'s `.vscode/settings.json` is used.
+ */
+export function nedPathDirsFor(explicit: string | undefined, projectDir: string): string[] {
+  const list = explicit !== undefined ? resolveNedPath(explicit, process.cwd()) : resolveNedPath(readNedPathSetting(projectDir), projectDir);
+  return splitNedPath(list);
 }

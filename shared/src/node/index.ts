@@ -5,3 +5,4 @@ export { indexPath, splitNedPath, uriToIndexPath } from './fsPath';
 export { createNodeIconProvider, sniffImageSize, listIconIds, type NodeIconProviderOptions } from './docIcons';
 export { NodeRandomAccessFile, NodeRandomAccessFileProvider } from './nodeRandomAccessFile';
 export { loadExternalDocSets } from './externalDocSets';
+export { readNedPathSetting, resolveNedPath } from './nedPathSetting';

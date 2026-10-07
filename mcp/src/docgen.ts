@@ -24,13 +24,13 @@ import {
   type NeddocOptions,
 } from '@omnetpp/shared';
 import { createNodeIconProvider, loadExternalDocSets } from '@omnetpp/shared/node';
-import { createDiskToolSetup, parseNedPathDirs } from './context.js';
+import { createDiskToolSetup, nedPathDirsFor } from './context.js';
 
 interface CliOptions {
   projectDirs: string[];
   outputDir?: string;
   format: DocFormat;
-  nedPath: string;
+  nedPath: string | undefined;
   title?: string;
   verbose: boolean;
   excludePatterns: string[];
@@ -61,7 +61,10 @@ Options:
                       html-material | markdown | rst.
   --ned-path=<dirs>   Extra NED source roots for cross-file resolution
                       (libraries), ';'-separated (or ':' outside Windows).
-                      Indexed, not documented.
+                      Indexed, not documented. Defaults to the
+                      OMNETPP_NED_PATH environment variable, then to
+                      "omnetpp.nedPath" in the first project's
+                      .vscode/settings.json (relative to that project).
   --title=<text>      Documentation title (default: the project dir name).
   -x <pattern>        Exclude directories matching the glob-ish pattern
                       (* and ** supported); repeatable.
@@ -116,7 +119,7 @@ function parseArgs(argv: string[]): CliOptions {
   const opts: CliOptions = {
     projectDirs: [],
     format: 'html',
-    nedPath: process.env.OMNETPP_NED_PATH ?? '',
+    nedPath: process.env.OMNETPP_NED_PATH,
     verbose: false,
     excludePatterns: [],
     externalDocs: {},
@@ -200,7 +203,7 @@ async function main(): Promise<void> {
   };
 
   log(`indexing ${opts.projectDirs.join(', ')} ...`);
-  const { index } = await createDiskToolSetup(opts.projectDirs, parseNedPathDirs(opts.nedPath), fail);
+  const { index } = await createDiskToolSetup(opts.projectDirs, nedPathDirsFor(opts.nedPath, opts.projectDirs[0]), fail);
 
   const excludes = opts.excludePatterns.map(excludePatternRegex);
   const projectRelative = (path: string): string | undefined => {

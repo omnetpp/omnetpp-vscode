@@ -94,6 +94,7 @@ export {
   collectIndexableFiles,
   populateDatabase,
 } from './project/diskIndexer';
+export { parseJsonc, stripJsonc } from './project/jsonc';
 
 // Cross-reference graph + unified query surface
 export {

@@ -16,11 +16,11 @@ import {
   DiagnosticSeverity,
   lintFile,
 } from '@omnetpp/shared';
-import { createDiskToolSetup, parseNedPathDirs } from './context.js';
+import { createDiskToolSetup, nedPathDirsFor } from './context.js';
 
 interface Options {
   paths: string[];
-  nedPath: string;
+  nedPath: string | undefined;
   format: 'text' | 'json';
   /** Report diagnostics whose severity is at least this severe (1=error … 4=hint). */
   minSeverity: DiagnosticSeverity;
@@ -57,7 +57,9 @@ Arguments:
 Options:
   --ned-path=<dirs>   Extra NED source roots for cross-file resolution (libraries),
                       ';'-separated (or ':' outside Windows). These are indexed
-                      but not linted.
+                      but not linted. Defaults to the OMNETPP_NED_PATH
+                      environment variable, then to "omnetpp.nedPath" in
+                      ./.vscode/settings.json (relative to the current directory).
   --format=<fmt>      Output format: text (default) or json.
   --severity=<level>  Minimum severity to report: error | warning | info | hint
                       (default: hint — report everything).
@@ -79,7 +81,7 @@ function fail(msg: string): never {
 function parseArgs(argv: string[]): Options {
   const opts: Options = {
     paths: [],
-    nedPath: process.env.OMNETPP_NED_PATH ?? '',
+    nedPath: process.env.OMNETPP_NED_PATH,
     format: 'text',
     minSeverity: DiagnosticSeverity.Hint,
     failOn: DiagnosticSeverity.Error,
@@ -161,7 +163,7 @@ async function main(): Promise<void> {
   // resolution), plus the library roots from --ned-path. A missing grammar wasm is
   // fatal for the linter.
   const indexRoots = unique([...dirArgs, ...fileArgs.map((f) => dirname(f))]);
-  const { ctx, index } = await createDiskToolSetup(indexRoots, parseNedPathDirs(opts.nedPath), fail);
+  const { ctx, index } = await createDiskToolSetup(indexRoots, nedPathDirsFor(opts.nedPath, process.cwd()), fail);
 
   // Which indexed files are lint targets: explicit files, or anything under a dir arg.
   const explicitFiles = new Set(fileArgs);
