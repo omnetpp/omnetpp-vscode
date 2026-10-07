@@ -6,7 +6,7 @@
 	url = https://github.com/omnetpp/omnetpp-textmate-msg
 [submodule "subprojects/tree-sitter-ned"]
 	path = subprojects/tree-sitter-ned
-	url = git@github.com:omnetpp/tree-sitter-ned.git
+	url = https://github.com/omnetpp/tree-sitter-ned
 [submodule "subprojects/tree-sitter-msg"]
 	path = subprojects/tree-sitter-msg
-	url = git@github.com:omnetpp/tree-sitter-msg.git
+	url = https://github.com/omnetpp/tree-sitter-msg

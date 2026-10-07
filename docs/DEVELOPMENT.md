@@ -50,8 +50,7 @@ A few consequences worth knowing, because they bite if you forget them:
 ## First-time setup
 
 The NED/MSG tree-sitter grammars and the NED/MSG TextMate grammars (symlinked from
-`syntaxes/`) live in **git submodules** under `subprojects/`. The tree-sitter submodules
-use SSH URLs, so you need a GitHub SSH key.
+`syntaxes/`) live in **git submodules** under `subprojects/`.
 
 ```bash
 ./refresh_submodules          # or: git submodule update --init --recursive

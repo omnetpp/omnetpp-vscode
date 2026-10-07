@@ -175,7 +175,6 @@ runs `tsc --build` first so type errors surface alongside test failures.
 ```bash
 # First-time setup (grammars live in git submodules under subprojects/)
 ./refresh_submodules        # or: git submodule update --init --recursive
-                            # (the tree-sitter submodules use SSH URLs)
 bun install
 bun run build:wasm          # compile NED/MSG tree-sitter grammars to WASM
                             # (needs emscripten `emcc` on PATH, or Docker; the native
