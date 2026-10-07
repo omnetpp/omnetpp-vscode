@@ -1,6 +1,6 @@
 // Copies runtime assets into dist/: the language grammar WASM files, the
-// web-tree-sitter runtime WASM, and the bundled config-option registry snapshot.
-import { existsSync, mkdirSync, copyFileSync, cpSync, readdirSync } from 'node:fs';
+// web-tree-sitter runtime WASM, and the bundled snapshots (config, icons, skills, ...).
+import { existsSync, mkdirSync, copyFileSync, cpSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -16,6 +16,16 @@ function copyInto(src, destDir, destName) {
   mkdirSync(destDir, { recursive: true });
   const dest = join(destDir, destName ?? src.split('/').pop());
   copyFileSync(src, dest);
+  console.log(`copied ${src} -> ${dest}`);
+}
+
+function copyTree(src, dest) {
+  if (!existsSync(src)) {
+    console.error(`Asset not found: ${src}`);
+    process.exit(1);
+  }
+  rmSync(dest, { recursive: true, force: true });
+  cpSync(src, dest, { recursive: true });
   console.log(`copied ${src} -> ${dest}`);
 }
 
@@ -67,5 +77,8 @@ if (existsSync(materialSrc)) {
 } else {
   console.warn('resources/neddoc-material not found - run "bun scripts/gen-neddoc-material-assets.mjs <omnetpp-src>" (html-material docs will be unavailable).');
 }
+
+// 7) agent skill snapshot (gen-skills.mjs + the hand-kept omnetpp-tooling)
+copyTree(join(root, 'resources', 'skills'), join(dist, 'skills'));
 
 console.log('Assets copied.');

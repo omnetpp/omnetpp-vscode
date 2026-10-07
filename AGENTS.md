@@ -146,8 +146,12 @@ Sequence Chart editor, and the Event Log table; keep any new webview code under
   `resources/config/opp-config-options.json`, regenerated from an OMNeT++ source tree
   via `bun scripts/gen-config-options.mjs <omnetpp-src-dir>`. The other snapshots:
   `resources/config/msg-builtin-types.json` (`gen-msg-builtins.mjs <omnetpp-src-dir>`),
-  `resources/neddoc-material/` (`gen-neddoc-material-assets.mjs <omnetpp-src-dir>`), and
-  `shared/src/eventlog/entries.ts` (`gen-eventlog-entries.mjs [<omnetpp-src-dir>]`).
+  `resources/neddoc-material/` (`gen-neddoc-material-assets.mjs <omnetpp-src-dir>`),
+  `shared/src/eventlog/entries.ts` (`gen-eventlog-entries.mjs [<omnetpp-src-dir>]`), and
+  the end-user agent skills in `resources/skills/` (`gen-skills.mjs <skills-dir>`, from
+  the shared OMNeT++ skill collection). `resources/skills/omnetpp-tooling/` is the
+  exception: it documents this extension's own tools, so it is edited here directly and
+  must follow the MCP tool list and the `opp_lint` options.
 
 ## Commands
 

@@ -55,6 +55,13 @@
         "label": "OMNeT++ NED/MSG/INI (live)"
       }
     ],
+    "chatSkills": [
+      { "path": "./dist/skills/omnetpp-tooling/SKILL.md" },
+      { "path": "./dist/skills/omnetpp-modeling/SKILL.md" },
+      { "path": "./dist/skills/omnetpp-model-development/SKILL.md" },
+      { "path": "./dist/skills/omnetpp-coding-conventions/SKILL.md" },
+      { "path": "./dist/skills/omnetpp-sim-debugging/SKILL.md" }
+    ],
     "languages": [
       {
         "id": "OMNeT++ NED",
