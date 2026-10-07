@@ -96,6 +96,9 @@ export {
 } from './project/diskIndexer';
 export { parseJsonc, stripJsonc } from './project/jsonc';
 
+// AI agent integration
+export { editedFiles } from './agents/hookInput';
+
 // Cross-reference graph + unified query surface
 export {
   type SymbolId,

@@ -70,6 +70,9 @@ tsc projects inside the `client` workspace):
   via `refreshDiskIndex`, since it has no watcher) and find their assets (`wasm/`, `config/`, `icons/`,
   `neddoc-material/`) next to the script. The linter reuses the shared `lintFile`, the
   same per-file analysis the `get_diagnostics` MCP tool uses, suppression included.
+  `opp_lint --agent-hook` is the post-edit hook of the agent plugin: it parses the hook's
+  stdin JSON with `editedFiles` (`shared/src/agents/hookInput.ts`), must exit 0 without
+  loading the grammars for non-NED/MSG/INI edits, and reports on stderr with exit 2.
   **The IDE does not use `lintFile`**: `server/src/features/diagnostics.ts`
   (`computeDiagnostics`) is a separate list that also reports `unused-network`; only
   the INI checks are shared, through `iniFileDiagnostics`. All projects inherit `node16` module resolution from

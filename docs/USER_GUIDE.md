@@ -816,15 +816,27 @@ opp_lint --ned-path=/opt/inet/src src/   # add libraries for cross-file resoluti
 
 | Option | Meaning |
 | --- | --- |
-| `--ned-path=<dirs>` | Extra NED source roots (`;`-separated, or `:` outside Windows) for cross-file resolution. Indexed but **not** linted. Default: `OMNETPP_NED_PATH`. |
+| `--ned-path=<dirs>` | Extra NED source roots (`;`-separated, or `:` outside Windows) for cross-file resolution. Indexed but **not** linted. Default: `OMNETPP_NED_PATH`, then `omnetpp.nedPath` in `./.vscode/settings.json`. |
 | `--format=text\|json` | Output format (default `text`). |
 | `--severity=error\|warning\|info\|hint` | Minimum severity to report (default `hint` — report everything). |
 | `--fail-on=error\|warning\|info\|hint\|never` | Exit non-zero if a diagnostic at this severity or worse is found (default `error`). |
 | `--no-color` | Disable ANSI colors (also off when stdout is not a TTY, or when `NO_COLOR` is set). |
+| `--agent-hook` | Run as an AI agent post-edit hook (see below). |
 | `-h`, `--help` | Show help. |
 
 **Exit codes.** `0` — no diagnostics at/above `--fail-on`; `1` — diagnostics found
 at/above `--fail-on`; `2` — usage or runtime error.
+
+**As an agent post-edit hook.** `opp_lint --agent-hook` reads the JSON that Claude
+Code, Codex and Devin pass to a `PostToolUse` hook on stdin, takes the edited files from
+it (`tool_input.file_path`, or the file headers of a Codex `apply_patch`), and lints only
+the edited `.ned`/`.msg`/`.ini` files against the whole project at the hook's `cwd`
+(`CLAUDE_PROJECT_DIR` when set). When there are diagnostics (default
+`--severity=warning`), it writes them to **stderr** and exits with **2**, which these
+agents show to the model; otherwise it exits 0 silently. It returns at once, without
+loading the grammars, for edits of other files, so it can match every edit tool. The
+**OMNeT++: Set Up AI Agents** command installs it for you (see
+[AI agents](#ai-agents-set-up-ai-agents)).
 
 **Advantage.** Enforce model correctness in CI and pre-commit hooks with the same checks
 the IDE uses — no OMNeT++ install on the build agent, machine-readable JSON, and precise
