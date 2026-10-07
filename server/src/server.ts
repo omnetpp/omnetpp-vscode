@@ -53,15 +53,17 @@ import { registerIndexLifecycle } from './indexLifecycle';
 import { registerViewRequests } from './viewRequests';
 import { registerMcpRequests } from './mcpRequests';
 import { registerDocsRequests } from './docsRequests';
+import { parseCommandLine } from './commandLine';
 import type { NedHierarchyItem } from '@omnetpp/shared';
 
+const commandLine = parseCommandLine(process.argv, process.env);
 const connection = createConnection(ProposedFeatures.all);
 const documents = new TextDocuments(TextDocument);
 const state = new ServerState();
 
 /** Read the `omnetpp.*` settings the server cares about from init/config options. */
 function applySettings(opts: OmnetppSettings | undefined): void {
-  state.nedPathSetting = opts?.nedPath ?? '';
+  state.nedPathSetting = opts?.nedPath || commandLine.nedPath;
   state.installDir = resolveInstallDir(opts?.installDir, process.env);
   state.diagnosticsScope = opts?.diagnostics?.scope === 'openFiles' ? 'openFiles' : 'workspace';
   state.iniParamCodeLensEnabled = opts?.codeLens?.iniParams !== false;

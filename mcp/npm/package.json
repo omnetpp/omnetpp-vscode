@@ -1,15 +1,16 @@
 {
   "name": "@omnetpp/opp-tools",
   "version": "0.0.0",
-  "description": "Command-line tools for OMNeT++ NED/MSG/INI models: linter, documentation generator, and MCP server for AI agents",
+  "description": "Command-line tools for OMNeT++ NED/MSG/INI models: linter, documentation generator, language server, and MCP server for AI agents",
   "license": "SEE LICENSE IN LICENSE",
   "author": "OpenSim Ltd.",
   "homepage": "https://marketplace.visualstudio.com/items?itemName=opensim.omnetpp-vscode",
-  "keywords": ["omnetpp", "ned", "msg", "ini", "lint", "neddoc", "mcp", "simulation"],
+  "keywords": ["omnetpp", "ned", "msg", "ini", "lint", "neddoc", "lsp", "language-server", "mcp", "simulation"],
   "bin": {
     "opp_lint": "dist/opp_lint.js",
     "opp_docgen": "dist/opp_docgen.js",
-    "opp_ide_mcp": "dist/opp_ide_mcp.js"
+    "opp_ide_mcp": "dist/opp_ide_mcp.js",
+    "opp_lsp": "dist/opp_lsp.js"
   },
   "files": ["dist/", "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"],
   "engines": {

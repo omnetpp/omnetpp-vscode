@@ -28,7 +28,7 @@ if (!custom) {
   files.push(...['src/app/Foo.cc', 'src/app/Foo.h', 'src/app/Foo.ned', 'src/impl/OtherImpl.cc'].map((f) => join(projectDir, f)));
 }
 
-const server = spawn(process.execPath, [join(root, 'dist', 'server.js'), '--stdio'], {
+const server = spawn(process.execPath, [join(root, 'dist', 'opp_lsp.js'), '--stdio'], {
   stdio: ['pipe', 'pipe', 'inherit'],
 });
 

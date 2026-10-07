@@ -8,8 +8,8 @@ command-line tools:
    Sequence Chart and Event Log, documentation generation, and the in-editor bridge for
    AI agents.
 2. [**Command-line tools**](#2-command-line-tools) — how to install them, and the
-   `opp_lint` linter, the `opp_docgen` documentation generator, and the `opp_ide_mcp`
-   MCP server for AI agents.
+   `opp_lint` linter, the `opp_docgen` documentation generator, the `opp_ide_mcp`
+   MCP server for AI agents, and the `opp_lsp` language server for other editors.
 3. [**MCP tool reference**](#3-mcp-tool-reference) — the tools that AI agents can call.
 
 The editor and the command-line tools run the **same analyzers**, built on tree-sitter.
@@ -702,8 +702,8 @@ results reflect exactly what you're editing right now, unsaved changes included.
 
 ### Installing the command-line tools from VS Code
 
-**"OMNeT++: Install Command-Line Tools"** puts `opp_lint`, `opp_docgen` and
-`opp_ide_mcp` on your `PATH` without a separate download — see
+**"OMNeT++: Install Command-Line Tools"** puts `opp_lint`, `opp_docgen`, `opp_ide_mcp`
+and `opp_lsp` on your `PATH` without a separate download — see
 [Installation](#installation).
 
 ### Settings
@@ -747,8 +747,8 @@ The Sequence Chart and Event Log settings are listed in
 
 ## 2. Command-line tools
 
-Three tools bring the extension's analyzers to the command line — for CI, pre-commit
-hooks, scripts, and AI clients outside VS Code. None of them needs an OMNeT++
+Four tools bring the extension's analyzers to the command line — for CI, pre-commit
+hooks, scripts, AI clients, and other editors outside VS Code. None of them needs an OMNeT++
 installation.
 
 | Command | Purpose |
@@ -756,10 +756,11 @@ installation.
 | [`opp_lint`](#opp_lint--linter) | Lint NED, MSG, and INI files. |
 | [`opp_docgen`](#opp_docgen--documentation-generator) | Generate documentation from NED and MSG files. |
 | [`opp_ide_mcp`](#opp_ide_mcp--mcp-server-for-ai-agents) | MCP stdio server for AI agents (NED/MSG/INI model and eventlogs). |
+| [`opp_lsp`](#opp_lsp--language-server-for-other-editors) | Language server for NED, MSG, and INI files in other LSP editors. |
 
 ### Installation
 
-Choose one of the two ways. Both install all three tools.
+Choose one of the two ways. Both install all four tools.
 
 **From VS Code** (no Node.js needed). Run **"OMNeT++: Install Command-Line Tools"** from
 the Command Palette. It writes one small launcher per tool into `~/.local/bin` (Linux,
@@ -783,7 +784,7 @@ CI agents:
 npm install -g @omnetpp/opp-tools
 ```
 
-**Common options.** All three tools take `--ned-path=<dirs>` — extra NED source roots
+**Common options.** All four tools take `--ned-path=<dirs>` — extra NED source roots
 (libraries such as INET) that are indexed for cross-file resolution but not linted or
 documented, separated by `;` or `:`. Its default is the `OMNETPP_NED_PATH` environment
 variable. Quote the value in a shell if it contains `;`. Run any tool with `-h` /
@@ -894,6 +895,84 @@ The eventlog tools open `.elog` files by path on demand.
 
 **Advantage.** Use the OMNeT++ model tools from any MCP-capable client, in headless/CI
 contexts, with no editor running.
+
+### `opp_lsp` — language server for other editors
+
+**Feature.** The language server that the VS Code extension runs, as a standalone
+command for any editor with LSP support (Neovim, Helix, Emacs, Sublime Text, …). It
+provides the editor features of this guide that are standard LSP: diagnostics, hover,
+completion, go to definition, references, rename, formatting, code actions, document
+and workspace symbols, folding, type hierarchy, and the INI parameter CodeLens. The
+activity-bar views, the graphical NED preview, the Sequence Chart, and documentation
+generation need the VS Code extension.
+
+**How to use it.** Configure `opp_lsp` as the language server for `*.ned`, `*.msg`, and
+`*.ini` files. It speaks LSP over stdin/stdout by default (`--stdio`, `--socket=<port>`
+and `--pipe=<name>` select a transport explicitly) and logs through LSP, never to stdout.
+The server recognizes the files by their extension, so the editor's language id does
+not matter. The workspace root that the editor sends is the project directory.
+
+Library NED folders come from the `nedPath` initialization option, else from
+`--ned-path=<dirs>`, else from `OMNETPP_NED_PATH`. Relative `--ned-path` entries are
+resolved against the server's working directory. Optional initialization options:
+
+```json
+{
+  "nedPath": "/path/to/inet/src",
+  "installDir": "/path/to/omnetpp",
+  "diagnostics": { "scope": "workspace" },
+  "codeLens": { "iniParams": true }
+}
+```
+
+These have the same meaning as the `omnetpp.*` [settings](#settings). The server also
+accepts them later through `workspace/didChangeConfiguration`, nested under `"omnetpp"`.
+
+Neovim (0.11 or newer), in `init.lua`:
+
+```lua
+vim.filetype.add({ extension = { ned = 'ned', msg = 'omnetpp-msg' } })
+vim.lsp.config('opp_lsp', {
+  cmd = { 'opp_lsp' },
+  filetypes = { 'ned', 'omnetpp-msg', 'dosini' },
+  root_markers = { '.nedfolders', 'package.ned', '.git' },
+  init_options = { nedPath = '/path/to/inet/src' },
+})
+vim.lsp.enable('opp_lsp')
+```
+
+Helix, in `languages.toml` (`config` is sent as the initialization options):
+
+```toml
+[language-server.opp_lsp]
+command = "opp_lsp"
+config = { nedPath = "/path/to/inet/src" }
+
+[[language]]
+name = "ned"
+scope = "source.ned"
+file-types = ["ned"]
+roots = [".nedfolders", "package.ned"]
+comment-token = "//"
+language-servers = ["opp_lsp"]
+
+[[language]]
+name = "omnetpp-msg"
+scope = "source.omnetpp-msg"
+file-types = ["msg"]
+roots = [".nedfolders", "package.ned"]
+comment-token = "//"
+language-servers = ["opp_lsp"]
+
+[[language]]
+name = "ini"
+language-servers = ["opp_lsp"]
+```
+
+As in VS Code, an INI file gets features only inside a NED source folder.
+
+**Advantage.** The same diagnostics, navigation, and refactoring as in VS Code, in the
+editor you already use, with no OMNeT++ installation.
 
 ---
 

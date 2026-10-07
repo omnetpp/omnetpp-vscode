@@ -18,7 +18,8 @@
   "bin": {
     "opp_lint": "./dist/opp_lint.js",
     "opp_docgen": "./dist/opp_docgen.js",
-    "opp_ide_mcp": "./dist/opp_ide_mcp.js"
+    "opp_ide_mcp": "./dist/opp_ide_mcp.js",
+    "opp_lsp": "./dist/opp_lsp.js"
   },
   "activationEvents": [
     "workspaceContains:**/*.ned",

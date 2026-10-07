@@ -37,7 +37,10 @@ tsc projects inside the `client` workspace):
 - **`server/`** — the LSP server (`server/src/server.ts`). Owns the LSP connection,
   the project index (`projectIndex.ts`), and injects the Node filesystem
   (`NodeFileSystem` from `@omnetpp/shared/node`) into `shared`. Translates LSP requests into
-  `shared` calls. Bundled to `dist/server.js` and spawned as a child process. Also serves
+  `shared` calls. Bundled to `dist/opp_lsp.js`, which the extension spawns as a child
+  process over IPC and which also ships as the `opp_lsp` command-line tool for other LSP
+  editors (`commandLine.ts`: `--help`, `--ned-path`, stdio when no transport flag is
+  given; keep stdout free of anything but LSP). Also serves
   the `omnetpp/mcp/listTools` / `omnetpp/mcp/callTool` custom requests by running
   `handleTool` against its **live** index (so MCP results reflect unsaved buffers).
 - **`client/`** — the thin VS Code extension (`client/src/extension.ts`). Starts the
@@ -207,6 +210,8 @@ in debug mode the server listens on inspector port `6009` ("Attach to Server").
 ### Debugging / smoke scripts
 
 `scripts/` holds standalone smoke/check scripts (e.g. `lsp-smoke.mjs`,
+`lsp-cli-smoke.mjs` (starts `opp_lsp` like a non-VS Code editor: no transport flag,
+`--help`, and the `--ned-path` / `OMNETPP_NED_PATH` / `initializationOptions` order),
 `workspace-diag-smoke.mjs` (asserts unopened workspace files still get diagnostics),
 `ini-open-smoke.mjs` (asserts an open INI buffer, not its disk text, drives the INI
 index: unused-network hints at startup, after an edit, and after close),
@@ -216,7 +221,7 @@ after `bun run compile` (the analyzer-only checks) or `bun run compile && bun ru
 (everything that spawns a `dist/` bundle via `process.execPath`, i.e. bun).
 For the MCP feature (after `bun run dev:build`):
 `mcp-smoke.mjs <projectDir>` drives the standalone `dist/opp_ide_mcp.js` over MCP stdio;
-`mcp-live-smoke.mjs <projectDir>` drives `dist/server.js` and exercises the
+`mcp-live-smoke.mjs <projectDir>` drives `dist/opp_lsp.js` and exercises the
 `omnetpp/mcp/*` live-index requests (incl. unsaved-buffer reflection);
 `preview-smoke.mjs` checks the `omnetpp/nedPreview` scene request shape the same way.
 `counterparts-smoke.mjs [<projectDir> <file>…]` checks the `omnetpp/counterparts` request (the

@@ -336,7 +336,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 ## vscode-jsonrpc@8.2.0
 
-Used in: dist/eventlogWorker.js, dist/extension.js, dist/server.js
+Used in: dist/eventlogWorker.js, dist/extension.js, dist/opp_lsp.js
 
 License: MIT
 
@@ -376,7 +376,7 @@ THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ## vscode-languageserver-protocol@3.17.5
 
-Used in: dist/extension.js, dist/server.js
+Used in: dist/extension.js, dist/opp_lsp.js
 
 License: MIT
 
@@ -396,7 +396,7 @@ THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ## vscode-languageserver-textdocument@1.0.12
 
-Used in: dist/server.js
+Used in: dist/opp_lsp.js
 
 License: MIT
 
@@ -416,7 +416,7 @@ THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ## vscode-languageserver-types@3.17.5
 
-Used in: dist/extension.js, dist/server.js
+Used in: dist/extension.js, dist/opp_lsp.js
 
 License: MIT
 
@@ -436,7 +436,7 @@ THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ## vscode-languageserver@9.0.1
 
-Used in: dist/server.js
+Used in: dist/opp_lsp.js
 
 License: MIT
 
@@ -456,7 +456,7 @@ THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ## vscode-uri@3.1.0
 
-Used in: dist/opp_docgen.js, dist/opp_ide_mcp.js, dist/opp_lint.js, dist/server.js
+Used in: dist/opp_docgen.js, dist/opp_ide_mcp.js, dist/opp_lint.js, dist/opp_lsp.js
 
 License: MIT
 
@@ -474,7 +474,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ## web-tree-sitter@0.25.10
 
-Used in: dist/opp_docgen.js, dist/opp_ide_mcp.js, dist/opp_lint.js, dist/server.js
+Used in: dist/opp_docgen.js, dist/opp_ide_mcp.js, dist/opp_lint.js, dist/opp_lsp.js
 
 License: MIT
 

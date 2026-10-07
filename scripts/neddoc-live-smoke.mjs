@@ -17,7 +17,7 @@ writeFileSync(
   '// On-disk node.\nsimple DiskNode { gates: inout g[]; }\n',
 );
 
-const server = spawn(process.execPath, [join(root, 'dist', 'server.js'), '--stdio'], {
+const server = spawn(process.execPath, [join(root, 'dist', 'opp_lsp.js'), '--stdio'], {
   stdio: ['pipe', 'pipe', 'inherit'],
 });
 

@@ -7,7 +7,7 @@ The extension bundles a full language server written in **pure TypeScript on tre
 grammars** — it parses and analyzes your model with **no OMNeT++ installation required**:
 the built-in NED types and the config-option registry are bundled. The same semantic
 engine is also available as **command-line tools**: a linter, a documentation generator,
-and an **MCP server for AI agents**.
+a language server for other LSP editors, and an **MCP server for AI agents**.
 
 Available in the
 [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=opensim.omnetpp-vscode)
@@ -55,7 +55,8 @@ Alternatively, [download the latest release](https://github.com/omnetpp/omnetpp-
 - **Activity-bar views**: Configurations, Module Hierarchy, Module Parameters, NED
   Inheritance, and Used By.
 - **Command-line tools** — `opp_lint` (linter for CI, pre-commit hooks, and scripts),
-  `opp_docgen` (documentation generator), and `opp_ide_mcp` (MCP server). Install them
+  `opp_docgen` (documentation generator), `opp_ide_mcp` (MCP server), and `opp_lsp`
+  (the language server, for other LSP editors such as Neovim or Helix). Install them
   with the **OMNeT++: Install Command-Line Tools** command, or with
   `npm install -g @omnetpp/opp-tools` (Node.js 18+). No OMNeT++ install needed.
 - **MCP tools** — 23 read/refactor tools that let an AI agent query and safely refactor

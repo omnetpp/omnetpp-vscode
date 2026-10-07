@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const projectDir = resolve(process.argv[2] ?? join(root, 'samples'));
 
-const server = spawn(process.execPath, [join(root, 'dist', 'server.js'), '--stdio'], {
+const server = spawn(process.execPath, [join(root, 'dist', 'opp_lsp.js'), '--stdio'], {
   stdio: ['pipe', 'pipe', 'inherit'],
 });
 

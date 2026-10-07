@@ -8,7 +8,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const projDir = process.argv[2];
 const iniPath = process.argv[3];
 
-const server = spawn(process.execPath, [join(root, 'dist', 'server.js'), '--stdio'], { stdio: ['pipe', 'pipe', 'inherit'] });
+const server = spawn(process.execPath, [join(root, 'dist', 'opp_lsp.js'), '--stdio'], { stdio: ['pipe', 'pipe', 'inherit'] });
 const send = (m) => { const j = JSON.stringify(m); server.stdin.write(`Content-Length: ${Buffer.byteLength(j)}\r\n\r\n${j}`); };
 let buf = Buffer.alloc(0); const handlers = [];
 server.stdout.on('data', (c) => {

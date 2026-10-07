@@ -57,7 +57,7 @@ function readSettings(): OmnetppSettings {
 
 export function activate(context: ExtensionContext): void {
   // The bundled server lives next to the bundled client in dist/.
-  const serverModule = context.asAbsolutePath(path.join('dist', 'server.js'));
+  const serverModule = context.asAbsolutePath(path.join('dist', 'opp_lsp.js'));
 
   const serverOptions: ServerOptions = {
     run: { module: serverModule, transport: TransportKind.ipc },

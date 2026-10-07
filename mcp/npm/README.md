@@ -10,6 +10,7 @@ and need **no OMNeT++ installation**.
 | `opp_lint` | Lint NED, MSG, and INI files — for CI, pre-commit hooks, and scripts. |
 | `opp_docgen` | Generate documentation (HTML, Markdown, or reStructuredText) from NED and MSG files. |
 | `opp_ide_mcp` | MCP (Model Context Protocol) stdio server that lets AI agents query and refactor an OMNeT++ model and read eventlog (`.elog`) files. |
+| `opp_lsp` | Language server (LSP over stdio) for NED, MSG, and INI files — for editors other than VS Code. |
 
 ## Install
 
@@ -32,6 +33,9 @@ To use `opp_ide_mcp`, register it as a stdio MCP server in your AI client, for e
 ```json
 { "command": "opp_ide_mcp", "args": ["/path/to/project"] }
 ```
+
+To use `opp_lsp`, configure it as the language server command for `*.ned`, `*.msg`,
+and `*.ini` files in your editor. It speaks LSP over stdin/stdout.
 
 Run any command with `--help` for all options. Library NED folders (for example the
 INET Framework) can be given with `--ned-path=<dirs>` or the `OMNETPP_NED_PATH`

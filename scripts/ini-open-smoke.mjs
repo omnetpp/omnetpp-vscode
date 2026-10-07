@@ -1,7 +1,7 @@
 // Verifies that an OPEN INI buffer, not its disk version, drives the INI index:
 // the "unused network" hints on an open NED file must follow the buffer when the
 // INI is open at startup, after an edit, and fall back to the disk text on close.
-// Builds a throwaway project, drives dist/server.js over LSP stdio.
+// Builds a throwaway project, drives dist/opp_lsp.js over LSP stdio.
 // Usage: bun scripts/ini-open-smoke.mjs   (after `bun run dev:build`)
 import { spawn } from 'node:child_process';
 import { resolve, dirname, join } from 'node:path';
@@ -18,7 +18,7 @@ writeFileSync(join(proj, 'omnetpp.ini'), '[General]\nnetwork = Net\n');
 const nedUri = pathToFileURL(join(proj, 'Nets.ned')).toString();
 const iniUri = pathToFileURL(join(proj, 'omnetpp.ini')).toString();
 
-const server = spawn(process.execPath, [join(root, 'dist', 'server.js'), '--stdio'], {
+const server = spawn(process.execPath, [join(root, 'dist', 'opp_lsp.js'), '--stdio'], {
   stdio: ['pipe', 'pipe', 'inherit'],
 });
 

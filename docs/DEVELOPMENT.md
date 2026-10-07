@@ -17,7 +17,8 @@ install (`omnetpp.installDir` / `OMNETPP_ROOT`) is used only as an icon source
 
 The same semantic core also powers three non-editor surfaces: a standalone
 **command-line linter** (`opp_lint`), a **documentation generator** (`opp_docgen`), and an
-**MCP server** for AI agents (`opp_ide_mcp`). The CLI linter and the MCP `get_diagnostics`
+**MCP server** for AI agents (`opp_ide_mcp`). The language server itself also ships as a
+command-line tool, `opp_lsp`, for other LSP editors. The CLI linter and the MCP `get_diagnostics`
 tool share `lintFile`. The IDE runs the same `shared` analyzers through
 `server/src/features/diagnostics.ts`, plus a few checks that need the live index (unused
 networks, INI `include` resolution, and include-merged INI parameter checks), so CLI/MCP
@@ -98,7 +99,7 @@ the Extension Development Host. In debug mode the server listens on inspector po
 - **`tsc --build`** type-checks and emits `.d.ts` / `out/` for the TypeScript project
   references (and feeds esbuild, which bundles from `shared/out`).
 - **`esbuild`** (`esbuild.mjs`) produces the actual runtime bundles in `dist/`:
-  `extension.js`, `server.js`, `opp_ide_mcp.js`, `opp_lint.js`, `opp_docgen.js`,
+  `extension.js`, `opp_lsp.js`, `opp_ide_mcp.js`, `opp_lint.js`, `opp_docgen.js`,
   `eventlogWorker.js` (Node/CJS), and the browser IIFEs `webview/nedPreview.js`,
   `webview/sequenceChart.js`, `webview/eventLogTable.js`. `copy:assets` adds
   `dist/wasm/`, `dist/config/`, `dist/icons/`, `dist/webview/codicons/` and
@@ -146,8 +147,13 @@ language (`match/`), and the eventlog engine (`eventlog/`).
 
 `server/src/server.ts` owns the LSP connection and the project index (`projectIndex.ts`),
 and injects the Node filesystem (`NodeFileSystem` from `@omnetpp/shared/node`) into
-`shared`. It translates LSP requests into `shared` calls. Bundled to `dist/server.js` and
-spawned as a child process by the client. It also serves the `omnetpp/mcp/listTools` /
+`shared`. It translates LSP requests into `shared` calls. Bundled to `dist/opp_lsp.js`
+(with a node shebang), which the client spawns as a child process over IPC, and which
+also ships as the `opp_lsp` command-line tool for other LSP editors.
+`server/src/commandLine.ts` handles its command line before the connection is created:
+`--help`, `--ned-path=<dirs>` (else `OMNETPP_NED_PATH`, used when the editor sends no
+`nedPath`), and `--stdio` when no transport flag is given. The server never writes to
+stdout, because stdout carries the LSP stream. It also serves the `omnetpp/mcp/listTools` /
 `omnetpp/mcp/callTool` custom requests by running `handleTool` against its **live** index
 (so MCP results reflect unsaved editor buffers).
 
@@ -192,7 +198,7 @@ The source is not released, so end users get the `opp_*` tools in one of two way
 
 - **npm package `@omnetpp/opp-tools`.** The manifest and README template live in
   `mcp/npm/`. `scripts/pack-cli.mjs` stages the package from an already-built `dist/`
-  into `build/opp-tools/` — the three bundles, only the asset folders they load, the
+  into `build/opp-tools/` — the four bundles, only the asset folders they load, the
   template, and `LICENSE` — with the version taken from the root `package.json`, then runs
   `bun pm pack` (or `bun publish` with `--publish`). Use `bun run package:cli` /
   `bun run deploy:cli`. Requires Node ≥ 18 at the user's end (the esbuild target).
@@ -323,22 +329,23 @@ preview panel, the Sequence Chart custom editor, and the Event Log table view.
 
 `scripts/` holds standalone smoke/check scripts for exercising the parser, analyzers, or
 an LSP/MCP/CLI feature outside VS Code. Run them with `bun scripts/<file>.mjs`. Scripts
-that drive a bundle (`dist/server.js`, `dist/opp_*.js`, `dist/eventlogWorker.js`,
+that drive a bundle (`dist/opp_*.js`, `dist/eventlogWorker.js`,
 `dist/webview/*`) need `bun run compile && bun run dev:build` first and spawn the bundle
 via `process.execPath`, i.e. bun. The analyzer-only check scripts load `shared/out`
 directly and need only `bun run compile` (and built WASM).
 
 | Script | What it drives |
 | --- | --- |
-| `lsp-smoke.mjs`, `lsp-ini-smoke.mjs <projDir> <iniPath>`, `lsp-project-smoke.mjs <projectDir>`, `lsp-modhier-smoke.mjs <projDir> <nedFile>` | LSP features over `dist/server.js` |
-| `ini-nav-smoke.mjs` | INI param-line hover/definition/references/CodeLens over `dist/server.js` |
+| `lsp-smoke.mjs`, `lsp-ini-smoke.mjs <projDir> <iniPath>`, `lsp-project-smoke.mjs <projectDir>`, `lsp-modhier-smoke.mjs <projDir> <nedFile>` | LSP features over `dist/opp_lsp.js` |
+| `lsp-cli-smoke.mjs` | `dist/opp_lsp.js` started like a non-VS Code editor does: no transport flag, `--help`, and the `--ned-path` / `OMNETPP_NED_PATH` / `initializationOptions` order |
+| `ini-nav-smoke.mjs` | INI param-line hover/definition/references/CodeLens over `dist/opp_lsp.js` |
 | `workspace-diag-smoke.mjs` | asserts unopened workspace files still get diagnostics |
 | `workspace-suppress-smoke.mjs` | inline `suppress(...)` is honored for never-opened workspace files |
 | `revalidate-smoke.mjs` | `omnetpp/revalidate` reconciles the index after a real `git checkout` |
 | `preview-smoke.mjs [projectDir]` | the `omnetpp/nedPreview` scene request shape |
 | `counterparts-smoke.mjs [<projectDir> <file>…]` | the `omnetpp/counterparts` (`Alt+O`) request, with the C++ files not open |
 | `mcp-smoke.mjs <projectDir>` | the standalone `dist/opp_ide_mcp.js` over MCP stdio |
-| `mcp-live-smoke.mjs <projectDir>` | the `omnetpp/mcp/*` live-index requests on `dist/server.js` (incl. unsaved-buffer reflection) |
+| `mcp-live-smoke.mjs <projectDir>` | the `omnetpp/mcp/*` live-index requests on `dist/opp_lsp.js` (incl. unsaved-buffer reflection) |
 | `lint-cli-smoke.mjs` | the bundled CLI linter (`dist/opp_lint.js`) — diagnostics, suppression, JSON shape, exit codes |
 | `docgen-cli-smoke.mjs` | the bundled `dist/opp_docgen.js` — pages, links, options, exit codes |
 | `neddoc-live-smoke.mjs` | the `omnetpp/generateDocs` request on the live index (incl. unsaved buffer, progress) |
@@ -355,7 +362,7 @@ directly and need only `bun run compile` (and built WASM).
 GitHub Actions in `.github/workflows/`:
 
 - `ci.yml` — every push/PR: `build:wasm`, compile, unit tests, `dev:build`,
-  `lint-cli-smoke.mjs` and `lsp-smoke.mjs`.
+  `lint-cli-smoke.mjs`, `lsp-smoke.mjs` and `lsp-cli-smoke.mjs`.
 - `release.yml` — on a pushed `X.Y.Z` tag (no `v` prefix): packages the `.vsix`, creates
   a GitHub release with it, and publishes to Open VSX and the VS Code Marketplace.
 - `publish.yml` — manual dispatch: `bun run deploy` to the Marketplace.

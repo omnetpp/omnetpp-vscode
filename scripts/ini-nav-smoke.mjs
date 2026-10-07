@@ -31,7 +31,7 @@ const nedUri = pathToFileURL(join(proj, 'net.ned')).href;
 const iniUri = pathToFileURL(join(proj, 'omnetpp.ini')).href;
 const rootUri = pathToFileURL(proj).href;
 
-const server = spawn(process.execPath, [join(root, 'dist', 'server.js'), '--stdio'], {
+const server = spawn(process.execPath, [join(root, 'dist', 'opp_lsp.js'), '--stdio'], {
   stdio: ['pipe', 'pipe', 'inherit'],
 });
 function send(msg) {

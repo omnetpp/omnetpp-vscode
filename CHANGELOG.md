@@ -1,5 +1,12 @@
 # Change Log
 
+## Unreleased
+
+- **`opp_lsp` command-line tool**: the extension's language server, for other LSP
+  editors (Neovim, Helix, Emacs, …). It speaks LSP over stdio by default and takes
+  library NED roots from `--ned-path` or `OMNETPP_NED_PATH`. Installed with the other
+  command-line tools and by `@omnetpp/opp-tools`
+
 ## 1.0.0
 
 - **License change:** from 1.0.0 on, the extension and the command-line tools are licensed

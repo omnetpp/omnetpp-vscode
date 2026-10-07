@@ -40,5 +40,8 @@ jobs:
     - name: Smoke-test CLI linter (dist/opp_lint.js)
       run: bun scripts/lint-cli-smoke.mjs
 
-    - name: Smoke-test language server (dist/server.js)
+    - name: Smoke-test language server (dist/opp_lsp.js)
       run: bun scripts/lsp-smoke.mjs
+
+    - name: Smoke-test opp_lsp as a standalone server (dist/opp_lsp.js)
+      run: bun scripts/lsp-cli-smoke.mjs

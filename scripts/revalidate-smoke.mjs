@@ -35,7 +35,7 @@ git('checkout', '-q', 'broken');
 
 const subUri = pathToFileURL(join(proj, 'Sub.ned')).toString();
 
-const server = spawn(process.execPath, [join(root, 'dist', 'server.js'), '--stdio'], {
+const server = spawn(process.execPath, [join(root, 'dist', 'opp_lsp.js'), '--stdio'], {
   stdio: ['pipe', 'pipe', 'inherit'],
 });
 
