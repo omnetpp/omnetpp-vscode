@@ -1,3 +1,5 @@
+#!/bin/sh
+set -e
 echo 'Refreshing submodules....'
-cd subprojects
-git submodule init && git submodule update --init --remote --recursive
+cd "$(dirname "$0")"
+git submodule update --init --recursive
