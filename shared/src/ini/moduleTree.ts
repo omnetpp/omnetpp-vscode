@@ -69,7 +69,10 @@ export interface ExpandResult {
  *  for the default case — matching OMNeT++'s parent-chain walk. */
 interface NedTypeRule {
   re: RegExp;
-  typeName: string;
+  /** undefined when the value is not a static name (an expression, or `""`): the
+   *  rule still selects the type, so the slot's type is unknown rather than its
+   *  `<default(...)>`. */
+  typeName?: string;
   isDefault: boolean;
 }
 
@@ -101,7 +104,7 @@ function compileNedRules(type: NedTypeInfo, instanceNorm: string, base: NedTypeR
   if (!patterns.length) return base;
   const rules = base.slice();
   for (const p of patterns) {
-    if (!p.typeName || !p.prefixPattern) continue; // non-literal or bare `typename` → skip
+    if (!p.prefixPattern) continue; // bare `typename` names this module's own type
     rules.push({ re: iniKeyToRegex(`${instanceNorm}.${p.prefixPattern}`), typeName: p.typeName, isDefault: p.isDefault });
   }
   return rules;
@@ -119,14 +122,15 @@ function resolveLikeTypeNames(
   // 1. fixed angle-bracket `<"X">` — highest, not overridable
   if (sub.likeFixedType) return { names: [sub.likeFixedType], fromIni: false };
   // 2. NED non-default `<sub>.typename = "X"` deep assignment — innermost (deepest) wins
-  let nonDefault: string | undefined;
-  for (const r of nedRules) if (!r.isDefault && r.re.test(slotNorm)) nonDefault = r.typeName;
-  if (nonDefault !== undefined) return { names: [nonDefault], fromIni: false };
+  let nonDefault: NedTypeRule | undefined;
+  for (const r of nedRules) if (!r.isDefault && r.re.test(slotNorm)) nonDefault = r;
+  if (nonDefault) return { names: nonDefault.typeName ? [nonDefault.typeName] : [], fromIni: false };
   // 3. INI `typename` binding
   const ini = typenamesFor?.(slotNorm) ?? [];
   if (ini.length) return { names: ini, fromIni: true };
   // 4. NED `<sub>.typename = default("X")` deep assignment — outermost (shallowest) wins
-  for (const r of nedRules) if (r.isDefault && r.re.test(slotNorm)) return { names: [r.typeName], fromIni: false };
+  for (const r of nedRules)
+    if (r.isDefault && r.re.test(slotNorm)) return { names: r.typeName ? [r.typeName] : [], fromIni: false };
   // 5. default angle-bracket `<default("X")>` — lowest
   if (sub.likeDefaultType) return { names: [sub.likeDefaultType], fromIni: false };
   return { names: [], fromIni: false };

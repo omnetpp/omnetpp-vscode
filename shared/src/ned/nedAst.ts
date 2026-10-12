@@ -298,7 +298,7 @@ export interface TypenamePattern {
   node: SyntaxNode;
   /** the assignment key with the trailing `.typename` removed (e.g. `radio`, `wlan[*].mgmt`). */
   prefixPattern: string;
-  /** the concrete type name, iff the RHS is a static string literal (else undefined → skip). */
+  /** the concrete type name, iff the RHS is a non-empty string literal (else undefined: not statically known). */
   typeName?: string;
   /** whether the RHS is wrapped in `default(...)`. */
   isDefault: boolean;

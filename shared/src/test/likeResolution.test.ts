@@ -116,3 +116,29 @@ test('fully-qualified typename disambiguates (no ambiguity warning)', async () =
   const diags = iniParamDiagnostics(parseIni('network = n.NetA\n*.h.r.typename = "p1.Dup"\n'), cache, reg);
   assert.deepEqual(diags.filter((d) => d.code === 'ambiguous-typename'), []);
 });
+
+// TSN-style: the slot's `<default("ApskRadio")>` is overridden by an expression
+// that picks the type at runtime, so the linter cannot know the concrete type.
+const NED_EXPR = `
+package t;
+moduleinterface IRadio { parameters: int dummy; }
+simple ApskRadio like IRadio { parameters: int dummy; int freq = default(1); }
+simple UnitRadio like IRadio { parameters: int dummy; int gain = default(2); }
+module If { submodules: radio: <default("ApskRadio")> like IRadio; }
+module ExprDefaultIf extends If { parameters: bool unit = default(false); radio.typename = default(unit ? "UnitRadio" : "ApskRadio"); }
+module ExprFixedIf extends If { parameters: bool unit = default(false); radio.typename = unit ? "UnitRadio" : "ApskRadio"; }
+network NetED { submodules: h: ExprDefaultIf; }
+network NetEF { submodules: h: ExprFixedIf; }`;
+
+test('a default() typename expression makes the like slot type unknown', async () => {
+  const cache = await cacheWith(NED_EXPR);
+  // not the slot's <default("ApskRadio")>: UnitRadio's gain must not be flagged
+  assert.deepEqual(noMatch('network = t.NetED\n*.h.unit = true\n*.h.radio.gain = 5\n', cache), []);
+  // an INI typename still outranks a default() deep assignment
+  assert.ok(noMatch('network = t.NetED\n*.h.radio.typename = "ApskRadio"\n*.h.radio.gain = 5\n', cache).length > 0);
+});
+
+test('a fixed typename expression makes the like slot type unknown, even with an INI typename', async () => {
+  const cache = await cacheWith(NED_EXPR);
+  assert.deepEqual(noMatch('network = t.NetEF\n*.h.radio.typename = "ApskRadio"\n*.h.radio.gain = 5\n', cache), []);
+});
