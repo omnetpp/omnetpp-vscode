@@ -3,6 +3,7 @@ import { ResourceCacheBase } from '../model/resourceCacheBase';
 import { MsgKind, MsgTypeInfo } from './msgTypeInfo';
 import { msgNameNode, msgNamespaceNode, msgTopLevelTypes } from './msgAst';
 import { childrenOfType } from '../parser/treeUtils';
+import { scopedNameCandidates } from '../cpp/scopedName';
 
 export interface MsgFileInfo {
   uri: string;
@@ -73,22 +74,18 @@ export class MsgResourceCache extends ResourceCacheBase<MsgFileInfo, MsgTypeInfo
     this.bySimple.clear(); // builtins are kept
   }
 
-  /** Resolve a MSG type name in a namespace context to a declared type. */
+  /**
+   * Resolve a MSG type name in a namespace context to a declared type with C++
+   * lookup rules (`scopedNameCandidates`); an unqualified name that still misses
+   * falls back to any namespace by simple name.
+   */
   lookupType(name: string, namespace: string): MsgTypeInfo | undefined {
-    const n = name.replace(/^::/, '');
-    if (n.includes('::')) {
-      return this.types.get(n);
-    }
-    // current namespace
-    if (namespace) {
-      const t = this.types.get(`${namespace}::${n}`);
+    for (const q of scopedNameCandidates(name, namespace)) {
+      const t = this.types.get(q);
       if (t) return t;
     }
-    // global namespace
-    const g = this.types.get(n);
-    if (g) return g;
-    // any namespace by simple name
-    const arr = this.bySimple.get(n);
+    if (name.includes('::')) return undefined;
+    const arr = this.bySimple.get(name);
     return arr && arr.length ? arr[0] : undefined;
   }
 

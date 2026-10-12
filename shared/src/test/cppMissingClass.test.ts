@@ -152,3 +152,32 @@ test('a subtype of an @class(-) type is checked when it declares its own @class'
   assert.equal(d.length, 1);
   assert.ok(/C\+\+ class 'Impl'/.test(d[0].message));
 });
+
+test('a qualified @class resolves relative to the @namespace (INET Dymo)', async () => {
+  const ctx = await build();
+  ctx.addCpp('file:///Dymo.cc', 'namespace inet { namespace dymo { Define_Module(Dymo); } }');
+  ctx.addNed('file:///Dymo.ned', 'package inet.routing.dymo;\n@namespace(inet);\nsimple Dymo { @class(dymo::Dymo); }');
+  assert.equal(nedMissingImplClassDiagnostics(ctx.db, ctx.nedCache, 'file:///Dymo.ned').length, 0);
+  assert.equal(ctx.db.findImplClass('inet.routing.dymo.Dymo')?.qualifiedName, 'inet::dymo::Dymo');
+});
+
+test('a qualified @class is looked up in the enclosing namespaces', async () => {
+  const ctx = await build();
+  ctx.addCpp('file:///Impl.cc', 'namespace a { namespace c { Define_Module(Impl); } }');
+  ctx.addNed('file:///Foo.ned', 'package demo;\n@namespace(a::b);\nsimple Foo { @class(c::Impl); }');
+  assert.equal(nedMissingImplClassDiagnostics(ctx.db, ctx.nedCache, 'file:///Foo.ned').length, 0);
+});
+
+test('a @class with a leading :: is looked up only in the global namespace', async () => {
+  const ctx = await build();
+  ctx.addCpp('file:///Impl.cc', 'namespace demo { Define_Module(Impl); }');
+  ctx.addNed('file:///Foo.ned', `${HDR}simple Foo { @class(::Impl); }`);
+  assert.equal(nedMissingImplClassDiagnostics(ctx.db, ctx.nedCache, 'file:///Foo.ned').length, 1);
+});
+
+test('a @class falls back to the omnetpp namespace', async () => {
+  const ctx = await build();
+  ctx.addCpp('file:///Chan.cc', 'namespace omnetpp { Define_Module(cSimpleThing); }');
+  ctx.addNed('file:///Foo.ned', `${HDR}simple Foo { @class(cSimpleThing); }`);
+  assert.equal(nedMissingImplClassDiagnostics(ctx.db, ctx.nedCache, 'file:///Foo.ned').length, 0);
+});

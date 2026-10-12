@@ -7,6 +7,7 @@
 // so `removeFile` fully forgets it.
 
 import { scanCpp, type CppClassDecl, type CppClassDef, type CppMemberAccess } from './cppScanner';
+import { scopedNameCandidates } from './scopedName';
 
 export interface CppFileInfo {
   uri: string;
@@ -96,20 +97,20 @@ export class CppResourceCache {
   }
 
   /**
-   * Resolve a (possibly unqualified) class name in a namespace context to an
-   * indexed registration. Mirrors `MsgResourceCache.lookupType`: exact qualified
-   * match, then `namespace::name`, then global, then any namespace by simple name.
+   * Resolve a class name in a namespace context to an indexed registration the
+   * way the kernel does (`scopedNameCandidates`, then `omnetpp::name`). An
+   * unqualified name that still misses falls back to any namespace by simple
+   * name, so an unusual namespace setup does not cause a false "missing class".
    */
   lookupClass(name: string, namespace: string): CppClassDecl | undefined {
-    const n = name.replace(/^::/, '');
-    if (n.includes('::')) return this.classByQualifiedName(n);
-    if (namespace) {
-      const q = this.classByQualifiedName(`${namespace}::${n}`);
-      if (q) return q;
+    const candidates = scopedNameCandidates(name, namespace);
+    if (!name.startsWith('::')) candidates.push(`omnetpp::${name}`);
+    for (const q of candidates) {
+      const c = this.classByQualifiedName(q);
+      if (c) return c;
     }
-    const g = this.classByQualifiedName(n);
-    if (g) return g;
-    const set = this.bySimple.get(n);
+    if (name.includes('::')) return undefined;
+    const set = this.bySimple.get(name);
     if (set && set.size) return this.classByQualifiedName([...set][0]);
     return undefined;
   }

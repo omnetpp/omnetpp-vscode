@@ -70,3 +70,14 @@ test('MSG duplicate field/type local diagnostics', async () => {
   assert.ok(diags.some((d) => /Duplicate field 'x'/.test(d.message)));
   assert.ok(diags.some((d) => /Duplicate type 'A'/.test(d.message)));
 });
+
+test('MSG qualified base type resolves in the enclosing namespaces (INET OSPF)', async () => {
+  const cache = await build({
+    'file:///base.msg': 'namespace inet::ospf;\nclass OspfPacketBase { int x; }',
+    'file:///p.msg': 'namespace inet::ospfv2;\nclass Ospfv2Packet extends ospf::OspfPacketBase { int y; }',
+    'file:///g.msg': 'namespace other;\nclass G extends ::inet::ospf::OspfPacketBase { }',
+  });
+  assert.equal(cache.getType('inet::ospfv2::Ospfv2Packet')!.superType()?.fqName, 'inet::ospf::OspfPacketBase');
+  assert.equal(cache.getType('other::G')!.superType()?.fqName, 'inet::ospf::OspfPacketBase');
+  assert.equal(cache.lookupType('::OspfPacketBase', 'inet::ospf'), undefined);
+});
