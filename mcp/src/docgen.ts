@@ -22,8 +22,9 @@ import {
   type GeneratedFile,
   type IncludeResolution,
   type NeddocOptions,
+  type NeddocResult,
 } from '@omnetpp/shared';
-import { createNodeIconProvider, loadExternalDocSets } from '@omnetpp/shared/node';
+import { NeddocOutputTracker, createNodeIconProvider, loadExternalDocSets } from '@omnetpp/shared/node';
 import { createDiskToolSetup, nedPathDirsFor } from './context.js';
 
 /** Injected by esbuild from package.json. */
@@ -59,8 +60,9 @@ Arguments:
 
 Options:
   -o <dir>            Output directory (default: <projectdir>/doc/neddoc).
-                      Existing files are overwritten but the directory is not
-                      cleaned first.
+                      Files of the previous run that this one does not write
+                      again are deleted (listed in its .neddoc-files); other
+                      files are left alone.
   --format=<fmt>      Output format: html (default) | html-readthedocs |
                       html-material | markdown | rst.
   --ned-path=<dirs>   Extra NED source roots for cross-file resolution
@@ -296,10 +298,13 @@ async function main(): Promise<void> {
   }
 
   let files = 0;
+  mkdirSync(outputDir, { recursive: true });
+  const output = new NeddocOutputTracker(outputDir);
   const emit = (file: GeneratedFile): void => {
     const target = join(outputDir, ...file.relativePath.split('/'));
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, file.content);
+    output.record(file.relativePath);
     files++;
   };
 
@@ -337,33 +342,39 @@ async function main(): Promise<void> {
   const statusLine = process.stderr.isTTY === true && !opts.verbose;
   let lastStatus = '';
   let statusWidth = 0;
-  const result = await generateNeddoc(
-    {
-      nedCache: index.nedCache,
-      msgCache: index.msgCache,
-      isTargetUri,
-      displayPath: (uri) => (uri.startsWith('file:') ? (projectRelative(fileURLToPath(uri)) ?? uri) : uri),
-    },
-    optionOverrides,
-    emit,
-    {
-      report: (step, done, total, percent) => {
-        if (statusLine) {
-          // self-updating status line on a TTY (throttled to visible changes)
-          const line = `[${String(Math.floor(percent)).padStart(3)}%] ${step} (${done}/${total})`;
-          if (line !== lastStatus) {
-            lastStatus = line;
-            process.stderr.write(`\r${line.padEnd(statusWidth)}`);
-            statusWidth = Math.max(statusWidth, line.length);
-          }
-        } else if (opts.verbose && step !== lastStep) {
-          lastStep = step;
-          log(step.toLowerCase());
-        }
+  let result: NeddocResult | undefined;
+  try {
+    result = await generateNeddoc(
+      {
+        nedCache: index.nedCache,
+        msgCache: index.msgCache,
+        isTargetUri,
+        displayPath: (uri) => (uri.startsWith('file:') ? (projectRelative(fileURLToPath(uri)) ?? uri) : uri),
       },
-    },
-    renderDiagram,
-  );
+      optionOverrides,
+      emit,
+      {
+        report: (step, done, total, percent) => {
+          if (statusLine) {
+            // self-updating status line on a TTY (throttled to visible changes)
+            const line = `[${String(Math.floor(percent)).padStart(3)}%] ${step} (${done}/${total})`;
+            if (line !== lastStatus) {
+              lastStatus = line;
+              process.stderr.write(`\r${line.padEnd(statusWidth)}`);
+              statusWidth = Math.max(statusWidth, line.length);
+            }
+          } else if (opts.verbose && step !== lastStep) {
+            lastStep = step;
+            log(step.toLowerCase());
+          }
+        },
+      },
+      renderDiagram,
+    );
+  } finally {
+    const removed = output.finish(result !== undefined);
+    if (removed.length > 0) log(`removed ${removed.length} file(s) of the previous run`);
+  }
   if (statusLine) process.stderr.write(`\r${' '.repeat(statusWidth)}\r`);
 
   for (const w of result.warnings) process.stderr.write(`opp_docgen: warning: ${w}\n`);

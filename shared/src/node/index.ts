@@ -6,3 +6,4 @@ export { createNodeIconProvider, sniffImageSize, listIconIds, type NodeIconProvi
 export { NodeRandomAccessFile, NodeRandomAccessFileProvider } from './nodeRandomAccessFile';
 export { loadExternalDocSets } from './externalDocSets';
 export { readNedPathSetting, resolveNedPath } from './nedPathSetting';
+export { NEDDOC_MANIFEST, NeddocOutputTracker } from './neddocOutput';

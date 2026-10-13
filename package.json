@@ -805,7 +805,7 @@
           "type": "string",
           "default": "doc/neddoc",
           "order": 2,
-          "markdownDescription": "Where the generated documentation is written; relative paths are resolved against the workspace folder. Existing files are overwritten, but the directory is not cleaned first."
+          "markdownDescription": "Where the generated documentation is written; relative paths are resolved against the workspace folder. Files of the previous run that this one does not write again are deleted (they are listed in `.neddoc-files`); other files are left alone."
         },
         "omnetpp.neddoc.title": {
           "type": "string",

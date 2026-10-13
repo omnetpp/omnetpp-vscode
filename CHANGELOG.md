@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **NED documentation removes its stale files**: each run lists the files it writes in
+  `.neddoc-files` in the output folder, and the next run deletes the listed files it does
+  not write again (pages of renamed or deleted types and files). Other files in the
+  folder are left alone
 - **Richer submodule tooltips in NED documentation**: in the module figures of the type
   pages, a submodule's tooltip also shows the description of its type (and of the `like`
   interface) and its source, as in the Eclipse IDE

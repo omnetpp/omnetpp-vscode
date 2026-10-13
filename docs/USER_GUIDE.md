@@ -648,8 +648,10 @@ command line as [`opp_docgen`](#opp_docgen--documentation-generator).
 `omnetpp.neddoc.format` setting preselects one). A progress notification shows the
 steps and can be canceled. When it is done, **Open** shows the documentation in your
 browser, and **Reveal in Explorer** shows the output folder (`omnetpp.neddoc.outputDirectory`,
-default `doc/neddoc`; existing files are overwritten, but the folder is not cleaned
-first). The other `omnetpp.neddoc.*` settings (see [Settings](#settings)) select the
+default `doc/neddoc`). Each run lists the files it writes in `.neddoc-files` in the
+output folder, and the next run deletes the listed files that it does not write again —
+pages of renamed or deleted types and files, for example. Files the generator did not
+write are never deleted, and a canceled or failed run deletes nothing. The other `omnetpp.neddoc.*` settings (see [Settings](#settings)) select the
 diagrams and sections, the title, excluded folders, a custom stylesheet, links to
 Doxygen-generated C++ documentation, and a file of extra content for the pages.
 
@@ -1023,7 +1025,7 @@ opp_docgen --ned-path=../inet/src \
 
 | Option | Meaning |
 | --- | --- |
-| `-o <dir>` | Output directory (default `<projectdir>/doc/neddoc`). Existing files are overwritten, but the directory is not cleaned first. |
+| `-o <dir>` | Output directory (default `<projectdir>/doc/neddoc`). Files of the previous run that this one does not write again are deleted (they are listed in `.neddoc-files`); other files are left alone. |
 | `--format=<fmt>` | `html` (default), `html-readthedocs`, `html-material`, `markdown`, or `rst`. |
 | `--ned-path=<dirs>` | Extra NED source roots; indexed, not documented. |
 | `--title=<text>` | Documentation title (default: the project directory name). |

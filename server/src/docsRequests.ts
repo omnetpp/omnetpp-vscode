@@ -18,8 +18,9 @@ import {
   type GeneratedFile,
   type IncludeResolution,
   type NeddocOptions,
+  type NeddocResult,
 } from '@omnetpp/shared';
-import { createNodeIconProvider, loadExternalDocSets } from '@omnetpp/shared/node';
+import { NeddocOutputTracker, createNodeIconProvider, loadExternalDocSets } from '@omnetpp/shared/node';
 import { iconDirs as computeIconDirs, safeFsPath, type ServerState } from './serverState';
 
 export function registerDocsRequests(connection: Connection, state: ServerState): void {
@@ -113,7 +114,10 @@ export function registerDocsRequests(connection: Connection, state: ServerState)
     }
 
     let files = 0;
+    await mkdir(outputDir, { recursive: true });
+    const output = new NeddocOutputTracker(outputDir);
     const emit = async (file: GeneratedFile): Promise<void> => {
+      output.record(file.relativePath);
       const target = join(outputDir, ...file.relativePath.split('/'));
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, file.content);
@@ -159,18 +163,23 @@ export function registerDocsRequests(connection: Connection, state: ServerState)
       cancelled: () => token.isCancellationRequested,
     };
 
-    const result = await generateNeddoc(
-      {
-        nedCache: index.cache,
-        msgCache: index.msgCache,
-        isTargetUri,
-        displayPath: (uri) => (uri.startsWith('file:') ? (projectRelative(safeFsPath(uri) ?? '') ?? uri) : uri),
-      },
-      optionOverrides,
-      emit,
-      progress,
-      createDiagramRenderer({ nedCache: index.cache, icons }),
-    );
+    let result: NeddocResult | undefined;
+    try {
+      result = await generateNeddoc(
+        {
+          nedCache: index.cache,
+          msgCache: index.msgCache,
+          isTargetUri,
+          displayPath: (uri) => (uri.startsWith('file:') ? (projectRelative(safeFsPath(uri) ?? '') ?? uri) : uri),
+        },
+        optionOverrides,
+        emit,
+        progress,
+        createDiagramRenderer({ nedCache: index.cache, icons }),
+      );
+    } finally {
+      output.finish(result !== undefined);
+    }
 
     const entry = params.format === 'markdown' ? 'index.md' : params.format === 'rst' ? 'index.rst' : 'index.html';
     return {
