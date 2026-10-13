@@ -1,15 +1,16 @@
 // Drives the bundled language server (dist/opp_lsp.js) the way a non-VS Code editor
 // does: no transport flag (stdio is the default) and, unless a case says otherwise,
-// no initializationOptions. Checks --help and where the NED path comes from:
+// no initializationOptions. Checks --help, --version, and where the NED path comes from:
 // --ned-path, OMNETPP_NED_PATH, and initializationOptions.nedPath taking precedence.
 import { spawn, spawnSync } from 'node:child_process';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const cli = join(root, 'dist', 'opp_lsp.js');
+const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 
 // Net uses Host, which lives in a library outside the workspace folder. Marker always
 // has an error, so its workspace marker tells us the index is ready.
@@ -103,6 +104,11 @@ try {
   assert(help.status === 0, `--help exited with ${help.status}`);
   assert(help.stdout.startsWith('opp_lsp — '), '--help text missing');
   console.log('--help: OK');
+
+  const ver = spawnSync(process.execPath, [cli, '--version'], { encoding: 'utf8' });
+  assert(ver.status === 0, `--version exited with ${ver.status}`);
+  assert(ver.stdout === `opp_lsp ${version}\n`, `unexpected --version output: ${ver.stdout}`);
+  console.log('--version: OK');
 
   const plain = await netDiagnostics();
   assert(unresolved(plain), `expected an unresolved Host without a NED path, got: ${plain.join('; ')}`);

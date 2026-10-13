@@ -1,16 +1,17 @@
 // Drives the bundled CLI linter (dist/opp_lint.js) against a throwaway project
 // and asserts: diagnostics are reported, inline suppression is honored, the JSON
-// shape is correct, exit codes follow --fail-on, and --agent-hook follows the agent
-// post-edit hook contract (stdin JSON, report on stderr, exit 2). Run after
-// `bun run dev:build`.
+// shape is correct, exit codes follow --fail-on, --version prints the package
+// version, and --agent-hook follows the agent post-edit hook contract (stdin JSON,
+// report on stderr, exit 2). Run after `bun run dev:build`.
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const cli = join(root, 'dist', 'opp_lint.js');
+const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 
 const proj = mkdtempSync(join(tmpdir(), 'opp-lint-'));
 writeFileSync(join(proj, 'Host.ned'), 'simple Host {\n  parameters:\n    int n;\n    int n;\n}\n');
@@ -55,6 +56,10 @@ try {
   const hasOneBased = data.files.every((f) => f.diagnostics.every((d) => d.line >= 1 && d.column >= 1));
   assert(hasOneBased, 'json line/column must be 1-based');
   console.log('json output: OK');
+
+  const ver = run(['--version']);
+  assert(ver.code === 0 && ver.out === `opp_lint ${version}\n`, `unexpected --version output: ${ver.out}`);
+  console.log('--version: OK');
 
   // 3) --fail-on=never → exit 0 despite errors
   assert(run(['--fail-on=never', proj]).code === 0, '--fail-on=never should exit 0');

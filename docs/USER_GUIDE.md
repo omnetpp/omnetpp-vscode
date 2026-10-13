@@ -866,7 +866,7 @@ variable. When neither is given, the tools use `omnetpp.nedPath` from the projec
 current directory for `opp_lint`), with relative entries resolved against that
 directory. A team can therefore commit one NED path that the IDE, the CLI tools and AI
 agents share. Quote the value in a shell if it contains `;`. Run any tool with `-h` /
-`--help` for its full usage.
+`--help` for its full usage, or with `--version` for its version.
 
 ### `opp_lint` — linter
 
@@ -897,6 +897,7 @@ opp_lint --ned-path=/opt/inet/src src/   # add libraries for cross-file resoluti
 | `--no-color` | Disable ANSI colors (also off when stdout is not a TTY, or when `NO_COLOR` is set). |
 | `--agent-hook` | Run as an AI agent post-edit hook (see below). |
 | `-h`, `--help` | Show help. |
+| `--version` | Show the version. |
 
 **Exit codes.** `0` — no diagnostics at/above `--fail-on`; `1` — diagnostics found
 at/above `--fail-on`; `2` — usage or runtime error.
@@ -958,6 +959,7 @@ opp_docgen --ned-path=../inet/src \
 | `-l`, `--external-docs=<list>` | Documentation of dependencies, as `<package>=<url-or-path>` items (see [Linking to the documentation of dependencies](#linking-to-the-documentation-of-dependencies)). |
 | `--verbose` | Print progress. |
 | `-h`, `--help` | Show help. |
+| `--version` | Show the version. |
 
 Icons for the module figures come from the `images/` folders of the project directories,
 then `$OMNETPP_ROOT/images`, then the bundled icon set.

@@ -26,6 +26,9 @@ import {
 import { createNodeIconProvider, loadExternalDocSets } from '@omnetpp/shared/node';
 import { createDiskToolSetup, nedPathDirsFor } from './context.js';
 
+/** Injected by esbuild from package.json. */
+declare const __OPP_VERSION__: string;
+
 interface CliOptions {
   projectDirs: string[];
   outputDir?: string;
@@ -92,6 +95,7 @@ Options:
                                  "not documented here".
   --verbose                      Print progress.
   -h, --help                     Show this help.
+  --version                      Show the version.
 
 Exit codes:
   0  documentation generated
@@ -136,6 +140,9 @@ function parseArgs(argv: string[]): CliOptions {
     const a = argv[i];
     if (a === '-h' || a === '--help') {
       process.stdout.write(`${USAGE}\n`);
+      process.exit(0);
+    } else if (a === '--version') {
+      process.stdout.write(`opp_docgen ${__OPP_VERSION__}\n`);
       process.exit(0);
     } else if (a === '-o') {
       const v = argv[++i];

@@ -4,6 +4,9 @@
 import { resolve } from 'node:path';
 import { readNedPathSetting, resolveNedPath, splitNedPath } from '@omnetpp/shared/node';
 
+/** Injected by esbuild from package.json. */
+declare const __OPP_VERSION__: string;
+
 const USAGE = `opp_lsp — language server for OMNeT++ NED, MSG and INI files
 
 Usage:
@@ -25,6 +28,7 @@ Options:
                       entries of the editor value and of the settings file are
                       resolved against the (first) workspace folder.
   -h, --help          Show this help.
+  --version           Show the version.
 
 Editor settings (all optional):
   initializationOptions:              { "nedPath": "...", "installDir": "...",
@@ -46,6 +50,9 @@ export function parseCommandLine(argv: string[], env: NodeJS.ProcessEnv): Comman
   for (const a of argv.slice(2)) {
     if (a === '-h' || a === '--help') {
       process.stdout.write(`${USAGE}\n`);
+      process.exit(0);
+    } else if (a === '--version') {
+      process.stdout.write(`opp_lsp ${__OPP_VERSION__}\n`);
       process.exit(0);
     } else if (a.startsWith('--ned-path=')) {
       nedPath = a.slice('--ned-path='.length);

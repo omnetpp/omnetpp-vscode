@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **`--version` for the command-line tools**: `opp_lint`, `opp_docgen`, `opp_ide_mcp`
+  and `opp_lsp` print their name and the package version (`opp_lint 1.0.0`)
 - **`opp_lsp` command-line tool**: the extension's language server, for other LSP
   editors (Neovim, Helix, Emacs, …). It speaks LSP over stdio by default and takes
   library NED roots from `--ned-path` or `OMNETPP_NED_PATH`. Installed with the other

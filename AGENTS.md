@@ -40,7 +40,7 @@ tsc projects inside the `client` workspace):
   (`NodeFileSystem` from `@omnetpp/shared/node`) into `shared`. Translates LSP requests into
   `shared` calls. Bundled to `dist/opp_lsp.js`, which the extension spawns as a child
   process over IPC and which also ships as the `opp_lsp` command-line tool for other LSP
-  editors (`commandLine.ts`: `--help`, `--ned-path`, stdio when no transport flag is
+  editors (`commandLine.ts`: `--help`, `--version`, `--ned-path`, stdio when no transport flag is
   given; keep stdout free of anything but LSP). Also serves
   the `omnetpp/mcp/listTools` / `omnetpp/mcp/callTool` custom requests by running
   `handleTool` against its **live** index (so MCP results reflect unsaved buffers).

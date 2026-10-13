@@ -19,6 +19,9 @@ import {
 } from '@omnetpp/shared';
 import { createDiskToolSetup, nedPathDirsFor } from './context.js';
 
+/** Injected by esbuild from package.json. */
+declare const __OPP_VERSION__: string;
+
 interface Options {
   paths: string[];
   nedPath: string | undefined;
@@ -77,6 +80,7 @@ Options:
                       there are diagnostics (default --severity=warning).
                       Path arguments are ignored.
   -h, --help          Show this help.
+  --version           Show the version.
 
 Exit codes:
   0  no diagnostics at or above the --fail-on level
@@ -102,6 +106,9 @@ function parseArgs(argv: string[]): Options {
   for (const a of argv) {
     if (a === '-h' || a === '--help') {
       process.stdout.write(`${USAGE}\n`);
+      process.exit(0);
+    } else if (a === '--version') {
+      process.stdout.write(`opp_lint ${__OPP_VERSION__}\n`);
       process.exit(0);
     } else if (a === '--no-color') {
       opts.color = false;

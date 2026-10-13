@@ -41,7 +41,8 @@ Options:
                       Defaults to the OMNETPP_NED_PATH environment variable,
                       then to "omnetpp.nedPath" in the first project's
                       .vscode/settings.json (relative to that project).
-  -h, --help          Show this help.`;
+  -h, --help          Show this help.
+  --version           Show the version.`;
 
 function parseArgs(argv: string[]): { roots: string[]; nedPathDirs: string[] } {
   const roots: string[] = [];
@@ -49,6 +50,9 @@ function parseArgs(argv: string[]): { roots: string[]; nedPathDirs: string[] } {
   for (const a of argv) {
     if (a === '-h' || a === '--help') {
       process.stdout.write(`${USAGE}\n`);
+      process.exit(0);
+    } else if (a === '--version') {
+      process.stdout.write(`opp_ide_mcp ${__OPP_VERSION__}\n`);
       process.exit(0);
     } else if (a.startsWith('--ned-path=')) nedPath = a.slice('--ned-path='.length);
     else if (a.startsWith('--')) continue;

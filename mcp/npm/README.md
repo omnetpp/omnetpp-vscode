@@ -37,7 +37,7 @@ To use `opp_ide_mcp`, register it as a stdio MCP server in your AI client, for e
 To use `opp_lsp`, configure it as the language server command for `*.ned`, `*.msg`,
 and `*.ini` files in your editor. It speaks LSP over stdin/stdout.
 
-Run any command with `--help` for all options. Library NED folders (for example the
+Run any command with `--help` for all options, or with `--version` for its version. Library NED folders (for example the
 INET Framework) can be given with `--ned-path=<dirs>` or the `OMNETPP_NED_PATH`
 environment variable.
 

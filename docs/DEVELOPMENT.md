@@ -151,7 +151,7 @@ and injects the Node filesystem (`NodeFileSystem` from `@omnetpp/shared/node`) i
 (with a node shebang), which the client spawns as a child process over IPC, and which
 also ships as the `opp_lsp` command-line tool for other LSP editors.
 `server/src/commandLine.ts` handles its command line before the connection is created:
-`--help`, `--ned-path=<dirs>` (else `OMNETPP_NED_PATH`, used when the editor sends no
+`--help`, `--version`, `--ned-path=<dirs>` (else `OMNETPP_NED_PATH`, used when the editor sends no
 `nedPath`), and `--stdio` when no transport flag is given. The server never writes to
 stdout, because stdout carries the LSP stream. It also serves the `omnetpp/mcp/listTools` /
 `omnetpp/mcp/callTool` custom requests by running `handleTool` against its **live** index
