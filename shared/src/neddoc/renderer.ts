@@ -37,9 +37,12 @@ export interface NeddocRenderer {
   auxFiles(ctx: RenderCtx): GeneratedFile[];
 }
 
-/** Default path scheme: type pages under types/, structural pages at the root. */
+/** Default path scheme: type pages under types/, file listings under files/,
+ *  structural pages at the root. */
 export function defaultPagePath(ref: DocPageRef, extension: string): string {
-  return ref.kind === 'nedtype' || ref.kind === 'msgtype' ? `types/${ref.id}${extension}` : `${ref.id}${extension}`;
+  if (ref.kind === 'nedtype' || ref.kind === 'msgtype') return `types/${ref.id}${extension}`;
+  if (ref.kind === 'file') return `files/${ref.id.replace(/^file-/, '')}${extension}`;
+  return `${ref.id}${extension}`;
 }
 
 export function dirOf(relativePath: string): string {

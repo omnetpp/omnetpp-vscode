@@ -123,6 +123,8 @@ export interface GenerateDocsParams {
   fullInheritanceDiagram?: boolean;
   messageDefinitions?: boolean;
   sourceListings?: boolean;
+  /** A page per NED/MSG file with its types and source. */
+  fileListings?: boolean;
   automaticHyperlinks?: boolean;
   includeBuiltins?: boolean;
   /** Absolute path of a stylesheet replacing the generated style.css. */

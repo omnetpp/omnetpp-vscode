@@ -28,6 +28,7 @@ import { parseNedComment, parseBriefComment, type CommentParseCtx, type DocBlock
 import {
   namespaceAnchor,
   packageAnchor,
+  pageIdForFile,
   pageIdForType,
   type DiagramRequest,
   type DocCell,
@@ -86,6 +87,14 @@ function defaultDisplayPath(uri: string): string {
   return uri.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/?/, '');
 }
 
+/** A NED/MSG file that gets a file listing page. */
+interface DocFile {
+  uri: string;
+  language: 'ned' | 'msg';
+  /** Display path: page title, nav label and the `filename` fragment key. */
+  path: string;
+}
+
 // ---------------------------------------------------------------------------
 // Extraction
 // ---------------------------------------------------------------------------
@@ -115,13 +124,28 @@ export async function extractDocModel(
           .sort((a, b) => a.fqName.localeCompare(b.fqName))
       : [];
 
-  const model = new Extraction(nedCache, input.msgCache, nedTypes, msgTypes, options, warnings, displayPath);
+  // all NED and MSG files, MSG ones even when MSG types are not documented
+  // (as in Eclipse), sorted by path ignoring case
+  const files: DocFile[] = options.fileListings
+    ? [
+        ...nedCache
+          .allFiles()
+          .filter((f) => f.uri !== BUILTIN_URI && isTarget(f.uri))
+          .map((f) => ({ uri: f.uri, language: 'ned' as const, path: displayPath(f.uri) })),
+        ...(input.msgCache?.allFiles() ?? [])
+          .filter((f) => isTarget(f.uri))
+          .map((f) => ({ uri: f.uri, language: 'msg' as const, path: displayPath(f.uri) })),
+      ].sort((a, b) => a.path.toLowerCase().localeCompare(b.path.toLowerCase()))
+    : [];
+
+  const model = new Extraction(nedCache, input.msgCache, nedTypes, msgTypes, files, options, warnings, displayPath);
   return model.run(onType);
 }
 
 class Extraction {
   private nedPageId = new Map<string, string>(); // ned fq -> page id
   private msgPageId = new Map<string, string>(); // msg fq -> page id
+  private filePageId = new Map<string, string>(); // file uri -> page id
   private typeNames = new Map<string, string[]>(); // referable name -> page ids
   private externalTypes = new Map<string, ExternalTypeRef>(); // page id -> dependency docs
   private externalTypeNames = new Map<string, string[]>(); // referable name -> external page ids
@@ -147,12 +171,14 @@ class Extraction {
     private msgCache: MsgResourceCache | undefined,
     private nedTypes: NedTypeInfo[],
     private msgTypes: MsgTypeInfo[],
+    private files: DocFile[],
     private options: NeddocOptions,
     private warnings: string[],
     private displayPath: (uri: string) => string,
   ) {
     for (const t of nedTypes) this.nedPageId.set(t.fqName, pageIdForType(t.fqName, 'ned'));
     for (const t of msgTypes) this.msgPageId.set(t.fqName, pageIdForType(t.fqName, 'msg'));
+    for (const f of files) this.filePageId.set(f.uri, pageIdForFile(f.path));
     if (options.doxytags) this.doxyMap = parseDoxyTags(options.doxytags.xml);
     this.fragments = new DocFragmentSet(parseDocFragments(options.docFragments ?? [], warnings));
     this.collectExternalTypes();
@@ -187,6 +213,10 @@ class Extraction {
       this.pages.push(this.msgTypePage(t));
     }
     onType?.(total, total);
+    for (const f of this.files) {
+      await maybeYield();
+      this.pages.push(this.filePage(f));
+    }
     this.pages.push(...this.fullDiagramPages());
     this.pages.unshift(this.indexPage(), ...this.packagesPage(), ...this.namespacesPage());
     this.reportUnusedFragments();
@@ -372,11 +402,14 @@ class Extraction {
   private reportUnusedFragments(): void {
     const unused = this.fragments.unused();
     const fileFragments = unused.filter((f) => f.target === 'filename');
-    if (fileFragments.length > 0) {
+    if (fileFragments.length > 0 && !this.options.fileListings) {
       const n = fileFragments.length;
       this.warnings.push(
-        `${n} doc fragment${n === 1 ? '' : 's'} with a filename attribute skipped: file listing pages are not generated (first at ${fileFragments[0].location})`,
+        `${n} doc fragment${n === 1 ? '' : 's'} with a filename attribute skipped: file listings are turned off (first at ${fileFragments[0].location})`,
       );
+    } else {
+      for (const f of fileFragments)
+        this.warnings.push(`${f.location}: no documented NED or MSG file '${f.key}' (doc fragment skipped)`);
     }
     const groupNames = (names: string[]) => new Set(names.flatMap((n) => (n ? [n] : ['(default)', 'default'])));
     const packages = groupNames(this.nedTypes.map((t) => t.packageName));
@@ -878,16 +911,22 @@ class Extraction {
       const banner = leadingDocCommentRaw(t.node);
       sections.push({ kind: 'source', language: 'ned', code: (banner ? banner + '\n' : '') + t.node.text });
     }
-    sections.push({
-      kind: 'para',
-      cells:
-        t.file.uri === BUILTIN_URI
-          ? [{ kind: 'text', text: 'File: Built-in type' }]
-          : [{ kind: 'text', text: `File: ${this.displayPath(t.file.uri)}` }],
-    });
+    sections.push(
+      t.file.uri === BUILTIN_URI ? { kind: 'para', cells: [{ kind: 'text', text: 'File: Built-in type' }] } : this.fileLine(t.file.uri),
+    );
     sections.push(...frag('bottom'));
 
     return { ref: { id: pageId, title: t.simpleName, kind: 'nedtype' }, sections };
+  }
+
+  /** "File: <path>", linked to the file listing when there is one. */
+  private fileLine(uri: string): DocSection {
+    const path = this.displayPath(uri);
+    const page = this.filePageId.get(uri);
+    return {
+      kind: 'para',
+      cells: page ? [{ kind: 'text', text: 'File: ' }, { kind: 'link', text: path, page }] : [{ kind: 'text', text: `File: ${path}` }],
+    };
   }
 
   private typesTableUnresolved(name: string): DocSection {
@@ -1181,7 +1220,7 @@ class Extraction {
       sections.push({ kind: 'subheading', text: 'Source code', anchor: 'source' });
       sections.push({ kind: 'source', language: 'msg', code: t.node.text });
     }
-    sections.push({ kind: 'para', cells: [{ kind: 'text', text: `File: ${this.displayPath(t.file.uri)}` }] });
+    sections.push(this.fileLine(t.file.uri));
     sections.push(...frag('bottom'));
 
     return { ref: { id: pageId, title: t.simpleName, kind: 'msgtype' }, sections };
@@ -1258,6 +1297,33 @@ class Extraction {
       { kind: 'subheading', text: 'Properties', anchor: 'properties' },
       { kind: 'table', cssClass: 'propertiestable', columns: ['Name', 'Value', 'Description'], rows },
     ];
+  }
+
+  // ---- file listing page (Eclipse generateFilePages) ----
+
+  private filePage(file: DocFile): DocPage {
+    this.currentUri = file.uri;
+    const frag = (anchor: string) => this.fragment('filename', file.path, anchor);
+    const sections: DocSection[] = [...frag('top')];
+    const isNed = file.language === 'ned';
+    const tree = isNed ? this.nedCache.getFile(file.uri)?.tree : this.msgCache?.getFile(file.uri)?.tree;
+    const types = isNed
+      ? this.nedCache
+          .typesInFile(file.uri)
+          .filter((t) => !t.isInnerType && t.file.uri === file.uri)
+          .map((t) => this.nedTypeRef(t))
+      : (this.msgCache?.typesInFile(file.uri) ?? []).filter((t) => t.file.uri === file.uri).map((t) => this.msgTypeRef(t));
+    if (types.length > 0) sections.push(this.typesTable(types));
+    sections.push(...frag('after-types'));
+    if (tree) {
+      // the root node starts at the first token, so restore that line's indentation
+      const root = tree.rootNode;
+      sections.push({ kind: 'subheading', text: 'Source code', anchor: 'source' });
+      sections.push({ kind: 'source', language: file.language, code: (' '.repeat(root.startPosition.column) + root.text).trimEnd() });
+    }
+    sections.push(...frag('bottom'));
+    const title = `${isNed ? 'NED' : 'MSG'} File ${file.path}`;
+    return { ref: { id: this.filePageId.get(file.uri)!, title, kind: 'file' }, sections };
   }
 
   // ---- structural pages ----
@@ -1400,6 +1466,9 @@ class Extraction {
       }
       if (msgDefs.children.length) root.children.push(msgDefs);
     }
+
+    if (this.files.length > 0)
+      root.children.push({ title: 'Files', children: this.files.map((f) => leaf(f.path, this.filePageId.get(f.uri)!)) });
 
     return root;
   }

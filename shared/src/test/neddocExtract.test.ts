@@ -302,7 +302,7 @@ test('neddoc extract: ~refs in descriptions resolve to page ids', async () => {
 test('neddoc extract: nav tree categories and search index', async () => {
   const model = await extract(await buildInput({ 'file:///lib.ned': LIB, 'file:///net.ned': NET }, { 'file:///p.msg': MSG }));
   const titles = model.navRoot.children.map((n) => n.title);
-  assert.deepEqual(titles, ['Overview', 'Packages', 'Networks', 'Modules', 'Module Interfaces', 'Namespaces', 'Message Definitions']);
+  assert.deepEqual(titles, ['Overview', 'Packages', 'Networks', 'Modules', 'Module Interfaces', 'Namespaces', 'Message Definitions', 'Files']);
   const networks = model.navRoot.children.find((n) => n.title === 'Networks')!;
   assert.deepEqual(networks.children.map((c) => c.title), ['Net']);
   const msgDefs = model.navRoot.children.find((n) => n.title === 'Message Definitions')!;

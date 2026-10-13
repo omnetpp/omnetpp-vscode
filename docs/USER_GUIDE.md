@@ -638,7 +638,8 @@ not pick up changes.
 **Feature.** **"OMNeT++: Generate NED Documentation"** documents the NED and MSG types of
 the workspace folder (the first one, in a multi-root workspace): one page per type with
 its documentation comment, parameters, gates, module figure, usage and inheritance
-diagrams, and source listing. Output formats: **HTML** (a static site with navigation and
+diagrams, and source listing, plus one page per NED/MSG file with its types and full
+source. Output formats: **HTML** (a static site with navigation and
 search), **HTML (Read the Docs)**, **HTML (Material)** (the Eclipse IDE's neddoc look),
 **Markdown**, and **reStructuredText** (Sphinx-ready). The same generator runs on the
 command line as [`opp_docgen`](#opp_docgen--documentation-generator).
@@ -713,6 +714,7 @@ on that page, and its text (usually a CDATA section) is inserted there:
 | `nedtype="<fully qualified NED type>"` | NED type page | `top`, `after-description`, `after-image`, `after-diagrams`, `after-usage`, `after-inheritance`, `after-parameters`, `after-properties`, `after-gates`, `after-signals`, `after-statistics`, `after-unassigned-parameters`, `bottom` |
 | `msgtype="<C++ qualified MSG type>"` (e.g. `inet::Packet`) | MSG type page | `top`, `after-description`, `after-diagrams`, `after-inheritance`, `after-fields`, `after-properties`, `bottom` |
 | `nedtype="<package>"` / `msgtype="<namespace>"` | the package's / namespace's section of the Packages / Namespaces page | `top` (under the heading), `bottom` (under the type table) |
+| `filename="<file path>"` (e.g. `src/inet/node/inet/StandardHost.ned`, relative to the project folder) | the file's page | `top`, `after-types`, `bottom` |
 
 An anchor exists even when the section it follows is missing from the page (for example
 `after-gates` on a channel page). The content is NED comment markup, as in a doc comment:
@@ -720,9 +722,9 @@ HTML tags, type names that become links, `- ` lists, and blank lines between par
 The indentation common to all its lines is removed first. Fragments with the same page
 and anchor are inserted in file order.
 
-The generator does not produce the Eclipse IDE's file listing pages, so fragments with a
-`filename` attribute are skipped. It warns about them, and about fragments whose type,
-package, namespace or anchor does not exist, and about a malformed file.
+The generator warns about fragments whose type, package, namespace, file or anchor does
+not exist, about `filename` fragments when file listings are turned off, and about a
+malformed file.
 
 ### AI agents: the live MCP bridge
 
@@ -842,6 +844,7 @@ and `opp_lsp` on your `PATH` without a separate download — see
 | `omnetpp.neddoc.fullInheritanceDiagram` | `false` | Project-wide inheritance diagram pages (can get large). |
 | `omnetpp.neddoc.messageDefinitions` | `true` | Document MSG types too. |
 | `omnetpp.neddoc.sourceListings` | `true` | Include the NED/MSG source of each type. |
+| `omnetpp.neddoc.fileListings` | `true` | Generate a page per NED/MSG file with its types and full source; the `File:` line of type pages links to it. |
 | `omnetpp.neddoc.automaticHyperlinks` | `true` | Link every known type name in doc comments; when off, only `~Name` references are linked. |
 | `omnetpp.neddoc.includeBuiltins` | `false` | Also document the built-in NED types. |
 | `omnetpp.neddoc.customCss` | `""` | Stylesheet that replaces the generated `style.css` (HTML formats). |
@@ -994,6 +997,7 @@ opp_docgen --ned-path=../inet/src \
 | `--[no-]full-inheritance-diagrams` | Project-wide inheritance diagram (default off). |
 | `--[no-]message-definitions` | Document MSG types (default on). |
 | `--[no-]source-snippets` | Per-type source listings (default on). |
+| `--[no-]file-listings` | A page per NED/MSG file with its types and source (default on). `--[no-]source-files`, the Eclipse IDE's name, also works. |
 | `--[no-]automatic-hyperlinks` | Link all known type names in comments; when off, only `~` references (default on). |
 | `--include-builtins` | Document the built-in NED types too. |
 | `--custom-css=<file>` | Stylesheet that replaces the generated `style.css` (HTML formats). |

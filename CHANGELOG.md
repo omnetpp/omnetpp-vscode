@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **File listings in NED documentation**: as in the Eclipse IDE, a page per NED/MSG file
+  with its types and full source, a "Files" section in the navigation, and `File:`
+  lines on type pages that link to it. On by default; `omnetpp.neddoc.fileListings`,
+  `opp_docgen --no-file-listings`. Doc fragments with a `filename` attribute now go there
 - **Doc fragments for NED documentation**: the Eclipse IDE's doc fragments file
   (`<docfragments>` XML) inserts extra content at fixed anchors of the type, package and
   namespace pages. Set it with `omnetpp.neddoc.fragmentsFile` or `opp_docgen -f <file>`

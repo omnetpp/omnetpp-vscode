@@ -9,7 +9,7 @@ import type { DocBlock } from './commentAst';
 import type { DocGraph } from './graphDiagram';
 import type { ExternalTypeRef } from './externalDocs';
 
-export type PageKind = 'index' | 'packages' | 'namespaces' | 'nedtype' | 'msgtype' | 'fulldiagram';
+export type PageKind = 'index' | 'packages' | 'namespaces' | 'nedtype' | 'msgtype' | 'file' | 'fulldiagram';
 
 export interface DocPageRef {
   /** Stable page id; the renderer derives the output path from it. Type pages
@@ -107,6 +107,12 @@ export interface DocModel {
 export function pageIdForType(fqName: string, language: 'ned' | 'msg'): string {
   const id = fqName.replace(/::/g, '--');
   return language === 'msg' ? `msg-${id}` : id;
+}
+
+/** Page id for a NED/MSG file listing: the project-relative path with `/`
+ *  mapped to `-` (the Eclipse file name), prefixed to stay apart from type ids. */
+export function pageIdForFile(path: string): string {
+  return `file-${path.replace(/\//g, '-')}`;
 }
 
 /** Anchor id for a package on the packages page (dots become underscores,

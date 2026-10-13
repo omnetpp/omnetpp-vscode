@@ -98,7 +98,7 @@ test('neddoc html: nav and search data are valid JS with expected entries', asyn
   const nav = files.find((f) => f.relativePath === 'assets/navtree-data.js')!.content as string;
   const navJson = JSON.parse(nav.replace('window.NEDDOC_NAV = ', '').replace(/;\n$/, ''));
   const titles = navJson.c.map((n: { t: string }) => n.t);
-  assert.deepEqual(titles, ['Overview', 'Packages', 'Networks', 'Modules']);
+  assert.deepEqual(titles, ['Overview', 'Packages', 'Networks', 'Modules', 'Files']);
 
   const search = files.find((f) => f.relativePath === 'assets/search-data.js')!.content as string;
   const searchJson = JSON.parse(search.replace('window.NEDDOC_SEARCH = ', '').replace(/;\n$/, ''));

@@ -79,6 +79,9 @@ Options:
   --[no-]full-inheritance-diagrams  Project-wide inheritance diagram (default: off).
   --[no-]message-definitions     Document MSG types (default: on).
   --[no-]source-snippets         Per-type source listings (default: on).
+  --[no-]file-listings           A page per NED/MSG file with its types and
+                                 source (default: on). Also accepted as
+                                 --[no-]source-files (the Eclipse name).
   --[no-]automatic-hyperlinks    Link all known type names in comments; when
                                  off, only ~tilde references (default: on).
   --include-builtins             Document the built-in NED types too.
@@ -88,8 +91,8 @@ Options:
   --doxy-url-prefix=<url>        URL prefix for doxygen links.
   -f, --fragments=<file>         Doc fragments file (as in the Eclipse IDE): XML
                                  <docfragment> elements whose content is
-                                 inserted at anchors of type, package and
-                                 namespace pages; repeatable.
+                                 inserted at anchors of type, file, package
+                                 and namespace pages; repeatable.
   -l, --external-docs=<list>     Documentation of dependencies generated
                                  separately: <package>=<url-or-path> items,
                                  comma- or space-separated; repeatable. A path
@@ -120,7 +123,8 @@ const BOOL_TOGGLES: Record<string, keyof NeddocOptions> = {
   'full-inheritance-diagrams': 'fullInheritanceDiagrams',
   'message-definitions': 'messageDefinitions',
   'source-snippets': 'sourceSnippets',
-  'source-files': 'sourceFiles',
+  'file-listings': 'fileListings',
+  'source-files': 'fileListings',
   'automatic-hyperlinks': 'automaticHyperlinks',
 };
 

@@ -864,16 +864,22 @@
           "order": 16,
           "markdownDescription": "Include the NED/MSG source of each type on its page."
         },
-        "omnetpp.neddoc.automaticHyperlinks": {
+        "omnetpp.neddoc.fileListings": {
           "type": "boolean",
           "default": true,
           "order": 17,
+          "markdownDescription": "Generate a page for each NED/MSG file, listing its types and its full source. The `File:` line of type pages links to it."
+        },
+        "omnetpp.neddoc.automaticHyperlinks": {
+          "type": "boolean",
+          "default": true,
+          "order": 18,
           "markdownDescription": "Automatically hyperlink every known type name mentioned in doc comments (`\\Name` suppresses a link). When off, only `~Name` tilde references are linked and unknown `~name`s are flagged."
         },
         "omnetpp.neddoc.includeBuiltins": {
           "type": "boolean",
           "default": false,
-          "order": 18,
+          "order": 19,
           "markdownDescription": "Also document the built-in NED types (`ned.DelayChannel`, `ned.DatarateChannel`, ...)."
         },
         "omnetpp.neddoc.customCss": {
@@ -907,7 +913,7 @@
           "type": "string",
           "default": "",
           "order": 24,
-          "markdownDescription": "Path to a doc fragments file (the Eclipse IDE's \"Doc fragments file\"), relative to the workspace folder: XML `<docfragment nedtype|msgtype|filename=\"...\" anchor=\"...\">` elements whose content (NED comment markup) is inserted at that anchor of the type, package or namespace page. See the User Guide for the anchors."
+          "markdownDescription": "Path to a doc fragments file (the Eclipse IDE's \"Doc fragments file\"), relative to the workspace folder: XML `<docfragment nedtype|msgtype|filename=\"...\" anchor=\"...\">` elements whose content (NED comment markup) is inserted at that anchor of the type, file, package or namespace page. See the User Guide for the anchors."
         },
         "omnetpp.diagnostics.scope": {
           "type": "string",

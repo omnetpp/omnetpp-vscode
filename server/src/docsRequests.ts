@@ -76,6 +76,7 @@ export function registerDocsRequests(connection: Connection, state: ServerState)
       fullInheritanceDiagrams: params.fullInheritanceDiagram ?? false,
       messageDefinitions: params.messageDefinitions ?? true,
       sourceSnippets: params.sourceListings ?? true,
+      fileListings: params.fileListings ?? true,
       automaticHyperlinks: params.automaticHyperlinks ?? true,
       includeBuiltins: params.includeBuiltins ?? false,
     };

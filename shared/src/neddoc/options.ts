@@ -27,8 +27,8 @@ export interface NeddocOptions {
   messageDefinitions: boolean;
   /** Include the type's NED/MSG source on its page. */
   sourceSnippets: boolean;
-  /** Generate per-file pages with full source listings (not yet implemented). */
-  sourceFiles: boolean;
+  /** A page per NED/MSG file: its types and full source (Eclipse: file listings). */
+  fileListings: boolean;
   /** true: link every known type name in comments; false: only ~tilde refs. */
   automaticHyperlinks: boolean;
   /** Document the built-in NED declarations (ned.DelayChannel etc.). */
@@ -104,7 +104,7 @@ export function defaultNeddocOptions(): NeddocOptions {
     fullInheritanceDiagrams: false,
     messageDefinitions: true,
     sourceSnippets: true,
-    sourceFiles: true,
+    fileListings: true,
     automaticHyperlinks: true,
     includeBuiltins: false,
     excludePatterns: [],

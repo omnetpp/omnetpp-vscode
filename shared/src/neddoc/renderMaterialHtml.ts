@@ -64,9 +64,11 @@ export class MaterialHtmlRenderer implements NeddocRenderer {
   }
 
   /** Eclipse flat naming: everything at the output root; type pages named by
-   *  fq name, MSG C++ `::` becomes `-` (getOutputFileName). */
+   *  fq name, MSG C++ `::` becomes `-` (getOutputFileName), file listings by
+   *  path with `/` as `-` (getOutputBaseNameForFile). */
   pagePath(ref: DocPageRef): string {
     if (ref.kind === 'msgtype') return ref.id.replace(/^msg-/, '').replace(/--/g, '-') + this.pageExtension;
+    if (ref.kind === 'file') return ref.id.replace(/^file-/, '') + this.pageExtension;
     return `${ref.id}${this.pageExtension}`;
   }
 

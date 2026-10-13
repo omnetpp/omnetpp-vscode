@@ -34,7 +34,7 @@ async function buildInput(): Promise<NeddocInput> {
   nedCache.addFile('file:///Plain.ned', svc.parse('ned', 'simple Plain {}\n'), '');
   const msgCache = new MsgResourceCache();
   msgCache.addFile('file:///demo/Pkt.msg', svc.parse('msg', MSG));
-  return { nedCache, msgCache };
+  return { nedCache, msgCache, displayPath: (uri) => uri.replace(/^file:\/\/\//, '') };
 }
 
 function fragmentsXml(...items: string[]): string {
@@ -206,15 +206,26 @@ test('fragments: fragments that are not inserted are reported', async () => {
       frag('nedtype="demo.Nope" anchor="top"', 'x'),
       frag('nedtype="demo" anchor="after-gates"', 'x'),
       frag('msgtype="demo::Nope" anchor="top"', 'x'),
-      frag('filename="demo/Host.ned" anchor="top"', 'x'),
-      frag('filename="demo/Pkt.msg" anchor="bottom"', 'x'),
+      frag('filename="demo/Nope.ned" anchor="top"', 'x'),
     ),
   );
   assert.equal(model.warnings.length, 4, model.warnings.join('\n'));
-  assert.match(model.warnings[0], /^2 doc fragments with a filename attribute skipped: file listing pages are not generated \(first at frags\.xml:7\)$/);
+  assert.match(model.warnings[0], /^frags\.xml:7: no documented NED or MSG file 'demo\/Nope\.ned'/);
   assert.match(model.warnings[1], /^frags\.xml:4: no documented NED type or package 'demo\.Nope'/);
   assert.match(model.warnings[2], /^frags\.xml:5: anchor "after-gates" does not exist on the package section of 'demo'/);
   assert.match(model.warnings[3], /^frags\.xml:6: no documented message type or namespace 'demo::Nope'/);
+});
+
+test('fragments: filename fragments are skipped when file listings are off', async () => {
+  const xml = fragmentsXml(frag('filename="demo/Host.ned" anchor="top"', 'x'), frag('filename="demo/Pkt.msg" anchor="bottom"', 'x'));
+  const model = await extractDocModel(await buildInput(), {
+    ...defaultNeddocOptions(),
+    fileListings: false,
+    docFragments: [{ source: 'frags.xml', xml }],
+  });
+  assert.deepEqual(model.warnings, [
+    '2 doc fragments with a filename attribute skipped: file listings are turned off (first at frags.xml:4)',
+  ]);
 });
 
 test('fragments: rendered in the html, Read the Docs, Markdown and RST formats', async () => {

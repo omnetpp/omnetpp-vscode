@@ -43,6 +43,7 @@ function paramsFromSettings(folder: vscode.WorkspaceFolder, format: DocFormat): 
     fullInheritanceDiagram: cfg.get<boolean>('fullInheritanceDiagram', false),
     messageDefinitions: cfg.get<boolean>('messageDefinitions', true),
     sourceListings: cfg.get<boolean>('sourceListings', true),
+    fileListings: cfg.get<boolean>('fileListings', true),
     automaticHyperlinks: cfg.get<boolean>('automaticHyperlinks', true),
     includeBuiltins: cfg.get<boolean>('includeBuiltins', false),
     customCssPath: resolvePath(cfg.get<string>('customCss', '')),
