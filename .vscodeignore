@@ -20,6 +20,10 @@ resources/**
 **/tsconfig*.json
 tsconfig.base.json
 esbuild.mjs
+bun.lock
+bunfig.toml
+AGENTS.md
+docs/DEVELOPMENT.md
 .gitignore
 .gitmodules
 vsc-extension-quickstart.md
@@ -32,3 +36,6 @@ omnetpp-vscode.code-workspace
 # local agent/editor state and scratch files (vsce packs from disk, not from git)
 .devin/**
 scratchpad/**
+# prevent dotfiles and dorfolders from inclusion by vsce
+.*
+.*/**
