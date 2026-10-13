@@ -14,6 +14,7 @@ import type { DocFormat } from './options';
 import type { NeddocRenderer, RenderCtx, GeneratedFile } from './renderer';
 import { EXTERNAL_TYPE_CSS, defaultPagePath, dirOf, externalHref, externalTypeHtml, pageById, relativeRef } from './renderer';
 import { isAbsoluteUrl } from './externalDocs';
+import { SOURCE_HIGHLIGHT_CSS, highlightSourceHtml } from './sourceHighlight';
 
 export class HtmlRenderer implements NeddocRenderer {
   // widened so themed subclasses (RtdHtmlRenderer) can set their own format
@@ -141,13 +142,13 @@ ${heading}${body}
         return `<div class="diagram"><img src="${escapeHtmlAll(relativeRef(fromDir, section.image))}" alt="${escapeHtmlAll(section.title)}"></div>`;
       }
       case 'source':
-        return `<pre class="src src-${section.language}">${escapeHtmlAll(section.code)}</pre>`;
+        return `<pre class="src src-${section.language}">${highlightSourceHtml(section.code, section.language, 'class')}</pre>`;
     }
   }
 
   auxFiles(ctx: RenderCtx): GeneratedFile[] {
     return [
-      { relativePath: 'assets/style.css', content: ctx.options.customCss ?? this.styleCss() + EXTERNAL_TYPE_CSS },
+      { relativePath: 'assets/style.css', content: ctx.options.customCss ?? this.styleCss() + EXTERNAL_TYPE_CSS + SOURCE_HIGHLIGHT_CSS },
       { relativePath: 'assets/neddoc.js', content: NEDDOC_JS },
       {
         relativePath: 'assets/navtree-data.js',

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Highlighted source listings in NED documentation**: the NED and MSG sources on type
+  and file pages are colored like in the Eclipse IDE (keywords, types, strings, comments,
+  doc tags, `TODO` in private comments) in the HTML formats
 - **Overview and topic pages in NED documentation**: as in the Eclipse IDE, a file
   comment with `@titlepage` replaces the generated overview page, `@page <file>, <title>`
   adds a page, and `@externalpage <file>, <title>` a link; pages and links appear under

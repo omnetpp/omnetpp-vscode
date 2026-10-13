@@ -639,7 +639,7 @@ not pick up changes.
 the workspace folder (the first one, in a multi-root workspace): one page per type with
 its documentation comment, parameters, gates, module figure, usage and inheritance
 diagrams, and source listing, plus one page per NED/MSG file with its types and full
-source. Output formats: **HTML** (a static site with navigation and
+source. The HTML formats color the source listings as the Eclipse IDE does. Output formats: **HTML** (a static site with navigation and
 search), **HTML (Read the Docs)**, **HTML (Material)** (the Eclipse IDE's neddoc look),
 **Markdown**, and **reStructuredText** (Sphinx-ready). The same generator runs on the
 command line as [`opp_docgen`](#opp_docgen--documentation-generator).

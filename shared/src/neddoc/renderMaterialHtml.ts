@@ -13,6 +13,7 @@ import type { DocCell, DocModel, DocPage, DocPageRef, DocSection, NavNode } from
 import type { GeneratedFile, NeddocRenderer, RenderCtx } from './renderer';
 import { EXTERNAL_TYPE_CSS, externalHref, pageById, topicBaseName } from './renderer';
 import { htmlEmitOpts, type LinkingEmitOpts } from './renderHtml';
+import { highlightSourceHtml } from './sourceHighlight';
 
 /** Chip colors of HtmlRenderer.typeSectionHeading(). */
 const CHIP_COLORS: Record<string, string> = {
@@ -161,7 +162,8 @@ export class MaterialHtmlRenderer implements NeddocRenderer {
         // images live at the root in material layout (strip the images/ prefix)
         return `<object type="image/svg+xml" data="${escapeHtmlAll(materialImageName(section.image))}"></object>`;
       case 'source':
-        return `<pre class="src">${escapeHtmlAll(section.code)}</pre>`;
+        // inline styles, as HtmlRenderer.styled() writes them
+        return `<pre class="src">${highlightSourceHtml(section.code, section.language, 'inline')}</pre>`;
     }
   }
 
