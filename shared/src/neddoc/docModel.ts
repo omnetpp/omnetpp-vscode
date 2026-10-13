@@ -9,7 +9,7 @@ import type { DocBlock } from './commentAst';
 import type { DocGraph } from './graphDiagram';
 import type { ExternalTypeRef } from './externalDocs';
 
-export type PageKind = 'index' | 'packages' | 'namespaces' | 'nedtype' | 'msgtype' | 'file' | 'fulldiagram';
+export type PageKind = 'index' | 'packages' | 'namespaces' | 'nedtype' | 'msgtype' | 'file' | 'topic' | 'fulldiagram';
 
 export interface DocPageRef {
   /** Stable page id; the renderer derives the output path from it. Type pages
@@ -58,6 +58,9 @@ export type DocSection =
 export interface DocPage {
   ref: DocPageRef;
   sections: DocSection[];
+  /** The content brings its own heading (an `@titlepage`): renderers that
+   *  can do without one print no page heading. */
+  ownHeading?: boolean;
 }
 
 /** Navigation-tree node (drives the HTML sidebar, Markdown SUMMARY.md and the
@@ -66,6 +69,9 @@ export interface NavNode {
   title: string;
   page?: string;
   anchor?: string;
+  /** A link to something not generated (`@externalpage`): an absolute URL or
+   *  a path relative to the output root. */
+  href?: string;
   children: NavNode[];
 }
 
@@ -113,6 +119,11 @@ export function pageIdForType(fqName: string, language: 'ned' | 'msg'): string {
  *  mapped to `-` (the Eclipse file name), prefixed to stay apart from type ids. */
 export function pageIdForFile(path: string): string {
   return `file-${path.replace(/\//g, '-')}`;
+}
+
+/** Page id for an `@page` topic page, from its sanitized `.html` file name. */
+export function pageIdForTopic(fileName: string): string {
+  return `page-${fileName.replace(/\.html$/, '')}`;
 }
 
 /** Anchor id for a package on the packages page (dots become underscores,

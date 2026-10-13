@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Overview and topic pages in NED documentation**: as in the Eclipse IDE, a file
+  comment with `@titlepage` replaces the generated overview page, `@page <file>, <title>`
+  adds a page, and `@externalpage <file>, <title>` a link; pages and links appear under
+  "Selected Topics" in the navigation
 - **File listings in NED documentation**: as in the Eclipse IDE, a page per NED/MSG file
   with its types and full source, a "Files" section in the navigation, and `File:`
   lines on type pages that link to it. On by default; `omnetpp.neddoc.fileListings`,

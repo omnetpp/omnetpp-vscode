@@ -138,6 +138,12 @@ function expandIncludes(comment: string, ctx: CommentParseCtx, fromId: string | 
   });
 }
 
+/** Expand the `@include` directives of a raw comment (for callers that
+ *  split the expanded text before parsing it, like the `@page` pages). */
+export function expandCommentIncludes(raw: string, ctx: CommentParseCtx): string {
+  return expandIncludes(raw.replace(/\r/g, ''), ctx, undefined, []);
+}
+
 // ---------------------------------------------------------------------------
 // Main entry points
 // ---------------------------------------------------------------------------

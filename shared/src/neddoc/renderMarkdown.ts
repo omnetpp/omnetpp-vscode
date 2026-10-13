@@ -39,7 +39,7 @@ export class MarkdownRenderer implements NeddocRenderer {
       },
       typeRef: externalRef,
     };
-    const out: string[] = [`# ${escapeMdText(page.ref.title)}`];
+    const out: string[] = page.ownHeading ? [] : [`# ${escapeMdText(page.ref.title)}`];
     for (const section of page.sections) {
       const rendered = this.renderSection(section, ctx, linkTo, emitOpts, fromDir);
       if (rendered) out.push(rendered);
@@ -116,7 +116,8 @@ export class MarkdownRenderer implements NeddocRenderer {
       const indent = '  '.repeat(depth);
       const target = node.page ? pageById(ctx.model, node.page) : undefined;
       const anchor = node.anchor ? `#${node.anchor}` : '';
-      lines.push(target ? `${indent}- [${node.title}](${this.pagePath(target)}${anchor})` : `${indent}- ${node.title}`);
+      const href = target ? `${this.pagePath(target)}${anchor}` : node.href;
+      lines.push(href ? `${indent}- [${node.title}](${href})` : `${indent}- ${node.title}`);
       for (const child of node.children) walk(child, depth + 1);
     };
     for (const child of ctx.model.navRoot.children) walk(child, 0);

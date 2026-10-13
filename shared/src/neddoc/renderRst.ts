@@ -12,6 +12,7 @@ import type { DocBlock } from './commentAst';
 import type { DocCell, DocPage, DocPageRef, DocSection, NavNode } from './docModel';
 import type { GeneratedFile, NeddocRenderer, RenderCtx } from './renderer';
 import { defaultPagePath, dirOf, externalHref, pageById, relativeRef } from './renderer';
+import { isAbsoluteUrl } from './externalDocs';
 
 /** Sphinx label for a page or a page section (labels are global). */
 export function rstLabel(pageId: string, anchor?: string): string {
@@ -140,11 +141,18 @@ export class RstRenderer implements NeddocRenderer {
   }
 
   /** Hidden toctree on the index page naming every other page, so Sphinx
-   *  includes them in the build without cluttering the overview. */
+   *  includes them in the build without cluttering the overview. Of the
+   *  `@externalpage` links only URLs fit in; a relative one would name a
+   *  missing document. */
   private indexToctree(ctx: RenderCtx): string {
     const entries = ctx.model.pages
       .filter((p) => p.ref.id !== 'index')
       .map((p) => this.pagePath(p.ref).replace(/\.rst$/, ''));
+    const walk = (node: NavNode): void => {
+      if (node.href && isAbsoluteUrl(node.href)) entries.push(`${node.title.replace(/[<>]/g, '')} <${node.href}>`);
+      node.children.forEach(walk);
+    };
+    walk(ctx.model.navRoot);
     return ['.. toctree::', '   :hidden:', '   :maxdepth: 2', '', ...entries.map((e) => `   ${e}`)].join('\n');
   }
 

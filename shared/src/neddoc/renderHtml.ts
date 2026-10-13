@@ -13,6 +13,7 @@ import type { DocCell, DocModel, DocPage, DocPageRef, DocSection, NavNode } from
 import type { DocFormat } from './options';
 import type { NeddocRenderer, RenderCtx, GeneratedFile } from './renderer';
 import { EXTERNAL_TYPE_CSS, defaultPagePath, dirOf, externalHref, externalTypeHtml, pageById, relativeRef } from './renderer';
+import { isAbsoluteUrl } from './externalDocs';
 
 export class HtmlRenderer implements NeddocRenderer {
   // widened so themed subclasses (RtdHtmlRenderer) can set their own format
@@ -36,7 +37,8 @@ export class HtmlRenderer implements NeddocRenderer {
     const body = page.sections.map((s) => this.renderSection(s, page, ctx, emitOpts, fromDir)).filter(Boolean).join('\n');
     const title = escapeHtmlAll(page.ref.title);
     const projectTitle = escapeHtmlAll(ctx.options.projectTitle ?? 'NED Documentation');
-    return this.pageShell({ root, pageId: page.ref.id, title, projectTitle, body });
+    const heading = page.ownHeading ? '' : `<h1>${title}</h1>\n`;
+    return this.pageShell({ root, pageId: page.ref.id, title, projectTitle, heading, body });
   }
 
   /** The full HTML document around a page's rendered `body` (already-escaped
@@ -44,8 +46,8 @@ export class HtmlRenderer implements NeddocRenderer {
    *  logic scripts, and the `#search`/`#search-results`/`#navtree` hooks
    *  neddoc.js drives — is shared by all HTML themes; subclasses override this
    *  to change only the surrounding chrome, and `styleCss()` for the theme. */
-  protected pageShell(p: { root: string; pageId: string; title: string; projectTitle: string; body: string }): string {
-    const { root, pageId, title, projectTitle, body } = p;
+  protected pageShell(p: { root: string; pageId: string; title: string; projectTitle: string; heading: string; body: string }): string {
+    const { root, pageId, title, projectTitle, heading, body } = p;
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -66,8 +68,7 @@ export class HtmlRenderer implements NeddocRenderer {
   <div id="navtree"></div>
 </nav>
 <main id="content">
-<h1>${title}</h1>
-${body}
+${heading}${body}
 </main>
 </body>
 </html>
@@ -177,6 +178,7 @@ function pageHref(renderer: HtmlRenderer, model: DocModel, pageId: string, ancho
 interface NavData {
   t: string;
   h?: string; // root-relative href
+  u?: string; // absolute URL
   p?: string; // page id (for current-page highlighting)
   c?: NavData[];
 }
@@ -186,6 +188,9 @@ function navNodeToData(node: NavNode, renderer: HtmlRenderer, model: DocModel): 
   if (node.page) {
     data.h = pageHref(renderer, model, node.page, node.anchor);
     data.p = node.anchor ? undefined : node.page;
+  } else if (node.href) {
+    if (isAbsoluteUrl(node.href)) data.u = node.href;
+    else data.h = node.href;
   }
   if (node.children.length) data.c = node.children.map((c) => navNodeToData(c, renderer, model));
   return data;
@@ -298,13 +303,13 @@ const NEDDOC_JS = `// neddoc — sidebar nav tree + client-side type search (van
     if (hasChildren) {
       var details = el('details', depth < 1 ? { open: '' } : {}, li);
       var summary = el('summary', {}, details);
-      if (node.h) {
-        var a = el('a', { href: NEDDOC_ROOT + node.h, text: node.t }, summary);
+      if (node.h || node.u) {
+        var a = el('a', { href: node.u || NEDDOC_ROOT + node.h, text: node.t }, summary);
         if (node.p === NEDDOC_PAGE) a.className = 'current';
       } else summary.textContent = node.t;
       container = el('ul', {}, details);
-    } else if (node.h) {
-      var link = el('a', { href: NEDDOC_ROOT + node.h, text: node.t }, li);
+    } else if (node.h || node.u) {
+      var link = el('a', { href: node.u || NEDDOC_ROOT + node.h, text: node.t }, li);
       if (node.p === NEDDOC_PAGE) {
         link.className = 'current';
         var d = li.parentElement && li.parentElement.closest('details');

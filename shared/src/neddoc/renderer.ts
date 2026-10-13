@@ -38,11 +38,17 @@ export interface NeddocRenderer {
 }
 
 /** Default path scheme: type pages under types/, file listings under files/,
- *  structural pages at the root. */
+ *  structural and `@page` pages at the root. */
 export function defaultPagePath(ref: DocPageRef, extension: string): string {
   if (ref.kind === 'nedtype' || ref.kind === 'msgtype') return `types/${ref.id}${extension}`;
   if (ref.kind === 'file') return `files/${ref.id.replace(/^file-/, '')}${extension}`;
+  if (ref.kind === 'topic') return `${topicBaseName(ref)}${extension}`;
   return `${ref.id}${extension}`;
+}
+
+/** The `@page` file name without `.html` (the name hand-written links use). */
+export function topicBaseName(ref: DocPageRef): string {
+  return ref.id.replace(/^page-/, '');
 }
 
 export function dirOf(relativePath: string): string {

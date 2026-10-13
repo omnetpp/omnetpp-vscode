@@ -24,11 +24,12 @@ import {
 import { msgLeadingDocCommentRaw, msgPropertyInfo, msgTypeProperties } from '../msg/msgAst';
 import { leadingDocCommentRaw as anyLeadingDocCommentRaw, trailingDocCommentRaw } from '../ned/nedAst';
 import { resolveSubmoduleType } from '../ned/nedPreviewScene';
-import { parseNedComment, parseBriefComment, type CommentParseCtx, type DocBlock } from './commentAst';
+import { expandCommentIncludes, parseNedComment, parseBriefComment, type CommentParseCtx, type DocBlock } from './commentAst';
 import {
   namespaceAnchor,
   packageAnchor,
   pageIdForFile,
+  pageIdForTopic,
   pageIdForType,
   type DiagramRequest,
   type DocCell,
@@ -45,6 +46,7 @@ import { doxyUrlFor, parseDoxyTags } from './doxytags';
 import { ExternalDocsResolver, type ExternalTypeRef } from './externalDocs';
 import { collectUnassignedParameters, paramAssignmentsOf } from './unassignedParams';
 import { DocFragmentSet, parseDocFragments, type FragmentTarget } from './fragments';
+import { fileComment, pageDirectives } from './topicPages';
 
 // ---------------------------------------------------------------------------
 // Input
@@ -125,18 +127,17 @@ export async function extractDocModel(
       : [];
 
   // all NED and MSG files, MSG ones even when MSG types are not documented
-  // (as in Eclipse), sorted by path ignoring case
-  const files: DocFile[] = options.fileListings
-    ? [
-        ...nedCache
-          .allFiles()
-          .filter((f) => f.uri !== BUILTIN_URI && isTarget(f.uri))
-          .map((f) => ({ uri: f.uri, language: 'ned' as const, path: displayPath(f.uri) })),
-        ...(input.msgCache?.allFiles() ?? [])
-          .filter((f) => isTarget(f.uri))
-          .map((f) => ({ uri: f.uri, language: 'msg' as const, path: displayPath(f.uri) })),
-      ].sort((a, b) => a.path.toLowerCase().localeCompare(b.path.toLowerCase()))
-    : [];
+  // (as in Eclipse), sorted by path ignoring case: the file listings and the
+  // sources of the @page directives
+  const files: DocFile[] = [
+    ...nedCache
+      .allFiles()
+      .filter((f) => f.uri !== BUILTIN_URI && isTarget(f.uri))
+      .map((f) => ({ uri: f.uri, language: 'ned' as const, path: displayPath(f.uri) })),
+    ...(input.msgCache?.allFiles() ?? [])
+      .filter((f) => isTarget(f.uri))
+      .map((f) => ({ uri: f.uri, language: 'msg' as const, path: displayPath(f.uri) })),
+  ].sort((a, b) => a.path.toLowerCase().localeCompare(b.path.toLowerCase()));
 
   const model = new Extraction(nedCache, input.msgCache, nedTypes, msgTypes, files, options, warnings, displayPath);
   return model.run(onType);
@@ -146,6 +147,8 @@ class Extraction {
   private nedPageId = new Map<string, string>(); // ned fq -> page id
   private msgPageId = new Map<string, string>(); // msg fq -> page id
   private filePageId = new Map<string, string>(); // file uri -> page id
+  private titlePage?: DocBlock[];
+  private topicNav: NavNode[] = [];
   private typeNames = new Map<string, string[]>(); // referable name -> page ids
   private externalTypes = new Map<string, ExternalTypeRef>(); // page id -> dependency docs
   private externalTypeNames = new Map<string, string[]>(); // referable name -> external page ids
@@ -178,7 +181,7 @@ class Extraction {
   ) {
     for (const t of nedTypes) this.nedPageId.set(t.fqName, pageIdForType(t.fqName, 'ned'));
     for (const t of msgTypes) this.msgPageId.set(t.fqName, pageIdForType(t.fqName, 'msg'));
-    for (const f of files) this.filePageId.set(f.uri, pageIdForFile(f.path));
+    if (options.fileListings) for (const f of files) this.filePageId.set(f.uri, pageIdForFile(f.path));
     if (options.doxytags) this.doxyMap = parseDoxyTags(options.doxytags.xml);
     this.fragments = new DocFragmentSet(parseDocFragments(options.docFragments ?? [], warnings));
     this.collectExternalTypes();
@@ -213,11 +216,12 @@ class Extraction {
       this.pages.push(this.msgTypePage(t));
     }
     onType?.(total, total);
-    for (const f of this.files) {
-      await maybeYield();
-      this.pages.push(this.filePage(f));
-    }
-    this.pages.push(...this.fullDiagramPages());
+    if (this.options.fileListings)
+      for (const f of this.files) {
+        await maybeYield();
+        this.pages.push(this.filePage(f));
+      }
+    this.pages.push(...this.fullDiagramPages(), ...this.topicPages());
     this.pages.unshift(this.indexPage(), ...this.packagesPage(), ...this.namespacesPage());
     this.reportUnusedFragments();
     return {
@@ -1301,12 +1305,21 @@ class Extraction {
 
   // ---- file listing page (Eclipse generateFilePages) ----
 
+  /** The file's text as parsed; the root node starts at the first token, so
+   *  that line's indentation is restored. */
+  private fileText(file: DocFile): string | undefined {
+    const tree = file.language === 'ned' ? this.nedCache.getFile(file.uri)?.tree : this.msgCache?.getFile(file.uri)?.tree;
+    if (!tree) return undefined;
+    const root = tree.rootNode;
+    return ' '.repeat(root.startPosition.column) + root.text;
+  }
+
   private filePage(file: DocFile): DocPage {
     this.currentUri = file.uri;
     const frag = (anchor: string) => this.fragment('filename', file.path, anchor);
     const sections: DocSection[] = [...frag('top')];
     const isNed = file.language === 'ned';
-    const tree = isNed ? this.nedCache.getFile(file.uri)?.tree : this.msgCache?.getFile(file.uri)?.tree;
+    const text = this.fileText(file);
     const types = isNed
       ? this.nedCache
           .typesInFile(file.uri)
@@ -1315,21 +1328,62 @@ class Extraction {
       : (this.msgCache?.typesInFile(file.uri) ?? []).filter((t) => t.file.uri === file.uri).map((t) => this.msgTypeRef(t));
     if (types.length > 0) sections.push(this.typesTable(types));
     sections.push(...frag('after-types'));
-    if (tree) {
-      // the root node starts at the first token, so restore that line's indentation
-      const root = tree.rootNode;
+    if (text !== undefined) {
       sections.push({ kind: 'subheading', text: 'Source code', anchor: 'source' });
-      sections.push({ kind: 'source', language: file.language, code: (' '.repeat(root.startPosition.column) + root.text).trimEnd() });
+      sections.push({ kind: 'source', language: file.language, code: text.trimEnd() });
     }
     sections.push(...frag('bottom'));
     const title = `${isNed ? 'NED' : 'MSG'} File ${file.path}`;
     return { ref: { id: this.filePageId.get(file.uri)!, title, kind: 'file' }, sections };
   }
 
+  // ---- @titlepage / @page / @externalpage (Eclipse mapPageMatchers) ----
+
+  /** Builds the @page pages and the "Selected Topics" entries, and picks the
+   *  @titlepage, from the file comments in file order. */
+  private topicPages(): DocPage[] {
+    const pages: DocPage[] = [];
+    const ids = new Set<string>();
+    let titlePageFile: string | undefined;
+    // pages are split from the expanded text, so their includes are done
+    const pageCtx: CommentParseCtx = { ...this.commentCtx, resolveInclude: undefined };
+    for (const file of this.files) {
+      const text = this.fileText(file);
+      const comment = text === undefined ? '' : fileComment(text);
+      if (!/@(?:page|titlepage|externalpage|include)/.test(comment)) continue;
+      this.currentUri = file.uri;
+      for (const d of pageDirectives(expandCommentIncludes(comment, this.commentCtx))) {
+        if (d.kind === 'externalpage') {
+          this.topicNav.push({ title: d.title, href: d.href, children: [] });
+        } else if (d.kind === 'titlepage') {
+          if (!d.content.replace(/\/\/+/g, '').trim()) continue;
+          if (titlePageFile !== undefined) {
+            this.warnings.push(`${file.path}: @titlepage ignored, the overview page comes from ${titlePageFile}`);
+            continue;
+          }
+          titlePageFile = file.path;
+          this.titlePage = parseNedComment(d.content, pageCtx);
+        } else {
+          const id = pageIdForTopic(d.fileName);
+          if (ids.has(id)) {
+            this.warnings.push(`${file.path}: @page ${d.fileName} ignored, a page with that name already exists`);
+            continue;
+          }
+          ids.add(id);
+          pages.push({ ref: { id, title: d.title, kind: 'topic' }, sections: [{ kind: 'doc', blocks: parseNedComment(d.content, pageCtx) }] });
+          this.topicNav.push({ title: d.title, page: id, children: [] });
+        }
+      }
+    }
+    return pages;
+  }
+
   // ---- structural pages ----
 
   private indexPage(): DocPage {
     const title = this.options.projectTitle ?? 'NED Documentation';
+    if (this.titlePage)
+      return { ref: { id: 'index', title, kind: 'index' }, sections: [{ kind: 'doc', blocks: this.titlePage }], ownHeading: true };
     const sections: DocSection[] = [
       {
         kind: 'doc',
@@ -1403,6 +1457,7 @@ class Extraction {
 
     const root: NavNode = { title: this.options.projectTitle ?? 'NED Documentation', children: [] };
     root.children.push(leaf('Overview', 'index'));
+    if (this.topicNav.length > 0) root.children.push({ title: 'Selected Topics', children: this.topicNav });
 
     // full-diagram pages under a "Diagrams" node (as in Eclipse)
     const diagramPages = this.pages.filter((p) => p.ref.kind === 'fulldiagram');
@@ -1467,7 +1522,7 @@ class Extraction {
       if (msgDefs.children.length) root.children.push(msgDefs);
     }
 
-    if (this.files.length > 0)
+    if (this.options.fileListings && this.files.length > 0)
       root.children.push({ title: 'Files', children: this.files.map((f) => leaf(f.path, this.filePageId.get(f.uri)!)) });
 
     return root;

@@ -656,6 +656,44 @@ Doxygen-generated C++ documentation, and a file of extra content for the pages.
 **Advantage.** Browsable, linked model documentation straight from the doc comments —
 without the OMNeT++ IDE.
 
+#### Overview and topic pages
+
+As in the Eclipse IDE, the comment at the top of a NED or MSG file (usually
+`package.ned`) can add pages to the documentation. The file comment is the comment block
+before the first line of code, up to its last blank line; a type's own documentation
+comment, which touches the type, is not part of it.
+
+```ned
+//
+// @titlepage
+// <h1>Queueing library</h1>
+//
+// A queueing library; see <a href="usage.html">Using the library</a>.
+//
+//#--------------------------------------------------
+// @page usage.html, Using the library
+//
+// Start with Source and Sink.
+//
+// @externalpage https://example.org/guide.html, Online guide
+//
+
+package org.example.queueing;
+```
+
+- **`@titlepage`** replaces the generated overview page with the text that follows, up to
+  the next `@page` or `@titlepage`. Only the first one is used; others are warnings.
+- **`@page <file>[, <title>]`** adds a page with that title (default: the file name) and
+  the text that follows. The page is written at the root of the output under `<file>`
+  (`.html` added if missing; characters that are unsafe in file names become `_`), so the
+  html formats can link to it as `<a href="usage.html">`. Markdown and RST write
+  `usage.md` / `usage.rst`. A page whose name is taken by another page is a warning.
+- **`@externalpage <file>[, <title>]`** adds a navigation link to a page that is not
+  generated: a URL, or a path relative to the output folder. RST lists only URLs.
+
+The text uses the same markup as documentation comments, and `@include` works there too.
+The pages and links appear under **Selected Topics** in the navigation, in file order.
+
 #### Linking to the documentation of dependencies
 
 Types from other NED source roots (`omnetpp.nedPath`, `--ned-path`) are indexed but not

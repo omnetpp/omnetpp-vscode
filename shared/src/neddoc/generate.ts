@@ -6,7 +6,7 @@
  */
 
 import { extractDocModel, type NeddocInput } from './extract';
-import { pageIdForType, type DiagramRequest, type DocModel } from './docModel';
+import { pageIdForType, type DiagramRequest, type DocModel, type DocPage, type NavNode } from './docModel';
 import { cooperativeYielder, defaultNeddocOptions, type NeddocOptions } from './options';
 import { dirOf, externalHref, pageById, relativeRef, type GeneratedFile, type NeddocRenderer, type RenderCtx } from './renderer';
 import { HtmlRenderer } from './renderHtml';
@@ -133,6 +133,7 @@ export async function generateNeddoc(
     progress?.report?.('Extracting types', done, total, total ? (done / total) * EXTRACT_BAND : EXTRACT_BAND);
   });
   checkCancelled();
+  dropCollidingPages(model, renderer);
 
   const diagramUnits = renderDiagram ? model.diagrams.length * DIAGRAM_WEIGHT : 0;
   const totalUnits = Math.max(1, diagramUnits + model.pages.length + 1); // +1 for aux/tag files
@@ -194,6 +195,30 @@ export async function generateNeddoc(
   if (options.messageDefinitions) await emit({ relativePath: 'msgtags.xml', content: msgTagFile(model, renderer) });
   progress?.report?.('Done', model.pages.length, model.pages.length, 100);
   return { pages: model.pages.length, diagrams: images.size, warnings: model.warnings, externalWarnings: model.externalWarnings };
+}
+
+/** Pages named by the user (`@page`) can land on the path of another page;
+ *  the earlier page wins. */
+function dropCollidingPages(model: DocModel, renderer: NeddocRenderer): void {
+  const owner = new Map<string, DocPage>();
+  const dropped = new Set<string>();
+  model.pages = model.pages.filter((page) => {
+    const path = renderer.pagePath(page.ref);
+    const other = owner.get(path);
+    if (!other) {
+      owner.set(path, page);
+      return true;
+    }
+    model.warnings.push(`page "${page.ref.title}" not written: ${path} is the page "${other.ref.title}"`);
+    dropped.add(page.ref.id);
+    return false;
+  });
+  if (dropped.size === 0) return;
+  const prune = (node: NavNode): void => {
+    node.children = node.children.filter((c) => !c.page || !dropped.has(c.page));
+    node.children.forEach(prune);
+  };
+  prune(model.navRoot);
 }
 
 /** Convenience wrapper collecting all output files in memory (tests, MCP). */

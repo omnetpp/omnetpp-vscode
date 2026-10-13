@@ -11,7 +11,7 @@
 import { emitHtml, escapeHtmlAll, escapeHtmlText } from './commentEmit';
 import type { DocCell, DocModel, DocPage, DocPageRef, DocSection, NavNode } from './docModel';
 import type { GeneratedFile, NeddocRenderer, RenderCtx } from './renderer';
-import { EXTERNAL_TYPE_CSS, externalHref, pageById } from './renderer';
+import { EXTERNAL_TYPE_CSS, externalHref, pageById, topicBaseName } from './renderer';
 import { htmlEmitOpts, type LinkingEmitOpts } from './renderHtml';
 
 /** Chip colors of HtmlRenderer.typeSectionHeading(). */
@@ -65,10 +65,12 @@ export class MaterialHtmlRenderer implements NeddocRenderer {
 
   /** Eclipse flat naming: everything at the output root; type pages named by
    *  fq name, MSG C++ `::` becomes `-` (getOutputFileName), file listings by
-   *  path with `/` as `-` (getOutputBaseNameForFile). */
+   *  path with `/` as `-` (getOutputBaseNameForFile), `@page` pages by their
+   *  sanitized file name. */
   pagePath(ref: DocPageRef): string {
     if (ref.kind === 'msgtype') return ref.id.replace(/^msg-/, '').replace(/--/g, '-') + this.pageExtension;
     if (ref.kind === 'file') return ref.id.replace(/^file-/, '') + this.pageExtension;
+    if (ref.kind === 'topic') return topicBaseName(ref) + this.pageExtension;
     return `${ref.id}${this.pageExtension}`;
   }
 
@@ -85,7 +87,7 @@ export class MaterialHtmlRenderer implements NeddocRenderer {
     };
     const emitOpts = htmlEmitOpts(ctx, linkTo, '');
     const content =
-      page.ref.kind === 'index'
+      page.ref.kind === 'index' && !page.ownHeading
         ? DEFAULT_OVERVIEW
         : page.sections.map((s) => this.renderSection(s, ctx, emitOpts)).filter(Boolean).join('\n');
     const template = injectSearch(this.asset('page.tmpl'));
@@ -210,7 +212,7 @@ export class MaterialHtmlRenderer implements NeddocRenderer {
    *  arrays (backtick-quoted strings), wrapped by navtree.tmpl. */
   private navTreeData(model: DocModel): string {
     const nodeStr = (node: NavNode, indent: string): string => {
-      const url = node.page ? this.navUrl(model, node) : null;
+      const url = node.page ? this.navUrl(model, node) : (node.href ?? null);
       const head = `\n${indent}[\`${node.title}\`, ${url === null ? 'null' : `\`${url}\``}, `;
       if (node.children.length === 0) return `${head}null],`;
       const children = node.children.map((c) => nodeStr(c, indent + '  ')).join('');

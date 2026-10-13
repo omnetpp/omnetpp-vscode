@@ -28,9 +28,10 @@ export class RtdHtmlRenderer extends HtmlRenderer {
     pageId: string;
     title: string;
     projectTitle: string;
+    heading: string;
     body: string;
   }): string {
-    const { root, pageId, title, projectTitle, body } = p;
+    const { root, pageId, title, projectTitle, heading, body } = p;
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -58,8 +59,7 @@ export class RtdHtmlRenderer extends HtmlRenderer {
     <nav class="wy-nav-top"><a href="${root}index.html">${projectTitle}</a></nav>
     <div class="wy-nav-content">
       <div class="rst-content"><div role="main">
-<h1>${title}</h1>
-${body}
+${heading}${body}
       </div></div>
     </div>
   </section>
