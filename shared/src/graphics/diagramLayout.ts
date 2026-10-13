@@ -39,6 +39,9 @@ export interface DiagramBuildOptions {
   icons: IconProvider;
   measureText: TextMeasurer;
   seed: number;
+  /** More tooltip paragraphs for a submodule (the documentation figure adds
+   *  the type's description and the source). */
+  submoduleTooltip?: (sub: PreviewSubmodule) => string[];
 }
 
 export interface ShapeSpec {
@@ -183,6 +186,7 @@ async function buildSubFigure(
   if (sub.inheritedFrom) tooltipLines.push(`inherited from ${sub.inheritedFrom}`);
   const tt = ds.getAsString(Prop.TOOLTIP);
   if (tt) tooltipLines.push(tt);
+  for (const part of opts.submoduleTooltip?.(sub) ?? []) tooltipLines.push('', part);
 
   return {
     sub,

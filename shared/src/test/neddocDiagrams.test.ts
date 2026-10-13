@@ -137,6 +137,40 @@ test('typeFigure: compound modules render the full diagram with submodule links'
   assert.equal(result!.areas.length, 2);
 });
 
+test('typeFigure: submodule tooltips add the type description and the source (Eclipse makeSubmoduleTooltip)', async () => {
+  const cache = await nedCache({
+    'file:///t.ned': `package t;
+// The application interface. More text.
+moduleinterface IApp {}
+// A ping application.
+//
+// Second paragraph.
+simple PingApp like IApp {}
+simple Plain {}
+network Net
+{
+    submodules:
+        // the app
+        app: <default("PingApp")> like IApp {
+            @display("p=10,10");
+        }
+        plain: Plain;
+}
+`,
+  });
+  const result = await renderTypeFigureSvg(cache, cache.getType('t.Net')!, { icons: fakeIcons });
+  const titles = [...result!.svg.matchAll(/<title>([^<]*)<\/title>/g)].map((m) => m[1]);
+  assert.ok(
+    titles.includes(
+      'app: t.PingApp (like IApp)\n\nPingApp: A ping application.\n\nIApp: The application interface.\n\n' +
+        'Source:\napp: &lt;default(&quot;PingApp&quot;)&gt; like IApp {\n            @display(&quot;p=10,10&quot;);\n        }',
+    ),
+    titles.join('\n---\n'),
+  );
+  // no description: only the source
+  assert.ok(titles.includes('plain: t.Plain\n\nSource:\nplain: Plain;'), titles.join('\n---\n'));
+});
+
 test('typeFigure: simple modules render the card', async () => {
   const cache = await nedCache({ 'file:///lib.ned': LIB });
   const result = await renderTypeFigureSvg(cache, cache.getType('lib.Node')!, { icons: fakeIcons });

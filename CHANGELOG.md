@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Richer submodule tooltips in NED documentation**: in the module figures of the type
+  pages, a submodule's tooltip also shows the description of its type (and of the `like`
+  interface) and its source, as in the Eclipse IDE
 - **Highlighted source listings in NED documentation**: the NED and MSG sources on type
   and file pages are colored like in the Eclipse IDE (keywords, types, strings, comments,
   doc tags, `TODO` in private comments) in the HTML formats
