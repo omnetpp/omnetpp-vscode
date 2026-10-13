@@ -130,6 +130,8 @@ export interface GenerateDocsParams {
   /** Absolute path of a doxygen tag file for "C++ definition" links. */
   doxytagsPath?: string;
   doxyUrlPrefix?: string;
+  /** Absolute path of a doc fragments file (Eclipse `<docfragments>` XML). */
+  fragmentsPath?: string;
   /** Dependency documentation: NED package prefix -> URL, or a path relative
    *  to `outputDir`. */
   externalDocs?: Record<string, string>;

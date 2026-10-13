@@ -48,6 +48,7 @@ function paramsFromSettings(folder: vscode.WorkspaceFolder, format: DocFormat): 
     customCssPath: resolvePath(cfg.get<string>('customCss', '')),
     doxytagsPath: resolvePath(cfg.get<string>('doxytagsFile', '')),
     doxyUrlPrefix: cfg.get<string>('doxyUrlPrefix', '') || undefined,
+    fragmentsPath: resolvePath(cfg.get<string>('fragmentsFile', '')),
     externalDocs: cfg.get<Record<string, string>>('externalDocs', {}),
   };
 }

@@ -40,6 +40,7 @@ interface CliOptions {
   doxytagsPath?: string;
   doxyUrlPrefix?: string;
   customCssPath?: string;
+  fragmentPaths: string[];
   externalDocs: Record<string, string>;
   toggles: Partial<NeddocOptions>;
 }
@@ -85,6 +86,10 @@ Options:
                                  (the html* formats).
   --doxytags=<file>              Doxygen tag file for "C++ definition" links.
   --doxy-url-prefix=<url>        URL prefix for doxygen links.
+  -f, --fragments=<file>         Doc fragments file (as in the Eclipse IDE): XML
+                                 <docfragment> elements whose content is
+                                 inserted at anchors of type, package and
+                                 namespace pages; repeatable.
   -l, --external-docs=<list>     Documentation of dependencies generated
                                  separately: <package>=<url-or-path> items,
                                  comma- or space-separated; repeatable. A path
@@ -126,6 +131,7 @@ function parseArgs(argv: string[]): CliOptions {
     nedPath: process.env.OMNETPP_NED_PATH,
     verbose: false,
     excludePatterns: [],
+    fragmentPaths: [],
     externalDocs: {},
     toggles: {},
   };
@@ -156,6 +162,12 @@ function parseArgs(argv: string[]): CliOptions {
       const v = argv[++i];
       if (!v) fail('-l requires a <package>=<url-or-path> list argument');
       addExternalDocs(v);
+    } else if (a === '-f') {
+      const v = argv[++i];
+      if (!v) fail('-f requires a file argument');
+      opts.fragmentPaths.push(v);
+    } else if (a.startsWith('--fragments=')) {
+      opts.fragmentPaths.push(a.slice('--fragments='.length));
     } else if (a.startsWith('--external-docs=')) {
       addExternalDocs(a.slice('--external-docs='.length));
     } else if (a.startsWith('--format=')) {
@@ -259,6 +271,15 @@ async function main(): Promise<void> {
     } catch {
       fail(`cannot read custom CSS file: ${opts.customCssPath}`);
     }
+  }
+  if (opts.fragmentPaths.length > 0) {
+    optionOverrides.docFragments = opts.fragmentPaths.map((path) => {
+      try {
+        return { source: path, xml: readFileSync(resolve(path), 'utf8') };
+      } catch {
+        fail(`cannot read doc fragments file: ${path}`);
+      }
+    });
   }
   if (opts.format === 'html-material') {
     // the vendored Eclipse template snapshot ships next to the bundle

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Doc fragments for NED documentation**: the Eclipse IDE's doc fragments file
+  (`<docfragments>` XML) inserts extra content at fixed anchors of the type, package and
+  namespace pages. Set it with `omnetpp.neddoc.fragmentsFile` or `opp_docgen -f <file>`
 - **`--version` for the command-line tools**: `opp_lint`, `opp_docgen`, `opp_ide_mcp`
   and `opp_lsp` print their name and the package version (`opp_lint 1.0.0`)
 - **`opp_lsp` command-line tool**: the extension's language server, for other LSP

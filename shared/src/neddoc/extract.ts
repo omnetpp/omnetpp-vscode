@@ -43,6 +43,7 @@ import type { DocGraph, DocGraphEdge, DocGraphNode } from './graphDiagram';
 import { doxyUrlFor, parseDoxyTags } from './doxytags';
 import { ExternalDocsResolver, type ExternalTypeRef } from './externalDocs';
 import { collectUnassignedParameters, paramAssignmentsOf } from './unassignedParams';
+import { DocFragmentSet, parseDocFragments, type FragmentTarget } from './fragments';
 
 // ---------------------------------------------------------------------------
 // Input
@@ -134,6 +135,7 @@ class Extraction {
   private msgUsedBy = new Map<string, MsgTypeInfo[]>();
   private commentCtx: CommentParseCtx;
   private doxyMap?: Map<string, string>;
+  private fragments: DocFragmentSet;
   /** URI of the file whose comments are being parsed (anchors `@include`). */
   private currentUri?: string;
   private pages: DocPage[] = [];
@@ -152,6 +154,7 @@ class Extraction {
     for (const t of nedTypes) this.nedPageId.set(t.fqName, pageIdForType(t.fqName, 'ned'));
     for (const t of msgTypes) this.msgPageId.set(t.fqName, pageIdForType(t.fqName, 'msg'));
     if (options.doxytags) this.doxyMap = parseDoxyTags(options.doxytags.xml);
+    this.fragments = new DocFragmentSet(parseDocFragments(options.docFragments ?? [], warnings));
     this.collectExternalTypes();
     this.collectTypeNames();
     this.collectRelations();
@@ -186,6 +189,7 @@ class Extraction {
     onType?.(total, total);
     this.pages.push(...this.fullDiagramPages());
     this.pages.unshift(this.indexPage(), ...this.packagesPage(), ...this.namespacesPage());
+    this.reportUnusedFragments();
     return {
       pages: this.pages,
       navRoot: this.buildNav(),
@@ -346,6 +350,46 @@ class Extraction {
         this.msgUsedBy.set(t.fqName, [...used.values()]);
         for (const u of used.values()) Extraction.addTo(this.msgUsersOf, u.fqName, t);
       }
+    }
+  }
+
+  // ---- doc fragments ----
+
+  /** The fragment content for this anchor as a section (comment markup, as
+   *  in Eclipse), or nothing. */
+  private fragment(target: FragmentTarget, key: string, anchor: string): DocSection[] {
+    const content = this.fragments.take(target, key, anchor);
+    return content === undefined ? [] : [{ kind: 'doc', blocks: this.parseDoc(content) }];
+  }
+
+  /** Package / namespace section fragments; the default group is also
+   *  addressable as "default", its name in the Eclipse generator. */
+  private groupFragment(target: FragmentTarget, group: string, anchor: string): DocSection[] {
+    const keys = group === '(default)' ? [group, 'default'] : [group];
+    return keys.flatMap((key) => this.fragment(target, key, anchor));
+  }
+
+  private reportUnusedFragments(): void {
+    const unused = this.fragments.unused();
+    const fileFragments = unused.filter((f) => f.target === 'filename');
+    if (fileFragments.length > 0) {
+      const n = fileFragments.length;
+      this.warnings.push(
+        `${n} doc fragment${n === 1 ? '' : 's'} with a filename attribute skipped: file listing pages are not generated (first at ${fileFragments[0].location})`,
+      );
+    }
+    const groupNames = (names: string[]) => new Set(names.flatMap((n) => (n ? [n] : ['(default)', 'default'])));
+    const packages = groupNames(this.nedTypes.map((t) => t.packageName));
+    const namespaces = groupNames(this.msgTypes.map((t) => t.namespace));
+    for (const f of unused) {
+      if (f.target === 'filename') continue;
+      const [what, groups, group] =
+        f.target === 'nedtype' ? ['NED type', packages, 'package'] : ['message type', namespaces, 'namespace'];
+      this.warnings.push(
+        groups.has(f.key)
+          ? `${f.location}: anchor "${f.anchor}" does not exist on the ${group} section of '${f.key}' (expected top or bottom)`
+          : `${f.location}: no documented ${what} or ${group} '${f.key}' (doc fragment skipped)`,
+      );
     }
   }
 
@@ -716,6 +760,8 @@ class Extraction {
     const kindLabel = nedKindLabel(t);
     const sections: DocSection[] = [];
     this.searchIndex.push({ name: t.simpleName, fqName: t.fqName, kindLabel, page: pageId });
+    const frag = (anchor: string) => this.fragment('nedtype', t.fqName, anchor);
+    sections.push(...frag('top'));
 
     // package line + kind badge
     sections.push({
@@ -744,6 +790,7 @@ class Extraction {
     const rawDoc = leadingDocCommentRaw(t.node);
     if (rawDoc === undefined) sections.push({ kind: 'para', cells: [{ kind: 'label', text: '(no description)' }] });
     else sections.push({ kind: 'doc', blocks: this.parseDoc(rawDoc) });
+    sections.push(...frag('after-description'));
 
     // diagrams (placeholders; rendered in the generate phase)
     const usedTypes = this.usedBy.get(t.fqName) ?? [];
@@ -755,6 +802,7 @@ class Extraction {
       sections.push({ kind: 'diagram', diagram: 'type', image, title: t.simpleName });
       this.diagrams.push({ diagram: 'type', typeFqName: t.fqName, language: 'ned', image });
     }
+    sections.push(...frag('after-image'));
     if (this.options.usageDiagrams && (usedTypes.length > 0 || users.length > 0)) {
       const image = `images/${pageId}-usage.svg`;
       sections.push({ kind: 'subheading', text: 'Usage diagram', anchor: 'usage-diagram' });
@@ -775,6 +823,7 @@ class Extraction {
         graph: this.nedInheritanceGraph(t),
       });
     }
+    sections.push(...frag('after-diagrams'));
 
     // implemented by (interfaces only)
     const isInterface = t.kind === 'moduleinterface' || t.kind === 'channelinterface';
@@ -794,6 +843,7 @@ class Extraction {
       sections.push({ kind: 'subheading', text: 'Used in', anchor: 'used-in-networks' });
       sections.push(this.typesTable(userNetworks.map((u) => this.nedTypeRef(u))));
     }
+    sections.push(...frag('after-usage'));
 
     // known subclasses, extends
     if (subtypes.length > 0) {
@@ -811,14 +861,17 @@ class Extraction {
         );
       }
     }
+    sections.push(...frag('after-inheritance'));
 
-    sections.push(...this.parametersSection(t));
-    sections.push(...this.propertiesSection(this.mergedNedProperties(t)));
+    sections.push(...this.parametersSection(t), ...frag('after-parameters'));
+    sections.push(...this.propertiesSection(this.mergedNedProperties(t)), ...frag('after-properties'));
     if (t.isModuleType()) sections.push(...this.gatesSection(t));
-    sections.push(...this.signalsSection(t));
-    sections.push(...this.statisticsSection(t));
+    sections.push(...frag('after-gates'));
+    sections.push(...this.signalsSection(t), ...frag('after-signals'));
+    sections.push(...this.statisticsSection(t), ...frag('after-statistics'));
     if ((t.kind === 'compound' || t.kind === 'network') && t.isModuleType())
       sections.push(...this.unassignedParamsSection(t));
+    sections.push(...frag('after-unassigned-parameters'));
 
     if (this.options.sourceSnippets) {
       sections.push({ kind: 'subheading', text: 'Source code', anchor: 'source' });
@@ -832,6 +885,7 @@ class Extraction {
           ? [{ kind: 'text', text: 'File: Built-in type' }]
           : [{ kind: 'text', text: `File: ${this.displayPath(t.file.uri)}` }],
     });
+    sections.push(...frag('bottom'));
 
     return { ref: { id: pageId, title: t.simpleName, kind: 'nedtype' }, sections };
   }
@@ -1060,6 +1114,8 @@ class Extraction {
     const kindLabel = MSG_KIND_LABELS[t.kind] ?? t.kind;
     const sections: DocSection[] = [];
     this.searchIndex.push({ name: t.simpleName, fqName: t.fqName, kindLabel, page: pageId });
+    const frag = (anchor: string) => this.fragment('msgtype', t.fqName, anchor);
+    sections.push(...frag('top'));
 
     const ns = t.namespace || '(default)';
     sections.push({
@@ -1080,6 +1136,7 @@ class Extraction {
     const rawDoc = msgLeadingDocCommentRaw(t.node);
     if (rawDoc === undefined) sections.push({ kind: 'para', cells: [{ kind: 'label', text: '(no description)' }] });
     else sections.push({ kind: 'doc', blocks: this.parseDoc(rawDoc) });
+    sections.push(...frag('after-description'));
 
     // diagrams
     const used = this.msgUsedBy.get(t.fqName) ?? [];
@@ -1103,6 +1160,7 @@ class Extraction {
         graph: this.msgInheritanceGraph(t),
       });
     }
+    sections.push(...frag('after-diagrams'));
 
     // extends / subclasses
     if (t.extendsName()) {
@@ -1114,15 +1172,17 @@ class Extraction {
       sections.push({ kind: 'subheading', text: 'Known subclasses', anchor: 'subclasses' });
       sections.push(this.typesTable(subtypes.map((s) => this.msgTypeRef(s))));
     }
+    sections.push(...frag('after-inheritance'));
 
-    sections.push(...this.msgFieldsSection(t));
-    sections.push(...this.msgPropertiesSection(t));
+    sections.push(...this.msgFieldsSection(t), ...frag('after-fields'));
+    sections.push(...this.msgPropertiesSection(t), ...frag('after-properties'));
 
     if (this.options.sourceSnippets) {
       sections.push({ kind: 'subheading', text: 'Source code', anchor: 'source' });
       sections.push({ kind: 'source', language: 'msg', code: t.node.text });
     }
     sections.push({ kind: 'para', cells: [{ kind: 'text', text: `File: ${this.displayPath(t.file.uri)}` }] });
+    sections.push(...frag('bottom'));
 
     return { ref: { id: pageId, title: t.simpleName, kind: 'msgtype' }, sections };
   }
@@ -1241,7 +1301,9 @@ class Extraction {
     const sections: DocSection[] = [];
     for (const pkg of [...byPackage.keys()].sort()) {
       sections.push({ kind: 'subheading', text: pkg, anchor: packageAnchor(pkg) });
+      sections.push(...this.groupFragment('nedtype', pkg, 'top'));
       sections.push(this.typesTable(byPackage.get(pkg)!.map((t) => this.nedTypeRef(t))));
+      sections.push(...this.groupFragment('nedtype', pkg, 'bottom'));
     }
     return [{ ref: { id: 'packages', title: 'Packages', kind: 'packages' }, sections }];
   }
@@ -1253,7 +1315,9 @@ class Extraction {
     const sections: DocSection[] = [];
     for (const ns of [...byNs.keys()].sort()) {
       sections.push({ kind: 'subheading', text: ns, anchor: namespaceAnchor(ns === '(default)' ? '' : ns) });
+      sections.push(...this.groupFragment('msgtype', ns, 'top'));
       sections.push(this.typesTable(byNs.get(ns)!.map((t) => this.msgTypeRef(t))));
+      sections.push(...this.groupFragment('msgtype', ns, 'bottom'));
     }
     return [{ ref: { id: 'namespaces', title: 'Namespaces', kind: 'namespaces' }, sections }];
   }

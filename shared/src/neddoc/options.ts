@@ -6,6 +6,7 @@
 
 import type { IncludeResolution } from './commentAst';
 import type { ExternalDocSet } from './externalDocs';
+import type { DocFragmentFile } from './fragments';
 
 export type DocFormat = 'html' | 'html-readthedocs' | 'html-material' | 'markdown' | 'rst';
 
@@ -40,6 +41,10 @@ export interface NeddocOptions {
    *  indexed-but-not-documented types link there (Eclipse: External
    *  documentation). */
   externalDocs?: ExternalDocSet[];
+  /** Documentation fragment files (Eclipse: Doc fragments file), pre-read by
+   *  the host: extra content inserted at fixed anchors of the type, package
+   *  and namespace pages. */
+  docFragments?: DocFragmentFile[];
   /** Resolves `@include <file>` directives in comments (host provides I/O). */
   includeResolver?: (fileRef: string, fromId: string | undefined) => IncludeResolution | undefined;
   /** Title shown on the overview page and in the navigation header. */

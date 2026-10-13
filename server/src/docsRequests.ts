@@ -96,6 +96,13 @@ export function registerDocsRequests(connection: Connection, state: ServerState)
         warnings.push(`cannot read doxygen tag file: ${params.doxytagsPath} (skipping C++ definition links)`);
       }
     }
+    if (params.fragmentsPath) {
+      try {
+        optionOverrides.docFragments = [{ source: params.fragmentsPath, xml: readFileSync(params.fragmentsPath, 'utf8') }];
+      } catch {
+        warnings.push(`cannot read doc fragments file: ${params.fragmentsPath} (no fragments inserted)`);
+      }
+    }
     if (params.format === 'html-material') {
       const assetDir = join(__dirname, 'neddoc-material');
       if (!existsSync(join(assetDir, 'page.tmpl'))) throw new Error(`material template assets not found in ${assetDir}`);

@@ -903,6 +903,12 @@
           },
           "markdownDescription": "Separately generated documentation of dependencies. Maps a NED package prefix to the URL of its documentation, or to a path relative to the output directory, e.g. `{ \"inet\": \"https://inet.omnetpp.org/doc/neddoc\" }`. References to types of that package (the longest matching prefix wins) link there instead of showing as \"not documented here\". For a local path, the target's `nedtags.xml`/`msgtags.xml` supply the exact page names; otherwise the Eclipse page naming (`<qualified name>.html`) is assumed."
         },
+        "omnetpp.neddoc.fragmentsFile": {
+          "type": "string",
+          "default": "",
+          "order": 24,
+          "markdownDescription": "Path to a doc fragments file (the Eclipse IDE's \"Doc fragments file\"), relative to the workspace folder: XML `<docfragment nedtype|msgtype|filename=\"...\" anchor=\"...\">` elements whose content (NED comment markup) is inserted at that anchor of the type, package or namespace page. See the User Guide for the anchors."
+        },
         "omnetpp.diagnostics.scope": {
           "type": "string",
           "enum": [

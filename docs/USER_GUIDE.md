@@ -649,8 +649,8 @@ steps and can be canceled. When it is done, **Open** shows the documentation in 
 browser, and **Reveal in Explorer** shows the output folder (`omnetpp.neddoc.outputDirectory`,
 default `doc/neddoc`; existing files are overwritten, but the folder is not cleaned
 first). The other `omnetpp.neddoc.*` settings (see [Settings](#settings)) select the
-diagrams and sections, the title, excluded folders, a custom stylesheet, and links to
-Doxygen-generated C++ documentation.
+diagrams and sections, the title, excluded folders, a custom stylesheet, links to
+Doxygen-generated C++ documentation, and a file of extra content for the pages.
 
 **Advantage.** Browsable, linked model documentation straight from the doc comments —
 without the OMNeT++ IDE.
@@ -681,6 +681,48 @@ tooltip). A type whose dependency is not mapped — or that the dependency's tag
 not list — is shown as "not documented here" instead of as a broken link. Each run
 reports one line per such dependency: in the CLI as a warning that does not change the
 exit code, in VS Code in the **OMNeT++ Language Server** output.
+
+#### Adding content to the generated pages
+
+A doc fragments file adds content to the generated pages without changing the NED and
+MSG sources. It has the format of the Eclipse IDE's "Doc fragments file": an XML file
+whose root element holds `<docfragment>` elements. Each one names a page and an anchor
+on that page, and its text (usually a CDATA section) is inserted there:
+
+```xml
+<docfragments>
+    <docfragment nedtype="inet.node.inet.StandardHost" anchor="after-signals">
+    <![CDATA[
+        <h3>Recording</h3>
+        The statistics above are recorded by the submodules of StandardHost.
+    ]]>
+    </docfragment>
+    <docfragment msgtype="inet::Packet" anchor="top">
+    <![CDATA[ ... ]]>
+    </docfragment>
+</docfragments>
+```
+
+- **VS Code:** the `omnetpp.neddoc.fragmentsFile` setting (relative to the workspace
+  folder).
+- **`opp_docgen`:** `-f <file>` or `--fragments=<file>` (relative to the current
+  directory; repeatable, and the files are merged).
+
+| Attribute | Page | Anchors |
+| --- | --- | --- |
+| `nedtype="<fully qualified NED type>"` | NED type page | `top`, `after-description`, `after-image`, `after-diagrams`, `after-usage`, `after-inheritance`, `after-parameters`, `after-properties`, `after-gates`, `after-signals`, `after-statistics`, `after-unassigned-parameters`, `bottom` |
+| `msgtype="<C++ qualified MSG type>"` (e.g. `inet::Packet`) | MSG type page | `top`, `after-description`, `after-diagrams`, `after-inheritance`, `after-fields`, `after-properties`, `bottom` |
+| `nedtype="<package>"` / `msgtype="<namespace>"` | the package's / namespace's section of the Packages / Namespaces page | `top` (under the heading), `bottom` (under the type table) |
+
+An anchor exists even when the section it follows is missing from the page (for example
+`after-gates` on a channel page). The content is NED comment markup, as in a doc comment:
+HTML tags, type names that become links, `- ` lists, and blank lines between paragraphs.
+The indentation common to all its lines is removed first. Fragments with the same page
+and anchor are inserted in file order.
+
+The generator does not produce the Eclipse IDE's file listing pages, so fragments with a
+`filename` attribute are skipped. It warns about them, and about fragments whose type,
+package, namespace or anchor does not exist, and about a malformed file.
 
 ### AI agents: the live MCP bridge
 
@@ -806,6 +848,7 @@ and `opp_lsp` on your `PATH` without a separate download — see
 | `omnetpp.neddoc.doxytagsFile` | `""` | Doxygen tag file; when set, simple-module and message pages link to the C++ documentation. |
 | `omnetpp.neddoc.doxyUrlPrefix` | `""` | URL or path prefix for the Doxygen links. |
 | `omnetpp.neddoc.externalDocs` | `{}` | Documentation of dependencies, by NED package prefix (see above). |
+| `omnetpp.neddoc.fragmentsFile` | `""` | Doc fragments file whose content is inserted into the generated pages (see above). |
 
 The Sequence Chart and Event Log settings are listed in
 [Eventlog settings](#eventlog-settings).
@@ -957,6 +1000,7 @@ opp_docgen --ned-path=../inet/src \
 | `--doxytags=<file>` | Doxygen tag file for "C++ definition" links. |
 | `--doxy-url-prefix=<url>` | URL prefix for the Doxygen links. |
 | `-l`, `--external-docs=<list>` | Documentation of dependencies, as `<package>=<url-or-path>` items (see [Linking to the documentation of dependencies](#linking-to-the-documentation-of-dependencies)). |
+| `-f`, `--fragments=<file>` | Doc fragments file (see [Adding content to the generated pages](#adding-content-to-the-generated-pages)); repeatable. |
 | `--verbose` | Print progress. |
 | `-h`, `--help` | Show help. |
 | `--version` | Show the version. |
