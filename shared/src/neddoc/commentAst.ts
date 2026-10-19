@@ -20,6 +20,7 @@
  *  - type references: in tilde mode only `~Name` is linked (`~~` = literal
  *    tilde, unknown names are flagged as errors); in automatic mode every
  *    known type name is linked (`\Name` suppresses, `\\` = literal backslash)
+ *    and a `~` in front of a linked name is dropped as reference markup
  *
  * Host-agnostic: no vscode/Node imports; `@include` resolution is injected.
  */
@@ -360,7 +361,7 @@ function emitTextWithTypeRefs(
         continue;
       }
     }
-    pushText(text.slice(last, m.index));
+    let before = text.slice(last, m.index);
     last = candidateRe.lastIndex;
 
     let identifier = m[2];
@@ -370,7 +371,7 @@ function emitTextWithTypeRefs(
     const msgLen = MSG_TYPE_RE.exec(identifier)?.[0].length ?? 0;
     const len = Math.max(nedLen, msgLen);
     if (len === 0) {
-      pushText(m[0]); // false positive (e.g. "~123"), leave as-is
+      pushText(before + m[0]); // false positive (e.g. "~123"), leave as-is
       continue;
     }
     let suffix = identifier.slice(len);
@@ -411,9 +412,14 @@ function emitTextWithTypeRefs(
     // doubled prefix chars mean one literal char in the output
     const even = prefixes.length % 2 === 0;
     const literalPrefix = prefixes.slice(0, Math.floor(prefixes.length / 2));
-    if (literalPrefix) pushText(literalPrefix);
 
     const shouldLink = tilde ? !even : even && targets !== undefined && targets.length > 0;
+    // automatic mode: a `~` right before a linked name is tilde-mode reference
+    // markup (common in existing comments, e.g. "@see ~Foo"), not text.
+    // Eclipse keeps it, which in RST glues it to the role and breaks the link.
+    if (shouldLink && !tilde && !literalPrefix && before.endsWith('~')) before = before.slice(0, -1);
+    pushText(before);
+    if (literalPrefix) pushText(literalPrefix);
     if (shouldLink) {
       out.push({ kind: 'typeref', name: identifier, targets: targets ?? [] });
       if (suffix) pushText(suffix);

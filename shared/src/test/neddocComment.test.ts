@@ -167,6 +167,13 @@ test('neddoc comment: double tilde renders one literal tilde, no link', () => {
   assert.equal(html('// ~~Foo', ctx({ Foo: ['pkg.Foo'] })), '<p>~Foo</p>');
 });
 
+test('neddoc comment: automatic mode treats ~ before a known name as markup', () => {
+  const auto = ctx({ Foo: ['pkg.Foo'] }, 'automatic');
+  assert.equal(html('// see ~Foo and Foo', auto), '<p>see <a href="pkg.Foo.html">Foo</a> and <a href="pkg.Foo.html">Foo</a></p>');
+  assert.equal(html('// ~Nope', auto), '<p>~Nope</p>');
+  assert.equal(md('// ~Foo', auto), '[Foo](pkg.Foo.md)');
+});
+
 test('neddoc comment: qualified ~ref and enum-member fallback', () => {
   assert.equal(
     html('// ~pkg.Foo and ~State::IDLE', ctx({ 'pkg.Foo': ['pkg.Foo'], State: ['pkg.State'] })),
@@ -285,6 +292,20 @@ test('neddoc md: pre becomes a fenced block', () => {
 test('neddoc rst: paragraphs, refs, code and lists', () => {
   const out = rst('// Uses ~Foo via `send()`.\n//\n// - a\n//     - b', ctx({ Foo: ['p.Foo'] }));
   assert.equal(out, 'Uses :ref:`Foo <p.Foo>` via ``send()``.\n\n- a\n\n  - b');
+});
+
+test('neddoc rst: ~ref in automatic mode becomes a working :ref: role', () => {
+  const auto = ctx({ Foo: ['p.Foo'] }, 'automatic');
+  assert.equal(rst('// @see ~Foo', auto), '**See also:** :ref:`Foo <p.Foo>`');
+  assert.equal(rst('// (~Foo, ~Foo)', auto), '(:ref:`Foo <p.Foo>`, :ref:`Foo <p.Foo>`)');
+  // an unknown ~name has nothing to link, so its tilde stays as written
+  assert.equal(rst('// ~Nope', auto), '~Nope');
+});
+
+test('neddoc rst: refs glued to other characters stay recognizable roles', () => {
+  const refs = { Foo: ['p.Foo'] };
+  assert.equal(rst('// x.~Foo#y', ctx(refs)), 'x.\\ :ref:`Foo <p.Foo>`\\ #y');
+  assert.equal(rst('// ~Foo~~bar', ctx(refs)), ':ref:`Foo <p.Foo>`\\ ~bar');
 });
 
 test('neddoc rst: inline markup chars are escaped, simple tags translate', () => {
