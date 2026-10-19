@@ -223,6 +223,23 @@ test('neddoc rst: subheading underline lengths match text', async () => {
   assert.ok(nodePage.includes('Parameters\n----------'), nodePage);
 });
 
+test('neddoc rst: diagrams keep their natural width', async () => {
+  const { files } = await collectNeddoc(
+    await buildInput({ 'file:///lib.ned': LIB }),
+    { format: 'rst' },
+    () => '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-12 -32 427 260" width="427" height="260"></svg>',
+  );
+  const netPage = files.find((f) => f.relativePath === 'types/lib.Net.rst')!.content as string;
+  assert.ok(netPage.includes('.. image:: ../images/lib.Net-type.svg\n   :alt: Net\n   :width: 427px'), netPage);
+});
+
+test('neddoc rst: refs inside a table cell are glued to adjacent text', async () => {
+  const { files } = await collectNeddoc(await buildInput({ 'file:///lib.ned': LIB }), { format: 'rst' });
+  const netPage = files.find((f) => f.relativePath === 'types/lib.Net.rst')!.content as string;
+  // `n.rate` with `n` linked: without the escaped space the role stays literal
+  assert.ok(netPage.includes(':ref:`n <neddoc-lib-node>`\\ .rate'), netPage);
+});
+
 test('neddoc: unknown format throws', async () => {
   const input = await buildInput({ 'file:///lib.ned': LIB });
   await assert.rejects(() => collectNeddoc(input, { format: 'bogus' as never }), /not implemented/);

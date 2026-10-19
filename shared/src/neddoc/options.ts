@@ -10,6 +10,14 @@ import type { DocFragmentFile } from './fragments';
 
 export type DocFormat = 'html' | 'html-readthedocs' | 'html-material' | 'markdown' | 'rst';
 
+/** Formats whose pages show diagrams as SVG files loaded into an <img>
+ *  (Markdown viewers, Sphinx). Browsers load no external resources into such
+ *  an image, so the icons of those SVGs must be embedded as data: URIs
+ *  instead of referencing the icons/ files. */
+export function embedsDiagramIcons(format: DocFormat): boolean {
+  return format === 'markdown' || format === 'rst';
+}
+
 export interface NeddocOptions {
   /** Output format (default 'html'). */
   format: DocFormat;

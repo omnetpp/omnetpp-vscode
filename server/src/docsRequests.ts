@@ -10,6 +10,7 @@ import type { Connection } from 'vscode-languageserver/node';
 import {
   OmnetppMethods,
   createDiagramRenderer,
+  embedsDiagramIcons,
   excludePatternRegex,
   generateNeddoc,
   type GenerateDocsParams,
@@ -139,15 +140,17 @@ export function registerDocsRequests(connection: Connection, state: ServerState)
     const icons = createNodeIconProvider({
       iconDirs,
       bundledIndex,
-      emit: (absPath, relName) => {
-        let href = emittedIcons.get(absPath);
-        if (!href) {
-          href = iconHrefPrefix + relName;
-          emittedIcons.set(absPath, href);
-          void emit({ relativePath: `icons/${relName}`, content: readFileSync(absPath) });
-        }
-        return href;
-      },
+      emit: embedsDiagramIcons(params.format)
+        ? 'embed'
+        : (absPath, relName) => {
+            let href = emittedIcons.get(absPath);
+            if (!href) {
+              href = iconHrefPrefix + relName;
+              emittedIcons.set(absPath, href);
+              void emit({ relativePath: `icons/${relName}`, content: readFileSync(absPath) });
+            }
+            return href;
+          },
     });
 
     // throttled progress notifications

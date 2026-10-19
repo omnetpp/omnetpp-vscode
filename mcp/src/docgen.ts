@@ -13,6 +13,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   createDiagramRenderer,
+  embedsDiagramIcons,
   excludePatternRegex,
   generateNeddoc,
   defaultNeddocOptions,
@@ -311,7 +312,8 @@ async function main(): Promise<void> {
   // icon search roots: project images/ dirs, <OMNETPP_ROOT>/images, the bundled
   // snapshot next to the CLI bundle (Eclipse order). Referenced icons are
   // copied once into <out>/icons/ and SVGs point at them relatively (SVG
-  // files live in images/, or at the root in the material layout).
+  // files live in images/, or at the root in the material layout); formats
+  // that show SVGs as <img> embed them instead (embedsDiagramIcons).
   const installDir = resolveInstallDir(undefined, process.env);
   const iconDirs = [
     ...opts.projectDirs.map((d) => join(d, 'images')).filter(existsSync),
@@ -330,10 +332,12 @@ async function main(): Promise<void> {
   const icons = createNodeIconProvider({
     iconDirs,
     bundledIndex,
-    emit: (absPath, relName) => {
-      emit({ relativePath: `icons/${relName}`, content: readFileSync(absPath) });
-      return iconHrefPrefix + relName;
-    },
+    emit: embedsDiagramIcons(opts.format)
+      ? 'embed'
+      : (absPath, relName) => {
+          emit({ relativePath: `icons/${relName}`, content: readFileSync(absPath) });
+          return iconHrefPrefix + relName;
+        },
   });
   const renderDiagram = createDiagramRenderer({ nedCache: index.nedCache, icons });
 

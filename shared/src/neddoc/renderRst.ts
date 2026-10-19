@@ -54,22 +54,34 @@ export class RstRenderer implements NeddocRenderer {
   /** Inline (single-paragraph) rendition of cell content for table cells. */
   private cellText(cells: DocCell[], emitOpts: RstEmitOpts): string {
     let out = '';
+    let afterMarkup = false;
+    // inline markup is only recognized at word boundaries (`host.src.x` with
+    // `src` linked would leave the role as literal text): glue markup to
+    // adjacent text with escaped spaces, which render as nothing
+    const append = (text: string, markup: boolean): void => {
+      if (!text) return;
+      if ((markup || afterMarkup) && out && !/\s$/.test(out) && !/^\s/.test(text)) out += '\\ ';
+      out += text;
+      afterMarkup = markup;
+    };
     for (const cell of cells) {
       switch (cell.kind) {
         case 'text':
-          out += escapeRstText(cell.text);
+          append(escapeRstText(cell.text), false);
           break;
         case 'label':
-          out += cell.text ? `*${escapeRstText(cell.text)}*` : '';
+          append(cell.text ? `*${escapeRstText(cell.text)}*` : '', true);
           break;
-        case 'link':
-          out += cell.page ? (emitOpts.refFor(cell.page, cell.text) ?? escapeRstText(cell.text)) : escapeRstText(cell.text);
+        case 'link': {
+          const ref = cell.page ? emitOpts.refFor(cell.page, cell.text) : undefined;
+          append(ref ?? escapeRstText(cell.text), ref !== undefined);
           break;
+        }
         case 'exlink':
-          out += `\`${cell.text.replace(/[`<>]/g, '')} <${cell.href}>\`__`;
+          append(`\`${cell.text.replace(/[`<>]/g, '')} <${cell.href}>\`__`, true);
           break;
         case 'doc':
-          out += this.docCellText(cell.blocks, emitOpts);
+          append(this.docCellText(cell.blocks, emitOpts), false);
           break;
       }
     }
@@ -129,9 +141,13 @@ export class RstRenderer implements NeddocRenderer {
         }
         return lines.join('\n');
       }
-      case 'diagram':
+      case 'diagram': {
         if (!ctx.hasImage(section.image)) return '';
-        return `.. image:: ${relativeRef(fromDir, section.image)}\n   :alt: ${section.title}`;
+        // pin the SVG's natural width: themes that stretch images to the
+        // content width would otherwise blow small figures up
+        const width = /^<svg\b[^>]*?\swidth="([\d.]+)"/.exec(ctx.imageContent(section.image) ?? '')?.[1];
+        return `.. image:: ${relativeRef(fromDir, section.image)}\n   :alt: ${section.title}${width ? `\n   :width: ${width}px` : ''}`;
+      }
       case 'source':
         return `.. code-block:: ${section.language}\n\n${section.code
           .split('\n')

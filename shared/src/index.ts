@@ -145,7 +145,13 @@ export { CppResourceCache } from './cpp/cppResourceCache';
 export { type ToolContext, lintFile, OMNETPP_TOOLS, handleTool } from './mcp/tools';
 
 // NED documentation generator (neddoc)
-export { type DocFormat, type NeddocOptions, defaultNeddocOptions, excludePatternRegex } from './neddoc/options';
+export {
+  type DocFormat,
+  type NeddocOptions,
+  defaultNeddocOptions,
+  embedsDiagramIcons,
+  excludePatternRegex,
+} from './neddoc/options';
 export {
   type DocModel,
   type DocPage,
