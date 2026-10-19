@@ -296,38 +296,61 @@ const RST_TAG_MARKUP: Record<string, string> = {
   dfn: '*',
 };
 
+// Inline markup is only recognized when the character before its start is
+// whitespace or one of these (docutils "inline markup recognition rules"),
+// and the character after its end is whitespace or one of the second set;
+// non-ASCII punctuation is allowed on both sides.
+const RST_BEFORE_MARKUP = /[\s\-:/'"<([{]|(?![\x00-\x7f])\p{P}/u;
+const RST_AFTER_MARKUP = /[\s\-.,:;!?\\/'")\]}>]|(?![\x00-\x7f])\p{P}/u;
+
 export function emitRstInlines(inlines: DocInline[], opts: RstEmitOpts): string {
   let out = '';
+  let prevKind: DocInline['kind'] | undefined;
   for (const inline of inlines) {
+    let chunk = '';
     switch (inline.kind) {
       case 'text':
-        out += escapeRstText(inline.text);
+        chunk = escapeRstText(inline.text);
         break;
       case 'code':
-        out += `\`\`${inline.text}\`\``;
+        chunk = `\`\`${inline.text}\`\``;
         break;
       case 'boldlabel':
-        out += `**${inline.label}**`;
+        chunk = `**${inline.label}**`;
         break;
       case 'url':
-        out += inline.href; // Sphinx auto-links bare URLs
+        chunk = inline.href; // Sphinx auto-links bare URLs
         break;
       case 'typeref':
-        out += rstTypeRef(inline, opts);
+        chunk = rstTypeRef(inline, opts);
+        // a ref glued to preceding text (e.g. "x.~Foo") would not be
+        // recognized as a role; "\ " is an escaped space that renders as nothing
+        if (isRstText(prevKind) && !RST_BEFORE_MARKUP.test(out[out.length - 1])) chunk = '\\ ' + chunk;
         break;
       case 'html': {
         // degradation: translate simple formatting tags, drop the rest
         const markup = RST_TAG_MARKUP[inline.tag];
-        if (markup) out += markup;
-        else if (inline.tag === 'br' && !inline.closing) out += '\n';
+        if (markup) chunk = markup;
+        else if (inline.tag === 'br' && !inline.closing) chunk = '\n';
         break;
       }
       case 'literal':
-        out += escapeRstText(inline.text);
+        chunk = escapeRstText(inline.text);
         break;
     }
+    if (prevKind === 'typeref' && isRstText(inline.kind) && chunk && !RST_AFTER_MARKUP.test(chunk[0])) {
+      chunk = '\\ ' + chunk;
+    }
+    if (chunk) prevKind = inline.kind;
+    out += chunk;
   }
   return out;
+}
+
+// Plain-text chunks; markup chunks (<b> → "**" etc.) are left alone, since a
+// role cannot be nested in other RST inline markup anyway.
+function isRstText(kind: DocInline['kind'] | undefined): boolean {
+  return kind === 'text' || kind === 'literal';
 }
 
 function rstTypeRef(ref: Extract<DocInline, { kind: 'typeref' }>, opts: RstEmitOpts): string {
