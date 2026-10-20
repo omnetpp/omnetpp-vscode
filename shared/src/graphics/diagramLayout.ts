@@ -104,12 +104,24 @@ export interface BackgroundSpec {
 
 export interface DiagramModel {
   background: BackgroundSpec;
+  /** The compound type's own `i=` icon, shown before its name in the title
+   *  (IDE: CompoundModuleTypeFigure's title area, always the normal size). */
+  titleIcon?: ResolvedIcon;
   submodules: SubFigure[];
   connections: ConnFigure[];
 }
 
 function color(ds: DisplayString, prop: (typeof Prop)[keyof typeof Prop]): string | undefined {
   return parseColor(ds.getAsString(prop));
+}
+
+function resolveImage(ds: DisplayString, icons: IconProvider, sizeSuffix?: string): Promise<ResolvedIcon | undefined> {
+  return icons.get(
+    ds.getAsString(Prop.IMAGE),
+    sizeSuffix,
+    ds.getAsString(Prop.IMAGE_COLOR) || undefined,
+    ds.getAsInt(Prop.IMAGE_COLOR_PERCENTAGE, 30),
+  );
 }
 
 /** Resolve one submodule's visual spec (shape/icon/decorations), IDE rules. */
@@ -138,12 +150,7 @@ async function buildSubFigure(
   if (hasIconTag) {
     const sizeName = ds.getAsEnum(Prop.IMAGE_SIZE);
     const suffix = sizeName ? { 'very small': 'vs', small: 's', large: 'l', 'very large': 'vl' }[sizeName] : undefined;
-    icon = await icons.get(
-      ds.getAsString(Prop.IMAGE),
-      suffix,
-      ds.getAsString(Prop.IMAGE_COLOR) || undefined,
-      ds.getAsInt(Prop.IMAGE_COLOR_PERCENTAGE, 30),
-    );
+    icon = await resolveImage(ds, icons, suffix);
   } else if (!hasShape) {
     icon = await icons.get('_internal/default'); // no i, no b: the IDE's default icon
   }
@@ -475,5 +482,9 @@ export async function buildDiagram(scene: PreviewScene, opts: DiagramBuildOption
   }
   connFigures.sort((a, b) => a.index - b.index);
 
-  return { background, submodules: figures, connections: connFigures };
+  const titleIcon = compoundDs.containsTag('i') && compoundDs.getAsString(Prop.IMAGE) !== ''
+    ? await resolveImage(compoundDs, opts.icons)
+    : undefined;
+
+  return { background, titleIcon, submodules: figures, connections: connFigures };
 }

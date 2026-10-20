@@ -148,6 +148,7 @@ function collectIcons(chain: string[], icons: Map<string, PreviewIcon>, backgrou
   };
   if (background) {
     add(ds.getAsString(Prop.MODULE_IMAGE));
+    add(ds.getAsString(Prop.IMAGE)); // the title icon, always the normal size
   } else {
     add(ds.getAsString(Prop.IMAGE), sizeSuffix);
     add(ds.getAsString(Prop.IMAGE2));
@@ -186,7 +187,7 @@ export function buildPreviewScene(cache: NedResourceCache, type: NedTypeInfo): P
     return scene;
   }
 
-  collectIcons(displayChain, icons, true); // bgi
+  collectIcons(displayChain, icons, true); // bgi + title icon
 
   // submodules (inherited + local, base-first like the IDE's merged view)
   const submodules: PreviewSubmodule[] = [];

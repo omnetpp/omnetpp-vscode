@@ -137,6 +137,24 @@ test('diagramSvg: tinted icons get a color-matrix filter', async () => {
   assert.ok(!plain.svg.includes('<defs>'), 'no defs expected without tint');
 });
 
+test('diagramSvg: the type icon precedes the title, without overlapping the background', async () => {
+  const model = await buildDiagram(scene({ displayChain: ['i=block/app,red,40', 'bgb=400,300'] }), opts());
+  assert.equal(model.titleIcon?.href, 'icons/block/app.png');
+  const { svg } = renderDiagramSvg(model, { title: 'Net' });
+  const image = svg.match(/<image href="icons\/block\/app\.png" x="0" y="(-?[\d.]+)" width="32" height="20" filter="url\(#tint0\)"\/>/);
+  assert.ok(image, svg);
+  assert.ok(Number(image[1]) + 20 < 0, 'title icon overlaps the compound area');
+  const text = svg.match(/<text x="35" y="(-?[\d.]+)"[^>]*font-weight="bold"[^>]*>Net<\/text>/);
+  assert.ok(text, 'title text must follow the icon');
+  assert.ok(svg.indexOf(image[0]) < svg.indexOf(text[0]), 'icon must come before the title');
+  const viewBoxY = Number(svg.match(/viewBox="[^ ]+ (-?[\d.]+)/)![1]);
+  assert.ok(viewBoxY <= Number(image[1]), 'title icon clipped by the viewBox');
+
+  const plain = renderDiagramSvg(await buildDiagram(scene({}), opts()), { title: 'Net' });
+  assert.ok(!plain.svg.includes('<image'), 'no title icon without an i= tag');
+  assert.ok(renderDiagramSvg(model, {}).svg.indexOf('<image') < 0, 'no title icon without a title');
+});
+
 test('diagramSvg: card rendering for non-compound types', async () => {
   const s = scene({ kind: 'simple', fqName: 'demo.Node', simpleName: 'Node', displayChain: ['i=device/pc'], submodules: undefined, connections: undefined });
   const figure = await buildCardFigure(s, opts());

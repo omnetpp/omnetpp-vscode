@@ -1,6 +1,7 @@
 import type { PreviewScene } from '../protocol';
 import type { BackgroundSpec, ConnFigure, DiagramModel, ResolvedIcon, SubFigure } from './diagramLayout';
 import { SvgBuilder, type Attrs } from './svgBuilder';
+import { approxTextWidth } from './textMetrics';
 
 /**
  * Renders a DiagramModel to an SVG string, layered like the IDE's
@@ -18,6 +19,7 @@ import { SvgBuilder, type Attrs } from './svgBuilder';
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const NAME_GAP = 2;
 const FONT_SIZE = 12;
+const TITLE_FONT_SIZE = FONT_SIZE + 1;
 
 export interface LinkArea {
   /** Rect in final image coordinates (viewBox origin subtracted). */
@@ -368,7 +370,13 @@ export function renderDiagramSvg(model: DiagramModel, opts: DiagramRenderOptions
     bounds.y2 = Math.max(bounds.y2, f.cy + f.height / 2 + (f.range?.radius ?? 0) + NAME_GAP + FONT_SIZE);
   }
   const margin = 12;
-  const titleH = opts.title === undefined ? 0 : 20;
+  const titleIcon = opts.title === undefined ? undefined : model.titleIcon;
+  const titleX = titleIcon ? titleIcon.width + 3 : 0;
+  if (opts.title !== undefined) {
+    // bold runs wider than the regular-weight metrics table
+    bounds.x2 = Math.max(bounds.x2, titleX + approxTextWidth(opts.title, TITLE_FONT_SIZE) * 1.1);
+  }
+  const titleH = opts.title === undefined ? 0 : titleIcon ? titleIcon.height + 6 : 20;
   const x = bounds.x1 - margin;
   const y = bounds.y1 - margin - titleH;
   const w = bounds.x2 - bounds.x1 + 2 * margin;
@@ -377,11 +385,20 @@ export function renderDiagramSvg(model: DiagramModel, opts: DiagramRenderOptions
   const filters = new TintFilters();
   const body = new SvgBuilder();
   if (opts.title !== undefined) {
+    let baseline = bounds.y1 - margin - 6;
+    if (titleIcon) {
+      // IDE title area: icon at the left, the name vertically centred on it
+      const iconY = bounds.y1 - margin - 4 - titleIcon.height;
+      body.el('image', iconAttrs(titleIcon, filters, {
+        href: titleIcon.href, x: 0, y: iconY, width: titleIcon.width, height: titleIcon.height,
+      }));
+      baseline = iconY + titleIcon.height / 2 + TITLE_FONT_SIZE * 0.36;
+    }
     body.el(
       'text',
       {
-        x: 0, y: bounds.y1 - margin - 6,
-        'font-size': FONT_SIZE + 1, 'font-family': 'sans-serif', 'font-weight': 'bold', fill: 'black',
+        x: titleX, y: baseline,
+        'font-size': TITLE_FONT_SIZE, 'font-family': 'sans-serif', 'font-weight': 'bold', fill: 'black',
       },
       opts.title,
     );
