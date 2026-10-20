@@ -307,7 +307,35 @@ test('neddoc extract: nav tree categories and search index', async () => {
   assert.deepEqual(networks.children.map((c) => c.title), ['Net']);
   const msgDefs = model.navRoot.children.find((n) => n.title === 'Message Definitions')!;
   assert.deepEqual(msgDefs.children.map((c) => c.title), ['Packets']);
+  assert.deepEqual(
+    model.navRoot.children.map((n) => n.page),
+    ['index', 'packages', 'networks', 'modules', 'module-interfaces', 'namespaces', 'message-definitions', 'files'],
+  );
+  assert.equal(msgDefs.children[0].page, 'message-definitions');
+  assert.equal(msgDefs.children[0].anchor, 'packet');
   assert.ok(model.searchIndex.some((e) => e.fqName === 'lib.Node' && e.page === 'lib.Node'));
+});
+
+test('neddoc extract: category pages list their types by simple name', async () => {
+  const model = await extract(await buildInput({ 'file:///lib.ned': LIB, 'file:///net.ned': NET }, { 'file:///p.msg': MSG }));
+  assert.deepEqual(
+    model.pages.slice(0, 8).map((p) => p.ref.id),
+    ['index', 'packages', 'networks', 'modules', 'module-interfaces', 'namespaces', 'message-definitions', 'files'],
+  );
+  for (const id of ['networks', 'modules', 'module-interfaces', 'message-definitions', 'files'])
+    assert.equal(page(model, id).ref.kind, 'category');
+  const names = (id: string) =>
+    page(model, id)
+      .sections.filter((s) => s.kind === 'table')
+      .flatMap((s) => (s.kind === 'table' ? s.rows.map((r) => (r.cells[0][0] as { text: string }).text) : []));
+  assert.deepEqual(names('networks'), model.navRoot.children.find((n) => n.title === 'Networks')!.children.map((c) => c.title));
+  assert.deepEqual(names('modules'), model.navRoot.children.find((n) => n.title === 'Modules')!.children.map((c) => c.title));
+  assert.equal(page(model, 'lib.Node').typeKind, 'simple');
+});
+
+test('neddoc extract: no files index without file listings', async () => {
+  const model = await extract(await buildInput({ 'file:///lib.ned': LIB }), { fileListings: false });
+  assert.ok(!model.pages.some((p) => p.ref.id === 'files'));
 });
 
 // ---- full project-wide diagram pages -----------------------------------------------------------

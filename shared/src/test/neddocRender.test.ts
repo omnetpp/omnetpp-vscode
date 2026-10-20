@@ -260,19 +260,37 @@ test('neddoc tag files: Eclipse-style nedtags.xml and msgtags.xml', async () => 
   // qualified NED name + the renderer's page path
   assert.ok(
     nedtags.includes(
-      '  <compound kind="class">\n    <name>lib.Node</name>\n    <filename>types/lib.Node.html</filename>\n  </compound>',
+      '  <compound kind="class" typekind="simple">\n    <name>lib.Node</name>\n    <filename>types/lib.Node.html</filename>\n  </compound>',
     ),
     nedtags,
   );
+  assert.ok(nedtags.includes('<compound kind="class" typekind="network">\n    <name>lib.Net</name>'), nedtags);
   assert.ok(!nedtags.includes('FooPkt'), 'msg types must not appear in nedtags.xml');
 
   const msgtags = files.find((f) => f.relativePath === 'msgtags.xml')!.content as string;
   // MSG types are listed under their simple name (Eclipse behavior)
   assert.ok(
-    msgtags.includes('<name>FooPkt</name>\n    <filename>types/msg-lib--FooPkt.html</filename>'),
+    msgtags.includes('<compound kind="class" typekind="packet">\n    <name>FooPkt</name>\n    <filename>types/msg-lib--FooPkt.html</filename>'),
     msgtags,
   );
   assert.ok(!msgtags.includes('lib.Node'), 'ned types must not appear in msgtags.xml');
+});
+
+test('neddoc rst: category pages are in the index toctree and list their types', async () => {
+  const { files } = await collectNeddoc(await buildInput({ 'file:///lib.ned': LIB }, { 'file:///p.msg': MSG }), {
+    format: 'rst',
+  });
+  const index = files.find((f) => f.relativePath === 'index.rst')!.content as string;
+  for (const page of ['packages', 'networks', 'modules', 'namespaces', 'message-definitions', 'files'])
+    assert.ok(index.includes(`\n   ${page}\n`), index);
+  const modules = files.find((f) => f.relativePath === 'modules.rst')!.content as string;
+  assert.ok(modules.startsWith('.. _neddoc-modules:\n\nModules\n'), modules);
+  assert.ok(modules.indexOf('<neddoc-lib-node>') < modules.indexOf('<neddoc-lib-sink>'), modules);
+  assert.ok(!modules.includes('<neddoc-lib-net>'), 'networks are not listed among the modules');
+  const msgDefs = files.find((f) => f.relativePath === 'message-definitions.rst')!.content as string;
+  assert.ok(msgDefs.includes('.. _neddoc-message-definitions-packet:\n\nPackets\n'), msgDefs);
+  const fileIndex = files.find((f) => f.relativePath === 'files.rst')!.content as string;
+  assert.ok(fileIndex.includes(':ref:`/lib.ned <neddoc-file-lib-ned>`') && fileIndex.includes('*MSG file*'), fileIndex);
 });
 
 test('neddoc tag files: filenames follow the active format', async () => {

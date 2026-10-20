@@ -85,6 +85,29 @@ export function nedKindLabel(t: NedTypeInfo): string {
   return NED_KIND_LABELS[t.kind] ?? t.kind;
 }
 
+/** The kind of a NED type as the category pages and tag files name it: the
+ *  NED keyword, except `network` for modules marked as networks. */
+export function nedTypeKind(t: NedTypeInfo): string {
+  return t.isModuleType() && t.isNetworkType() ? 'network' : t.kind;
+}
+
+/** The category pages of NED types, in navigation order. */
+const NED_CATEGORIES: { id: string; title: string; kinds: string[] }[] = [
+  { id: 'networks', title: 'Networks', kinds: ['network'] },
+  { id: 'modules', title: 'Modules', kinds: ['simple', 'compound'] },
+  { id: 'module-interfaces', title: 'Module Interfaces', kinds: ['moduleinterface'] },
+  { id: 'channels', title: 'Channels', kinds: ['channel'] },
+  { id: 'channel-interfaces', title: 'Channel Interfaces', kinds: ['channelinterface'] },
+];
+
+const MSG_CATEGORIES: [string, string][] = [
+  ['message', 'Messages'],
+  ['packet', 'Packets'],
+  ['class', 'Classes'],
+  ['struct', 'Structs'],
+  ['enum', 'Enums'],
+];
+
 function defaultDisplayPath(uri: string): string {
   return uri.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/?/, '');
 }
@@ -222,7 +245,14 @@ class Extraction {
         this.pages.push(this.filePage(f));
       }
     this.pages.push(...this.fullDiagramPages(), ...this.topicPages());
-    this.pages.unshift(this.indexPage(), ...this.packagesPage(), ...this.namespacesPage());
+    this.pages.unshift(
+      this.indexPage(),
+      ...this.packagesPage(),
+      ...this.nedCategoryPages(),
+      ...this.namespacesPage(),
+      ...this.msgDefinitionsPage(),
+      ...this.filesPage(),
+    );
     this.reportUnusedFragments();
     return {
       pages: this.pages,
@@ -920,7 +950,7 @@ class Extraction {
     );
     sections.push(...frag('bottom'));
 
-    return { ref: { id: pageId, title: t.simpleName, kind: 'nedtype' }, sections };
+    return { ref: { id: pageId, title: t.simpleName, kind: 'nedtype' }, sections, typeKind: nedTypeKind(t) };
   }
 
   /** "File: <path>", linked to the file listing when there is one. */
@@ -1227,7 +1257,7 @@ class Extraction {
     sections.push(this.fileLine(t.file.uri));
     sections.push(...frag('bottom'));
 
-    return { ref: { id: pageId, title: t.simpleName, kind: 'msgtype' }, sections };
+    return { ref: { id: pageId, title: t.simpleName, kind: 'msgtype' }, sections, typeKind: t.kind };
   }
 
   private msgFieldsSection(t: MsgTypeInfo): DocSection[] {
@@ -1442,18 +1472,53 @@ class Extraction {
     return [{ ref: { id: 'namespaces', title: 'Namespaces', kind: 'namespaces' }, sections }];
   }
 
+  private static bySimpleName<T extends { simpleName: string; fqName: string }>(types: T[]): T[] {
+    return types.slice().sort((a, b) => a.simpleName.localeCompare(b.simpleName) || a.fqName.localeCompare(b.fqName));
+  }
+
+  private nedCategoryTypes(kinds: string[]): NedTypeInfo[] {
+    return Extraction.bySimpleName(this.nedTypes.filter((t) => kinds.includes(nedTypeKind(t))));
+  }
+
+  private nedCategoryPages(): DocPage[] {
+    return NED_CATEGORIES.flatMap(({ id, title, kinds }) => {
+      const types = this.nedCategoryTypes(kinds);
+      if (types.length === 0) return [];
+      const sections = [this.typesTable(types.map((t) => this.nedTypeRef(t)))];
+      return [{ ref: { id, title, kind: 'category' as const }, sections }];
+    });
+  }
+
+  private msgDefinitionsPage(): DocPage[] {
+    const sections: DocSection[] = [];
+    for (const [kind, title] of MSG_CATEGORIES) {
+      const types = Extraction.bySimpleName(this.msgTypes.filter((t) => t.kind === kind));
+      if (types.length === 0) continue;
+      sections.push({ kind: 'subheading', text: title, anchor: kind });
+      sections.push(this.typesTable(types.map((t) => this.msgTypeRef(t))));
+    }
+    if (sections.length === 0) return [];
+    return [{ ref: { id: 'message-definitions', title: 'Message Definitions', kind: 'category' }, sections }];
+  }
+
+  private filesPage(): DocPage[] {
+    if (!this.options.fileListings || this.files.length === 0) return [];
+    const rows: DocTableRow[] = this.files.map((f) => ({
+      cells: [
+        [{ kind: 'link', text: f.path, page: this.filePageId.get(f.uri) }],
+        [{ kind: 'label', text: f.language === 'ned' ? 'NED file' : 'MSG file' }],
+      ],
+    }));
+    const table: DocSection = { kind: 'table', cssClass: 'typestable', columns: ['Name', 'Type'], rows };
+    return [{ ref: { id: 'files', title: 'Files', kind: 'category' }, sections: [table] }];
+  }
+
   private buildNav(): NavNode {
     const leaf = (title: string, page: string): NavNode => ({ title, page, children: [] });
     const typeLeaves = (types: NedTypeInfo[]): NavNode[] =>
-      types
-        .slice()
-        .sort((a, b) => a.simpleName.localeCompare(b.simpleName) || a.fqName.localeCompare(b.fqName))
-        .map((t) => leaf(t.simpleName, this.nedPageId.get(t.fqName)!));
+      Extraction.bySimpleName(types).map((t) => leaf(t.simpleName, this.nedPageId.get(t.fqName)!));
     const msgLeaves = (types: MsgTypeInfo[]): NavNode[] =>
-      types
-        .slice()
-        .sort((a, b) => a.simpleName.localeCompare(b.simpleName) || a.fqName.localeCompare(b.fqName))
-        .map((t) => leaf(t.simpleName, this.msgPageId.get(t.fqName)!));
+      Extraction.bySimpleName(types).map((t) => leaf(t.simpleName, this.msgPageId.get(t.fqName)!));
 
     const root: NavNode = { title: this.options.projectTitle ?? 'NED Documentation', children: [] };
     root.children.push(leaf('Overview', 'index'));
@@ -1481,17 +1546,10 @@ class Extraction {
         });
       root.children.push(packages);
 
-      const networks = this.nedTypes.filter((t) => t.isModuleType() && t.isNetworkType());
-      const modules = this.nedTypes.filter((t) => t.isModuleType() && !t.isNetworkType());
-      const moduleIfaces = this.nedTypes.filter((t) => t.kind === 'moduleinterface');
-      const channels = this.nedTypes.filter((t) => t.kind === 'channel');
-      const channelIfaces = this.nedTypes.filter((t) => t.kind === 'channelinterface');
-      if (networks.length) root.children.push({ title: 'Networks', children: typeLeaves(networks) });
-      if (modules.length) root.children.push({ title: 'Modules', children: typeLeaves(modules) });
-      if (moduleIfaces.length) root.children.push({ title: 'Module Interfaces', children: typeLeaves(moduleIfaces) });
-      if (channels.length) root.children.push({ title: 'Channels', children: typeLeaves(channels) });
-      if (channelIfaces.length)
-        root.children.push({ title: 'Channel Interfaces', children: typeLeaves(channelIfaces) });
+      for (const { id, title, kinds } of NED_CATEGORIES) {
+        const types = this.nedCategoryTypes(kinds);
+        if (types.length) root.children.push({ title, page: id, children: typeLeaves(types) });
+      }
     }
 
     if (this.msgTypes.length > 0) {
@@ -1507,23 +1565,16 @@ class Extraction {
         });
       root.children.push(namespaces);
 
-      const msgDefs: NavNode = { title: 'Message Definitions', children: [] };
-      const byKind: [string, string][] = [
-        ['message', 'Messages'],
-        ['packet', 'Packets'],
-        ['class', 'Classes'],
-        ['struct', 'Structs'],
-        ['enum', 'Enums'],
-      ];
-      for (const [kind, title] of byKind) {
+      const msgDefs: NavNode = { title: 'Message Definitions', page: 'message-definitions', children: [] };
+      for (const [kind, title] of MSG_CATEGORIES) {
         const types = this.msgTypes.filter((t) => t.kind === kind);
-        if (types.length) msgDefs.children.push({ title, children: msgLeaves(types) });
+        if (types.length) msgDefs.children.push({ title, page: 'message-definitions', anchor: kind, children: msgLeaves(types) });
       }
       if (msgDefs.children.length) root.children.push(msgDefs);
     }
 
     if (this.options.fileListings && this.files.length > 0)
-      root.children.push({ title: 'Files', children: this.files.map((f) => leaf(f.path, this.filePageId.get(f.uri)!)) });
+      root.children.push({ title: 'Files', page: 'files', children: this.files.map((f) => leaf(f.path, this.filePageId.get(f.uri)!)) });
 
     return root;
   }

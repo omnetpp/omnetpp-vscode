@@ -9,7 +9,17 @@ import type { DocBlock } from './commentAst';
 import type { DocGraph } from './graphDiagram';
 import type { ExternalTypeRef } from './externalDocs';
 
-export type PageKind = 'index' | 'packages' | 'namespaces' | 'nedtype' | 'msgtype' | 'file' | 'topic' | 'fulldiagram';
+export type PageKind =
+  | 'index'
+  | 'packages'
+  | 'namespaces'
+  /** A listing of the types of one category (networks, modules, ...) or of the files. */
+  | 'category'
+  | 'nedtype'
+  | 'msgtype'
+  | 'file'
+  | 'topic'
+  | 'fulldiagram';
 
 export interface DocPageRef {
   /** Stable page id; the renderer derives the output path from it. Type pages
@@ -61,6 +71,9 @@ export interface DocPage {
   /** The content brings its own heading (an `@titlepage`): renderers that
    *  can do without one print no page heading. */
   ownHeading?: boolean;
+  /** The NED/MSG kind of a type page (`typeKind()` values), recorded in the
+   *  tag files. */
+  typeKind?: string;
 }
 
 /** Navigation-tree node (drives the HTML sidebar, Markdown SUMMARY.md and the

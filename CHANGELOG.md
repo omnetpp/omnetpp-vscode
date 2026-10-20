@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Category index pages in NED documentation**: as the legacy Eclipse reference, the
+  documentation has a page per category — Networks, Modules, Module Interfaces,
+  Channels, Channel Interfaces, Message Definitions (by kind) and Files — and the
+  category entries of the navigation link to them. `nedtags.xml` and `msgtags.xml` give
+  each type's NED/MSG kind in a `typekind` attribute (`simple`, `compound`, `network`,
+  `channel`, `moduleinterface`, `channelinterface`; `message`, `packet`, `class`,
+  `struct`, `enum`); `kind="class"` stays for doxygen-tagfile readers
 - **NED documentation removes its stale files**: each run lists the files it writes in
   `.neddoc-files` in the output folder, and the next run deletes the listed files it does
   not write again (pages of renamed or deleted types and files). Other files in the

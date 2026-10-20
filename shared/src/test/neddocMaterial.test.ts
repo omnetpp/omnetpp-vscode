@@ -125,7 +125,7 @@ test('neddoc html-material: navtreedata.js follows the Eclipse array format', as
   const nav = files.find((f) => f.relativePath === 'navtreedata.js')!.content as string;
   assert.ok(nav.includes('var NAVTREE ='), nav.slice(0, 100));
   // backtick-quoted [title, url, children] entries
-  assert.ok(/\[`Networks`, null, \[/.test(nav), nav);
+  assert.ok(/\[`Networks`, `networks\.html`, \[/.test(nav), nav);
   assert.ok(/\[`Net`, `lib\.Net\.html`, null\]/.test(nav), nav);
   assert.ok(/\[`Overview`, `index\.html`, null\]/.test(nav), nav);
 
