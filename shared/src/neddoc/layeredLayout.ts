@@ -110,16 +110,12 @@ export function layeredLayout(nodes: LayeredNode[], edges: LayeredEdge[], opts: 
     }
   }
 
-  // x placement: pack each rank, then pull nodes toward the median of their
-  // neighbors, resolving overlaps left-to-right
+  // x placement: alternate down/up sweeps that move each node toward the
+  // median of its neighbors in the rank already placed, then fit the rank to
+  // those targets with the least total displacement that keeps the order and
+  // spacing (isotonic regression). Overlaps are thus resolved symmetrically, so
+  // a fan-out centers under its parent; the final up sweep centers parents.
   const x = new Array<number>(nodes.length).fill(0);
-  const packRank = (row: number[]): void => {
-    let cursor = 0;
-    for (const v of row) {
-      x[v] = Math.max(x[v], cursor + nodes[v].width / 2);
-      cursor = x[v] + nodes[v].width / 2 + nodeSep;
-    }
-  };
   for (const row of ranks) {
     let cursor = 0;
     for (const v of row) {
@@ -127,23 +123,39 @@ export function layeredLayout(nodes: LayeredNode[], edges: LayeredEdge[], opts: 
       cursor = x[v] + nodes[v].width / 2 + nodeSep;
     }
   }
-  for (let pass = 0; pass < 3; pass++) {
-    for (const row of ranks) {
-      for (const v of row) {
-        const ns = [...inn[v], ...out[v]];
-        if (ns.length) {
-          const m = median(ns.map((n) => x[n]));
-          if (!Number.isNaN(m)) x[v] = m;
-        }
+  const centerMedian = (values: number[]): number => {
+    const s = values.slice().sort((a, b) => a - b);
+    return (s[Math.floor((s.length - 1) / 2)] + s[Math.floor(s.length / 2)]) / 2;
+  };
+  const fitRank = (row: number[], target: number[]): void => {
+    const offset: number[] = [0];
+    for (let i = 1; i < row.length; i++)
+      offset[i] = offset[i - 1] + nodes[row[i - 1]].width / 2 + nodeSep + nodes[row[i]].width / 2;
+    const blocks: { sum: number; count: number }[] = [];
+    for (let i = 0; i < row.length; i++) {
+      blocks.push({ sum: target[i] - offset[i], count: 1 });
+      while (blocks.length > 1) {
+        const last = blocks[blocks.length - 1];
+        const prev = blocks[blocks.length - 2];
+        if (prev.sum / prev.count < last.sum / last.count) break;
+        prev.sum += last.sum;
+        prev.count += last.count;
+        blocks.pop();
       }
-      // resolve overlaps: left-to-right minimal shifts
-      for (let i = 1; i < row.length; i++) {
-        const prev = row[i - 1];
-        const v = row[i];
-        const minX = x[prev] + nodes[prev].width / 2 + nodeSep + nodes[v].width / 2;
-        if (x[v] < minX) x[v] = minX;
-      }
-      packRank(row);
+    }
+    let i = 0;
+    for (const block of blocks)
+      for (let k = 0; k < block.count; k++, i++) x[row[i]] = block.sum / block.count + offset[i];
+  };
+  for (let pass = 0; pass < 4; pass++) {
+    const down = pass % 2 === 0;
+    const neighbors = down ? inn : out;
+    for (let r = down ? 1 : maxRank - 1; down ? r <= maxRank : r >= 0; down ? r++ : r--) {
+      const row = ranks[r];
+      fitRank(
+        row,
+        row.map((v) => (neighbors[v].length ? centerMedian(neighbors[v].map((n) => x[n])) : x[v])),
+      );
     }
   }
 

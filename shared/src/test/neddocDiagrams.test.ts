@@ -34,6 +34,28 @@ test('layeredLayout: no overlap within a rank', () => {
   assert.ok(width >= 4 * 60);
 });
 
+const LEAVES = ['l1', 'l2', 'l3', 'l4', 'l5', 'l6', 'l7', 'l8'];
+
+test('layeredLayout: a chain above a fan-out stays centered over it', () => {
+  const nodes = [box('head'), box('mid'), ...LEAVES.map((l) => box(l))];
+  const edges = [{ src: 'head', dest: 'mid' }, ...LEAVES.map((l) => ({ src: 'mid', dest: l }))];
+  const { pos } = layeredLayout(nodes, edges);
+  const xs = LEAVES.map((l) => pos.get(l)!.x);
+  const center = (Math.min(...xs) + Math.max(...xs)) / 2;
+  assert.ok(Math.abs(pos.get('mid')!.x - center) < 1, `mid ${pos.get('mid')!.x} vs leaves center ${center}`);
+  assert.ok(Math.abs(pos.get('head')!.x - pos.get('mid')!.x) < 1, `head ${pos.get('head')!.x} vs mid ${pos.get('mid')!.x}`);
+});
+
+test('layeredLayout: a fan-in above a chain stays centered over it', () => {
+  const nodes = [...LEAVES.map((l) => box(l)), box('mid'), box('tail')];
+  const edges = [...LEAVES.map((l) => ({ src: l, dest: 'mid' })), { src: 'mid', dest: 'tail' }];
+  const { pos } = layeredLayout(nodes, edges);
+  const xs = LEAVES.map((l) => pos.get(l)!.x);
+  const center = (Math.min(...xs) + Math.max(...xs)) / 2;
+  assert.ok(Math.abs(pos.get('mid')!.x - center) < 1, `mid ${pos.get('mid')!.x} vs leaves center ${center}`);
+  assert.ok(Math.abs(pos.get('tail')!.x - pos.get('mid')!.x) < 1, `tail ${pos.get('tail')!.x} vs mid ${pos.get('mid')!.x}`);
+});
+
 test('layeredLayout: cycles do not hang and still produce positions', () => {
   const nodes = [box('a'), box('b')];
   const edges = [
