@@ -3,8 +3,8 @@
  * Cross-page links use :ref: roles against per-page/per-section labels
  * (`.. _neddoc-<id>:`) so they resolve build-wide; tables are list-table
  * directives (robust with long cells); the index page carries a hidden
- * toctree naming every generated page so a plain `sphinx-build` works on
- * the output directory as-is.
+ * toctree naming the overview pages, and the type and file pages are
+ * `:orphan:`, so a plain `sphinx-build` works on the output directory as-is.
  */
 
 import { emitRst, emitRstInlines, escapeRstText, flattenInlines, type RstEmitOpts } from './commentEmit';
@@ -18,6 +18,14 @@ import { isAbsoluteUrl } from './externalDocs';
 export function rstLabel(pageId: string, anchor?: string): string {
   const raw = anchor ? `${pageId}-${anchor}` : pageId;
   return 'neddoc-' + raw.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+/** Type and file pages stay out of the toctree: themes that render the
+ *  global toctree into every page (sphinx_immaterial) would otherwise carry
+ *  hundreds of entries on each page of the site. They are reached from the
+ *  category listings. */
+function isOrphan(ref: DocPageRef): boolean {
+  return ref.kind === 'nedtype' || ref.kind === 'msgtype' || ref.kind === 'file';
 }
 
 export class RstRenderer implements NeddocRenderer {
@@ -42,7 +50,8 @@ export class RstRenderer implements NeddocRenderer {
     };
     const emitOpts: RstEmitOpts = { refFor };
     const title = page.ref.title;
-    const out: string[] = [`.. _${rstLabel(page.ref.id)}:`, '', title, '='.repeat(Math.max(title.length, 3))];
+    const out: string[] = isOrphan(page.ref) ? [':orphan:', ''] : [];
+    out.push(`.. _${rstLabel(page.ref.id)}:`, '', title, '='.repeat(Math.max(title.length, 3)));
     for (const section of page.sections) {
       const rendered = this.renderSection(section, page, ctx, emitOpts, fromDir);
       if (rendered) out.push('', rendered);
@@ -156,13 +165,13 @@ export class RstRenderer implements NeddocRenderer {
     }
   }
 
-  /** Hidden toctree on the index page naming every other page, so Sphinx
-   *  includes them in the build without cluttering the overview. Of the
+  /** Hidden toctree on the index page naming the other non-orphan pages, so
+   *  they get into the navigation without cluttering the overview. Of the
    *  `@externalpage` links only URLs fit in; a relative one would name a
    *  missing document. */
   private indexToctree(ctx: RenderCtx): string {
     const entries = ctx.model.pages
-      .filter((p) => p.ref.id !== 'index')
+      .filter((p) => p.ref.id !== 'index' && !isOrphan(p.ref))
       .map((p) => this.pagePath(p.ref).replace(/\.rst$/, ''));
     const walk = (node: NavNode): void => {
       if (node.href && isAbsoluteUrl(node.href)) entries.push(`${node.title.replace(/[<>]/g, '')} <${node.href}>`);

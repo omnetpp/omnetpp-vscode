@@ -201,8 +201,8 @@ test('neddoc rst: labels, refs, list-tables and toctree', async () => {
   assert.ok(paths.includes('types/lib.Node.rst'));
 
   const nodePage = files.find((f) => f.relativePath === 'types/lib.Node.rst')!.content as string;
-  // page label + title underline
-  assert.ok(nodePage.startsWith('.. _neddoc-lib-node:\n\nNode\n===='), nodePage.slice(0, 60));
+  // out of the toctree, page label + title underline
+  assert.ok(nodePage.startsWith(':orphan:\n\n.. _neddoc-lib-node:\n\nNode\n===='), nodePage.slice(0, 60));
   // ~ref resolves to a :ref: role against the target page label
   assert.ok(nodePage.includes(':ref:`Sink <neddoc-lib-sink>`'), nodePage);
   // parameters list-table with section label
@@ -214,7 +214,9 @@ test('neddoc rst: labels, refs, list-tables and toctree', async () => {
 
   const index = files.find((f) => f.relativePath === 'index.rst')!.content as string;
   assert.ok(index.includes('.. toctree::'));
-  assert.ok(index.includes('   types/lib.Node'), index);
+  assert.ok(!/^   (types|files)\//m.test(index), index);
+  const filePage = files.find((f) => f.relativePath.startsWith('files/'))!.content as string;
+  assert.ok(filePage.startsWith(':orphan:\n'), filePage.slice(0, 60));
 });
 
 test('neddoc rst: subheading underline lengths match text', async () => {
