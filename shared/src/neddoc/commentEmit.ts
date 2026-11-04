@@ -361,12 +361,18 @@ function rstTypeRef(ref: Extract<DocInline, { kind: 'typeref' }>, opts: RstEmitO
   return `${escapeRstText(name)}\\ (${links})`;
 }
 
+// The comment keeps the indentation of its lines (e.g. of a list item's
+// continuation lines), which in RST would start a block quote.
+function unindentRstLines(text: string): string {
+  return text.replace(/\n[ \t]+/g, '\n');
+}
+
 export function emitRst(blocks: DocBlock[], opts: RstEmitOpts): string {
   const out: string[] = [];
   for (const block of blocks) {
     switch (block.kind) {
       case 'para':
-        out.push(emitRstInlines(block.inlines, opts));
+        out.push(unindentRstLines(emitRstInlines(block.inlines, opts)));
         break;
       case 'pre': {
         const body = trimBlankEdges(flattenInlines(block.inlines))
@@ -386,7 +392,7 @@ export function emitRst(blocks: DocBlock[], opts: RstEmitOpts): string {
         for (const item of block.items) {
           const indent = '  '.repeat(item.level - 1);
           const marker = block.ordered ? `${++n}.` : '-';
-          const content = emitRstInlines(item.inlines, opts).replace(/\n/g, `\n${indent}  `);
+          const content = unindentRstLines(emitRstInlines(item.inlines, opts)).replace(/\n/g, `\n${indent}  `);
           // RST requires a blank line when the nesting level changes
           if (lines.length > 0 && item.level !== prevLevel) lines.push('');
           lines.push(`${indent}${marker} ${content}`);

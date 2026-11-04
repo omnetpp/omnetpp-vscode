@@ -319,3 +319,8 @@ test('neddoc rst: pre becomes a literal block', () => {
 test('neddoc rst: ordered list and hrule', () => {
   assert.equal(rst('// -# one\n// -# two\n//\n// ------\n//\n// end'), '1. one\n2. two\n\n----\n\nend');
 });
+
+test('neddoc comment: rst continuation lines lose their indentation', () => {
+  assert.equal(rst('// - item\n//   continued\n//     - nested\n//       more'), '- item\n  continued\n\n  - nested\n    more');
+  assert.equal(rst('// line one\n//    line two'), 'line one\nline two');
+});
