@@ -320,6 +320,14 @@ test('neddoc rst: ordered list and hrule', () => {
   assert.equal(rst('// -# one\n// -# two\n//\n// ------\n//\n// end'), '1. one\n2. two\n\n----\n\nend');
 });
 
+test('neddoc comment: rst headings become rubrics', () => {
+  assert.equal(
+    rst('// <center><h1>Lib-1.0</h1></center>\n// <center><h3>NED Documentation<h3></center>\n//\n// Text.'),
+    '.. rubric:: Lib-1.0\n   :heading-level: 1\n\n.. rubric:: NED Documentation\n   :heading-level: 3\n\nText.',
+  );
+  assert.equal(rst('// Before <h2>Title</h2> after.'), 'Before\n\n.. rubric:: Title\n   :heading-level: 2\n\nafter.');
+});
+
 test('neddoc comment: rst continuation lines lose their indentation', () => {
   assert.equal(rst('// - item\n//   continued\n//     - nested\n//       more'), '- item\n  continued\n\n  - nested\n    more');
   assert.equal(rst('// line one\n//    line two'), 'line one\nline two');

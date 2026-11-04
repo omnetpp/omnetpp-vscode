@@ -367,12 +367,42 @@ function unindentRstLines(text: string): string {
   return text.replace(/\n[ \t]+/g, '\n');
 }
 
+const RST_HEADING_TAGS: Record<string, number> = { h1: 1, h2: 2, h3: 3 };
+
+/** Splits a paragraph at its `<h1>`-`<h3>` headings. A heading ends at its
+ *  closing tag, or else (e.g. `<h3>Title<h3>`) at the next heading tag or
+ *  the end of its line. */
+function splitRstHeadings(inlines: DocInline[]): { level?: number; inlines: DocInline[] }[] {
+  const parts: { level?: number; inlines: DocInline[] }[] = [{ inlines: [] }];
+  const current = () => parts[parts.length - 1];
+  for (const inline of inlines) {
+    if (inline.kind === 'html' && RST_HEADING_TAGS[inline.tag]) {
+      const level = RST_HEADING_TAGS[inline.tag];
+      parts.push(current().level || inline.closing ? { inlines: [] } : { level, inlines: [] });
+      continue;
+    }
+    if (current().level && inline.kind === 'text' && inline.text.includes('\n')) {
+      const i = inline.text.indexOf('\n');
+      current().inlines.push({ kind: 'text', text: inline.text.slice(0, i) });
+      parts.push({ inlines: [{ kind: 'text', text: inline.text.slice(i + 1) }] });
+      continue;
+    }
+    current().inlines.push(inline);
+  }
+  return parts;
+}
+
 export function emitRst(blocks: DocBlock[], opts: RstEmitOpts): string {
   const out: string[] = [];
   for (const block of blocks) {
     switch (block.kind) {
       case 'para':
-        out.push(unindentRstLines(emitRstInlines(block.inlines, opts)));
+        for (const part of splitRstHeadings(block.inlines)) {
+          const text = unindentRstLines(emitRstInlines(part.inlines, opts)).trim();
+          if (!text) continue;
+          // a rubric, not a section: no TOC entry, no clash with the page title
+          out.push(part.level ? `.. rubric:: ${text.replace(/\s*\n\s*/g, ' ')}\n   :heading-level: ${part.level}` : text);
+        }
         break;
       case 'pre': {
         const body = trimBlankEdges(flattenInlines(block.inlines))
