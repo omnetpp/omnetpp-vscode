@@ -370,7 +370,6 @@ GitHub Actions in `.github/workflows/`:
   Marketplace, and publishes the command-line tools to npm as `@omnetpp/opp-tools`. It
   fails early if the tag differs from the `package.json` version. Secrets:
   `OPEN_VSX_TOKEN`, `VS_MARKETPLACE_TOKEN`, `NPM_TOKEN`.
-- `publish.yml` — manual dispatch: `bun run deploy` to the Marketplace.
 
 To release: bump `version` in `package.json`, add a `CHANGELOG.md` entry, commit, and push
 a tag such as `0.4.1`.
