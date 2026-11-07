@@ -366,9 +366,11 @@ GitHub Actions in `.github/workflows/`:
 - `ci.yml` — every push/PR: `build:wasm`, compile, unit tests, `dev:build`,
   `lint-cli-smoke.mjs`, `lsp-smoke.mjs` and `lsp-cli-smoke.mjs`.
 - `release.yml` — on a pushed `X.Y.Z` tag (no `v` prefix): packages the `.vsix`, creates
-  a GitHub release with it, and publishes to Open VSX and the VS Code Marketplace.
+  a GitHub release with it, publishes that `.vsix` to Open VSX and the VS Code
+  Marketplace, and publishes the command-line tools to npm as `@omnetpp/opp-tools`. It
+  fails early if the tag differs from the `package.json` version. Secrets:
+  `OPEN_VSX_TOKEN`, `VS_MARKETPLACE_TOKEN`, `NPM_TOKEN`.
 - `publish.yml` — manual dispatch: `bun run deploy` to the Marketplace.
 
 To release: bump `version` in `package.json`, add a `CHANGELOG.md` entry, commit, and push
-a tag such as `0.4.1`. Publish the command-line tools to npm with `bun run deploy:cli`
-(no workflow does this yet).
+a tag such as `0.4.1`.

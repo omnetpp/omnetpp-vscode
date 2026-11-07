@@ -67,3 +67,8 @@ jobs:
         pat: ${{ secrets.VS_MARKETPLACE_TOKEN }}
         registryUrl: https://marketplace.visualstudio.com
         extensionFile: ./omnetpp-vscode-${{ env.VERSION }}.vsix
+
+    - name: Publish the command-line tools to npm (@omnetpp/opp-tools)
+      env:
+        NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+      run: bun ./scripts/pack-cli.mjs --publish
