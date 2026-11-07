@@ -1,57 +1,5 @@
 # Change Log
 
-## Unreleased
-
-- **Category index pages in NED documentation**: as the legacy Eclipse reference, the
-  documentation has a page per category — Networks, Modules, Module Interfaces,
-  Channels, Channel Interfaces, Message Definitions (by kind) and Files — and the
-  category entries of the navigation link to them. `nedtags.xml` and `msgtags.xml` give
-  each type's NED/MSG kind in a `typekind` attribute (`simple`, `compound`, `network`,
-  `channel`, `moduleinterface`, `channelinterface`; `message`, `packet`, `class`,
-  `struct`, `enum`); `kind="class"` stays for doxygen-tagfile readers
-- **NED documentation removes its stale files**: each run lists the files it writes in
-  `.neddoc-files` in the output folder, and the next run deletes the listed files it does
-  not write again (pages of renamed or deleted types and files). Other files in the
-  folder are left alone
-- **Richer submodule tooltips in NED documentation**: in the module figures of the type
-  pages, a submodule's tooltip also shows the description of its type (and of the `like`
-  interface) and its source, as in the Eclipse IDE
-- **Highlighted source listings in NED documentation**: the NED and MSG sources on type
-  and file pages are colored like in the Eclipse IDE (keywords, types, strings, comments,
-  doc tags, `TODO` in private comments) in the HTML formats
-- **Overview and topic pages in NED documentation**: as in the Eclipse IDE, a file
-  comment with `@titlepage` replaces the generated overview page, `@page <file>, <title>`
-  adds a page, and `@externalpage <file>, <title>` a link; pages and links appear under
-  "Selected Topics" in the navigation
-- **File listings in NED documentation**: as in the Eclipse IDE, a page per NED/MSG file
-  with its types and full source, a "Files" section in the navigation, and `File:`
-  lines on type pages that link to it. On by default; `omnetpp.neddoc.fileListings`,
-  `opp_docgen --no-file-listings`. Doc fragments with a `filename` attribute now go there
-- **Doc fragments for NED documentation**: the Eclipse IDE's doc fragments file
-  (`<docfragments>` XML) inserts extra content at fixed anchors of the type, package and
-  namespace pages. Set it with `omnetpp.neddoc.fragmentsFile` or `opp_docgen -f <file>`
-- **`--version` for the command-line tools**: `opp_lint`, `opp_docgen`, `opp_ide_mcp`
-  and `opp_lsp` print their name and the package version (`opp_lint 1.0.0`)
-- **`opp_lsp` command-line tool**: the extension's language server, for other LSP
-  editors (Neovim, Helix, Emacs, …). It speaks LSP over stdio by default and takes
-  library NED roots from `--ned-path` or `OMNETPP_NED_PATH`. Installed with the other
-  command-line tools and by `@omnetpp/opp-tools`
-- **"OMNeT++: Set Up AI Agents…"**: installs an OMNeT++ agent plugin (skills, a post-edit
-  lint hook, and for Claude Code the language server) and the `opp_ide_mcp` MCP server
-  into Claude Code, Codex and Devin through their own CLIs, writes a managed project
-  section into `AGENTS.md`, and recommends the clangd C++ extension. Copilot in VS Code
-  gets the OMNeT++ skills through the extension itself
-- **OMNeT++ agent skills**: `omnetpp-tooling`, `omnetpp-modeling`,
-  `omnetpp-model-development`, `omnetpp-coding-conventions`, `omnetpp-sim-debugging`,
-  plus the optional `omnetpp-fingerprint-testing` and `omnetpp-model-refactoring`
-- **`opp_lint --agent-hook`**: runs as an agent post-edit hook and reports the
-  diagnostics of the edited NED/MSG/INI files back to the agent
-- **`opp_ide_mcp` follows file changes**: before each tool call it re-reads the files
-  that changed on disk, so an agent's edits show up without a server restart
-- **Shared NED path**: the command-line tools read `omnetpp.nedPath` from the project's
-  `.vscode/settings.json` when no `--ned-path` / `OMNETPP_NED_PATH` is given, and
-  relative entries of the setting are resolved against the workspace folder
-
 ## 1.0.0
 
 - **License change:** from 1.0.0 on, the extension and the command-line tools are licensed
@@ -64,15 +12,54 @@
   supports event filtering, cause/consequence tracing, bookmarks, and SVG export
 - **7 `elog_*` MCP tools** for reading eventlog files (standalone `opp_ide_mcp` server)
 - **Command-line tools for everyone**: "OMNeT++: Install Command-Line Tools" puts
-  `opp_lint`, `opp_docgen` and `opp_ide_mcp` on the `PATH` (launchers that run on VS
-  Code's own runtime, refreshed on updates), and the npm package `@omnetpp/opp-tools`
-  installs them without VS Code (Node.js 18+). `opp_ide_mcp` is now a command with
-  `--help`, like the other two
+  `opp_lint`, `opp_docgen`, `opp_ide_mcp` and `opp_lsp` on the `PATH` (launchers that
+  run on VS Code's own runtime, refreshed on updates), and the npm package
+  `@omnetpp/opp-tools` installs them without VS Code (Node.js 18+). All of them take
+  `--help` and `--version`
+- **`opp_lsp` command-line tool**: the extension's language server, for other LSP
+  editors (Neovim, Helix, Emacs, …). It speaks LSP over stdio by default and takes
+  library NED roots from `--ned-path` or `OMNETPP_NED_PATH`
+- **Shared NED path**: the command-line tools read `omnetpp.nedPath` from the project's
+  `.vscode/settings.json` when no `--ned-path` / `OMNETPP_NED_PATH` is given, and
+  relative entries of the setting are resolved against the workspace folder
 - **NED documentation generation** — "Generate NED Documentation" command and the
   standalone `opp_docgen` CLI: HTML (classic, Read the Docs, and Material styles),
   Markdown, or reStructuredText output with module figures, usage/inheritance diagrams,
   Doxygen tag-file links to C++ docs, and links to separately generated documentation
-  of dependencies; configurable via `omnetpp.neddoc.*` settings
+  of dependencies; configurable via `omnetpp.neddoc.*` settings. As in the Eclipse IDE:
+  - category index pages (Networks, Modules, Module Interfaces, Channels, Channel
+    Interfaces, Message Definitions by kind, Files), linked from the navigation
+  - file listings: a page per NED/MSG file with its types and full source, a "Files"
+    section in the navigation, and `File:` lines on type pages that link to it. On by
+    default; `omnetpp.neddoc.fileListings`, `opp_docgen --no-file-listings`
+  - overview and topic pages: a file comment with `@titlepage` replaces the generated
+    overview page, `@page <file>, <title>` adds a page, and `@externalpage <file>,
+    <title>` a link; they appear under "Selected Topics" in the navigation
+  - doc fragments: the `<docfragments>` XML file inserts extra content at fixed anchors
+    of the type, package, namespace and file pages. Set it with
+    `omnetpp.neddoc.fragmentsFile` or `opp_docgen -f <file>`
+  - syntax-highlighted NED and MSG source listings in the HTML formats
+  - submodule tooltips in the module figures that show the description and source of
+    the submodule's type (and of its `like` interface)
+  - `nedtags.xml` and `msgtags.xml` give each type's NED/MSG kind in a `typekind`
+    attribute (`simple`, `compound`, `network`, `channel`, `moduleinterface`,
+    `channelinterface`; `message`, `packet`, `class`, `struct`, `enum`);
+    `kind="class"` stays for doxygen-tagfile readers
+  - each run lists the files it writes in `.neddoc-files` in the output folder, and the
+    next run deletes the listed files it does not write again (pages of renamed or
+    deleted types and files). Other files in the folder are left alone
+- **"OMNeT++: Set Up AI Agents…"**: installs an OMNeT++ agent plugin (skills, a post-edit
+  lint hook, and for Claude Code the language server) and the `opp_ide_mcp` MCP server
+  into Claude Code, Codex and Devin through their own CLIs, writes a managed project
+  section into `AGENTS.md`, and recommends the clangd C++ extension. Copilot in VS Code
+  gets the OMNeT++ skills through the extension itself
+- **OMNeT++ agent skills**: `omnetpp-tooling`, `omnetpp-modeling`,
+  `omnetpp-model-development`, `omnetpp-coding-conventions`, `omnetpp-sim-debugging`,
+  plus the optional `omnetpp-fingerprint-testing` and `omnetpp-model-refactoring`
+- **`opp_lint --agent-hook`**: runs as an agent post-edit hook and reports the
+  diagnostics of the edited NED/MSG/INI files back to the agent
+- **`opp_ide_mcp` follows file changes**: before each tool call it re-reads the files
+  that changed on disk, so an agent's edits show up without a server restart
 - **Switch between corresponding `.cc`/`.h`/`.ned` files** (`Alt+O`)
 - **`find_member_accesses` MCP tool** — where NED parameters, gates, and submodules are
   accessed from C++ (23 NED/MSG/INI tools in total)
