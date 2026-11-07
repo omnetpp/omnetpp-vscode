@@ -20,10 +20,8 @@ Alternatively, [download the latest release](https://github.com/omnetpp/omnetpp-
 
 ## Documentation
 
-- **[User Guide](docs/USER_GUIDE.md)** — every feature in the editor and in the
-  command-line tools, how to install the tools, and the MCP tool reference.
-- **[Developer Guide](docs/DEVELOPMENT.md)** — building, testing, the architecture, and
-  the project's conventions.
+The **[User Guide](docs/USER_GUIDE.md)** describes every feature in the editor and in the
+command-line tools, how to install the tools, and the MCP tool reference.
 
 ## Feature highlights
 
