@@ -369,7 +369,10 @@ GitHub Actions in `.github/workflows/`:
   a GitHub release with it, publishes that `.vsix` to Open VSX and the VS Code
   Marketplace, and publishes the command-line tools to npm as `@omnetpp/opp-tools`. It
   fails early if the tag differs from the `package.json` version. Secrets:
-  `OPEN_VSX_TOKEN`, `VS_MARKETPLACE_TOKEN`, `NPM_TOKEN`.
+  `OPEN_VSX_TOKEN`, `NPM_TOKEN`. The Marketplace needs no secret: `vsce publish --oidc`
+  uses trusted publishing, for which the `opensim` publisher has a policy (Marketplace
+  publisher page → **Trusted Publishing**) for repository `omnetpp/omnetpp-vscode`,
+  workflow `release.yml` and no environment.
 
 To release: bump `version` in `package.json`, add a `CHANGELOG.md` entry, commit, and push
 a tag such as `0.4.1`.

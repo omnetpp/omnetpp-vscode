@@ -6,7 +6,7 @@ on:
       - '*.*.*'  # Triggers the workflow when pushing a tag that matches the pattern, e.g., 1.0.0
 
 permissions:
-        contents: write
+  contents: write
 
 jobs:
   release:
@@ -61,12 +61,12 @@ jobs:
         pat: ${{ secrets.OPEN_VSX_TOKEN }}
         extensionFile: ./omnetpp-vscode-${{ env.VERSION }}.vsix
 
+    # Trusted publishing: the Marketplace publisher has a policy for this repository and
+    # this workflow file (release.yml), and accepts the job's GitHub OIDC token instead
+    # of a PAT. Renaming this file, or adding a GitHub environment to the job, needs the
+    # same change in that policy.
     - name: Publish to Visual Studio Marketplace
-      uses: HaaLeo/publish-vscode-extension@v1
-      with:
-        pat: ${{ secrets.VS_MARKETPLACE_TOKEN }}
-        registryUrl: https://marketplace.visualstudio.com
-        extensionFile: ./omnetpp-vscode-${{ env.VERSION }}.vsix
+      run: bun ./node_modules/@vscode/vsce/vsce publish --oidc --packagePath ./omnetpp-vscode-${{ env.VERSION }}.vsix
 
     - name: Publish the command-line tools to npm (@omnetpp/opp-tools)
       env:
