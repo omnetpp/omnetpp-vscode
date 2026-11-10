@@ -993,6 +993,7 @@
     "@vscode/vsce": "^4.1.0",
     "esbuild": "^0.23.0",
     "happy-dom": "^20.10.6",
+    "ovsx": "1.4.0",
     "tree-sitter-cli": "0.25.10",
     "typescript": "^5.5.0",
     "vscode-jsonrpc": "^8.2.0",

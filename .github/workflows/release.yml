@@ -55,16 +55,15 @@ jobs:
         asset_name: omnetpp-vscode-${{ env.VERSION }}.vsix
         asset_content_type: application/vsix
 
+    # Trusted publishing: the opensim namespace has a trusted publisher for this
+    # repository and release.yml, and accepts the job's GitHub OIDC token instead of an
+    # access token. Renaming this file, or adding a GitHub environment to the job, needs
+    # the same change there.
     - name: Publish to Open VSX Registry
-      uses: HaaLeo/publish-vscode-extension@v1
-      with:
-        pat: ${{ secrets.OPEN_VSX_TOKEN }}
-        extensionFile: ./omnetpp-vscode-${{ env.VERSION }}.vsix
+      run: bun ./node_modules/ovsx/bin/ovsx publish --trusted-publishing --packagePath ./omnetpp-vscode-${{ env.VERSION }}.vsix
 
-    # Trusted publishing: the Marketplace publisher has a policy for this repository and
-    # this workflow file (release.yml), and accepts the job's GitHub OIDC token instead
-    # of a PAT. Renaming this file, or adding a GitHub environment to the job, needs the
-    # same change in that policy.
+    # Trusted publishing, as for Open VSX: the Marketplace publisher has a policy for this
+    # repository and release.yml.
     - name: Publish to Visual Studio Marketplace
       run: bun ./node_modules/@vscode/vsce/vsce publish --oidc --packagePath ./omnetpp-vscode-${{ env.VERSION }}.vsix
 
