@@ -374,13 +374,17 @@ GitHub Actions in `.github/workflows/`:
   an existing release: downloads that release's files and publishes them, unchanged, to
   Open VSX, the VS Code Marketplace and npm. Each registry is a checkbox, so a publish
   that failed on one of them can be repeated for that one alone (a registry never takes
-  the same version twice). The only secret is `NPM_TOKEN`: both extension registries use
-  trusted publishing (`ovsx publish --trusted-publishing`, `vsce publish --oidc`), which
-  exchanges the job's GitHub OIDC token for a short-lived publishing token. For that, the
-  `opensim` Open VSX namespace has a trusted publisher
-  (<https://open-vsx.org/user-settings/trusted-publishers>) and the `opensim` Marketplace
-  publisher a policy (publisher page → **Trusted Publishing**), both for repository
-  `omnetpp/omnetpp-vscode`, workflow `publish.yml` and no environment.
+  the same version twice). It needs no secret: all three registries use trusted
+  publishing (`ovsx publish --trusted-publishing`, `vsce publish --oidc`, and
+  `npm publish`, with the npm CLI because `bun publish` cannot), which exchanges the
+  job's GitHub OIDC token for a short-lived publishing token. For that, the `opensim`
+  Open VSX namespace has a trusted publisher
+  (<https://open-vsx.org/user-settings/trusted-publishers>), the `opensim` Marketplace
+  publisher a policy (publisher page → **Trusted Publishing**), and the
+  `@omnetpp/opp-tools` npm package a trusted publisher (package **Settings** on
+  npmjs.com), all for repository `omnetpp/omnetpp-vscode`, workflow `publish.yml` and no
+  environment. npm checks the package's `repository` field (`mcp/npm/package.json`)
+  against that repository.
 
 To release: bump `version` in `package.json`, add a `## X.Y.Z` section to `CHANGELOG.md`,
 commit, and push the tag `X.Y.Z`. Check the GitHub release, then run `publish.yml` for

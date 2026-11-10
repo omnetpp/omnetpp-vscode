@@ -9,7 +9,8 @@ name: Publish
 # Open VSX namespace and the opensim Marketplace publisher accept the job's
 # GitHub OIDC token for this repository and this workflow file (publish.yml),
 # with no environment. Renaming this file, or adding an environment to the job,
-# needs the same change there. npm still uses the NPM_TOKEN secret.
+# needs the same change there. npm does the same through the trusted publisher
+# of the @omnetpp/opp-tools package, so the workflow uses no secret at all.
 on:
   workflow_dispatch:
     inputs:
@@ -70,8 +71,16 @@ jobs:
       if: inputs.marketplace
       run: bun ./node_modules/@vscode/vsce/vsce publish --oidc --packagePath "release/omnetpp-vscode-$TAG.vsix"
 
+    # bun publish has no OIDC support; npm's trusted publishing needs npm >= 11.5.1.
+    - name: Set up Node.js and npm for trusted publishing
+      if: inputs.npm
+      uses: actions/setup-node@v4
+      with:
+        node-version: 24
+        registry-url: https://registry.npmjs.org
+
     - name: Publish the command-line tools to npm (@omnetpp/opp-tools)
       if: inputs.npm
-      env:
-        NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
-      run: bun publish "release/omnetpp-opp-tools-$TAG.tgz"
+      run: |
+        npm install --global npm@^11.5.1
+        npm publish "release/omnetpp-opp-tools-$TAG.tgz"

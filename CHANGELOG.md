@@ -1,6 +1,6 @@
 # Change Log
 
-## 1.0.1
+## 1.0.2
 
 - **License change:** from 1.0.0 on, the extension and the command-line tools are licensed
   like the OMNeT++ / OMNEST simulation kernel — free for noncommercial use, commercial use
