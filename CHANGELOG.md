@@ -1,5 +1,12 @@
 # Change Log
 
+## 1.0.1
+
+- No functional changes since 1.0.0. 1.0.0 was published only on Open VSX; 1.0.1 is the
+  first 1.x release on the VS Code Marketplace and of the `@omnetpp/opp-tools` npm
+  package. The release workflow now publishes to both extension registries with trusted
+  publishing (OIDC) instead of stored access tokens
+
 ## 1.0.0
 
 - **License change:** from 1.0.0 on, the extension and the command-line tools are licensed
