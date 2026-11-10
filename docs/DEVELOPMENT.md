@@ -365,16 +365,23 @@ GitHub Actions in `.github/workflows/`:
 
 - `ci.yml` — every push/PR: `build:wasm`, compile, unit tests, `dev:build`,
   `lint-cli-smoke.mjs`, `lsp-smoke.mjs` and `lsp-cli-smoke.mjs`.
-- `release.yml` — on a pushed `X.Y.Z` tag (no `v` prefix): packages the `.vsix`, creates
-  a GitHub release with it, publishes that `.vsix` to Open VSX and the VS Code
-  Marketplace, and publishes the command-line tools to npm as `@omnetpp/opp-tools`. It
-  fails early if the tag differs from the `package.json` version. The only secret is
-  `NPM_TOKEN`: both extension registries use trusted publishing (`vsce publish --oidc`,
-  `ovsx publish --trusted-publishing`), which exchanges the job's GitHub OIDC token for a
-  short-lived publishing token. For that, the `opensim` Marketplace publisher has a
-  policy (publisher page → **Trusted Publishing**) and the `opensim` Open VSX namespace a
-  trusted publisher (<https://open-vsx.org/user-settings/trusted-publishers>), both for
-  repository `omnetpp/omnetpp-vscode`, workflow `release.yml` and no environment.
+- `release.yml` — on a pushed `X.Y.Z` tag (no `v` prefix): builds the `.vsix` and the
+  npm package (`omnetpp-opp-tools-X.Y.Z.tgz`) and creates the GitHub release with both
+  attached, its notes taken from the `## X.Y.Z` section of `CHANGELOG.md`. It fails early
+  if the tag differs from the `package.json` version or the section is missing. It
+  publishes nothing.
+- `publish.yml` — started by hand (**Actions → Publish → Run workflow**) with the tag of
+  an existing release: downloads that release's files and publishes them, unchanged, to
+  Open VSX, the VS Code Marketplace and npm. Each registry is a checkbox, so a publish
+  that failed on one of them can be repeated for that one alone (a registry never takes
+  the same version twice). The only secret is `NPM_TOKEN`: both extension registries use
+  trusted publishing (`ovsx publish --trusted-publishing`, `vsce publish --oidc`), which
+  exchanges the job's GitHub OIDC token for a short-lived publishing token. For that, the
+  `opensim` Open VSX namespace has a trusted publisher
+  (<https://open-vsx.org/user-settings/trusted-publishers>) and the `opensim` Marketplace
+  publisher a policy (publisher page → **Trusted Publishing**), both for repository
+  `omnetpp/omnetpp-vscode`, workflow `publish.yml` and no environment.
 
-To release: bump `version` in `package.json`, add a `CHANGELOG.md` entry, commit, and push
-a tag such as `0.4.1`.
+To release: bump `version` in `package.json`, add a `## X.Y.Z` section to `CHANGELOG.md`,
+commit, and push the tag `X.Y.Z`. Check the GitHub release, then run `publish.yml` for
+that tag.

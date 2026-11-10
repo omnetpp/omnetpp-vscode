@@ -1,9 +1,12 @@
 name: Release
 
+# Builds the release on a pushed version tag and creates the GitHub release with
+# the extension (.vsix) and the npm package (.tgz) attached. Publishing those
+# files to the registries is the separate, manually started publish.yml.
 on:
   push:
     tags:
-      - '*.*.*'  # Triggers the workflow when pushing a tag that matches the pattern, e.g., 1.0.0
+      - '*.*.*'
 
 permissions:
   contents: write
@@ -14,60 +17,42 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up Bun
       uses: oven-sh/setup-bun@v2
 
     - name: Install dependencies
-      run: bun install && ./refresh_submodules
+      run: bun install --frozen-lockfile && ./refresh_submodules
 
     - name: Check that the tag matches the package.json version
+      env:
+        TAG: ${{ github.ref_name }}
       run: |
         VERSION=$(jq -r '.version' package.json)
-        if [ "$VERSION" != "${{ github.ref_name }}" ]; then
-          echo "::error::tag ${{ github.ref_name }} does not match package.json version $VERSION"
+        if [ "$VERSION" != "$TAG" ]; then
+          echo "::error::tag $TAG does not match package.json version $VERSION"
           exit 1
         fi
-        echo "VERSION=$VERSION" >> $GITHUB_ENV
+        echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
-    - name: Build VS Code extension package
+    - name: Build the extension package (.vsix)
       run: bun run package
 
-    - name: Create GitHub release
-      id: create_release
-      uses: actions/create-release@v1
+    - name: Build the npm package (.tgz)
+      run: bun ./scripts/pack-cli.mjs
+
+    - name: Take the release notes from CHANGELOG.md
+      run: |
+        awk -v v="$VERSION" '$0 == "## " v {on=1; next} /^## / {on=0} on' CHANGELOG.md > release-notes.md
+        if [ ! -s release-notes.md ]; then
+          echo "::error::CHANGELOG.md has no '## $VERSION' section"
+          exit 1
+        fi
+
+    - name: Create the GitHub release
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ github.ref_name }}
-        release_name: ${{ github.ref_name }}
-        draft: false
-        prerelease: false
-
-    - name: Upload VS Code extension package to release
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./omnetpp-vscode-${{ env.VERSION }}.vsix
-        asset_name: omnetpp-vscode-${{ env.VERSION }}.vsix
-        asset_content_type: application/vsix
-
-    # Trusted publishing: the opensim namespace has a trusted publisher for this
-    # repository and release.yml, and accepts the job's GitHub OIDC token instead of an
-    # access token. Renaming this file, or adding a GitHub environment to the job, needs
-    # the same change there.
-    - name: Publish to Open VSX Registry
-      run: bun ./node_modules/ovsx/bin/ovsx publish --trusted-publishing --packagePath ./omnetpp-vscode-${{ env.VERSION }}.vsix
-
-    # Trusted publishing, as for Open VSX: the Marketplace publisher has a policy for this
-    # repository and release.yml.
-    - name: Publish to Visual Studio Marketplace
-      run: bun ./node_modules/@vscode/vsce/vsce publish --oidc --packagePath ./omnetpp-vscode-${{ env.VERSION }}.vsix
-
-    - name: Publish the command-line tools to npm (@omnetpp/opp-tools)
-      env:
-        NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
-      run: bun ./scripts/pack-cli.mjs --publish
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gh release create "$VERSION" --verify-tag --title "$VERSION" --notes-file release-notes.md \
+          "omnetpp-vscode-$VERSION.vsix" "build/omnetpp-opp-tools-$VERSION.tgz"

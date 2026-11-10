@@ -1,0 +1,77 @@
+name: Publish
+
+# Publishes the files of an existing GitHub release (made by release.yml) to the
+# registries, without rebuilding them. Started by hand; each registry can be
+# chosen separately, so a publish that failed on one registry can be repeated
+# for that registry alone.
+#
+# Open VSX and the VS Code Marketplace use trusted publishing: the opensim
+# Open VSX namespace and the opensim Marketplace publisher accept the job's
+# GitHub OIDC token for this repository and this workflow file (publish.yml),
+# with no environment. Renaming this file, or adding an environment to the job,
+# needs the same change there. npm still uses the NPM_TOKEN secret.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish, e.g. 1.0.1'
+        required: true
+        type: string
+      openvsx:
+        description: 'Publish to Open VSX'
+        type: boolean
+        default: true
+      marketplace:
+        description: 'Publish to the VS Code Marketplace'
+        type: boolean
+        default: true
+      npm:
+        description: 'Publish @omnetpp/opp-tools to npm'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    env:
+      TAG: ${{ inputs.tag }}
+
+    steps:
+    # The tag's own checkout, for the vsce and ovsx versions pinned in its lockfile.
+    - name: Checkout the release tag
+      uses: actions/checkout@v4
+      with:
+        ref: refs/tags/${{ inputs.tag }}
+
+    - name: Set up Bun
+      uses: oven-sh/setup-bun@v2
+
+    - name: Install the publishing tools
+      run: bun install --frozen-lockfile
+
+    - name: Download the release files
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gh release download "$TAG" --dir release \
+          --pattern "omnetpp-vscode-$TAG.vsix" --pattern "omnetpp-opp-tools-$TAG.tgz"
+        ls -l release
+
+    - name: Publish to Open VSX Registry
+      if: inputs.openvsx
+      run: bun ./node_modules/ovsx/bin/ovsx publish --trusted-publishing --packagePath "release/omnetpp-vscode-$TAG.vsix"
+
+    - name: Publish to Visual Studio Marketplace
+      if: inputs.marketplace
+      run: bun ./node_modules/@vscode/vsce/vsce publish --oidc --packagePath "release/omnetpp-vscode-$TAG.vsix"
+
+    - name: Publish the command-line tools to npm (@omnetpp/opp-tools)
+      if: inputs.npm
+      env:
+        NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+      run: bun publish "release/omnetpp-opp-tools-$TAG.tgz"

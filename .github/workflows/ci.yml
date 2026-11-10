@@ -1,8 +1,8 @@
 name: CI
 
 # Validation gate: type-check, unit tests, bundling, and headless smoke tests on
-# every push and pull request. (Publishing is handled by release.yml,
-# which does NOT run tests — this workflow is what keeps them honest.)
+# every push and pull request. (Releasing and publishing are release.yml and
+# publish.yml, which do NOT run tests — this workflow is what keeps them honest.)
 on:
   push:
     branches: ['**']
