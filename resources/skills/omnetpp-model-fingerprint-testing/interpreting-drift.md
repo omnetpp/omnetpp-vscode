@@ -24,6 +24,17 @@ identifies the cause class before you look at any code.
   no apparent reason, suspect a registry insertion and bisect.
 - **sz moved** → statistics were added/removed, values changed, or the result
   recording ORDER changed (module reordering does this).
+- **sz moved, values identical, only their order differs** → often a signal
+  ID shift. Per-module result recording follows the global signal-ID order,
+  and IDs of `static simsignal_t X = registerSignal(...)` are assigned in
+  static-initialization (= link) order across translation units. Moving such
+  statics into another file -- or a new file statically registering an
+  already-used name -- reorders IDs and moves `sz` on every config that
+  records those statistics, while tplx/tilx/~tNl stay identical. Put the
+  signals where they belong, but make the move a SEPARATE step, so its
+  sz-only drift can be verified (compare the `.sca` values of both builds as
+  sets) and re-recorded on its own. Diagnose with a single-config `.sca`
+  diff, not by reading code.
 - **tyf moved** → display-string/figure noise; usually excluded from
   enforcement.
 - **Different value on every run (non-deterministic)** → uninitialized data in

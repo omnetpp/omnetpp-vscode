@@ -43,7 +43,13 @@ fingerprint uses the INET calculator (the `~` filter implies it).
 - "U" PACKET_UPDATE_FILTER: excludes packet update arrival events (e.g.
   transmission truncations).
 - "N" NETWORK_NODE_PATH: adds full paths of the sender and arrival network
-  nodes for packet arrival events.
+  nodes for packet arrival events. Full paths start with the network's
+  name, so RENAMING THE NETWORK (or switching a config to a derived network
+  type) moves `~tNl` even with bit-identical traffic. To prove that, run the
+  new code on a network with the old name (e.g. a copy in a scratch NED
+  package, `-n ...:<scratch>`, `--network=<pkg>.<OldName>`) with
+  `--fingerprint=<old>/~tNl` and
+  `--fingerprintcalculator-class=inet::FingerprintCalculator`.
 - "I" NETWORK_INTERFACE_PATH: adds full paths of the sender and arrival
   network interfaces.
 - "D" PACKET_DATA: includes raw packet data bytes in the fingerprint. Requires

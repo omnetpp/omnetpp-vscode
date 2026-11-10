@@ -53,9 +53,12 @@
   into Claude Code, Codex and Devin through their own CLIs, writes a managed project
   section into `AGENTS.md`, and recommends the clangd C++ extension. Copilot in VS Code
   gets the OMNeT++ skills through the extension itself
-- **OMNeT++ agent skills**: `omnetpp-tooling`, `omnetpp-modeling`,
-  `omnetpp-model-development`, `omnetpp-coding-conventions`, `omnetpp-sim-debugging`,
-  plus the optional `omnetpp-fingerprint-testing` and `omnetpp-model-refactoring`
+- **OMNeT++ agent skills**: `omnetpp-tooling`, `omnetpp-model-development`,
+  `omnetpp-model-coding-conventions`, `omnetpp-model-debugging`, plus the optional
+  `omnetpp-model-fingerprint-testing`, `omnetpp-model-refactoring`,
+  `omnetpp-model-review-brief`, `omnetpp-model-git-workflow`,
+  `omnetpp-model-branch-cleanup` and `omnetpp-model-branch-rebase`, each installed with
+  the skills it refers to (among them the generic `dev-*` Git procedures)
 - **`opp_lint --agent-hook`**: runs as an agent post-edit hook and reports the
   diagnostics of the edited NED/MSG/INI files back to the agent
 - **`opp_ide_mcp` follows file changes**: before each tool call it re-reads the files

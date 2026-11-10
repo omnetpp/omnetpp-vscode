@@ -785,8 +785,8 @@ terminal agents (Claude Code, Codex) do not see the bridge — set them up with
 `opp_ide_mcp` server.
 
 The extension also gives Copilot the OMNeT++ [skills](#ai-agents-set-up-ai-agents)
-(`omnetpp-tooling`, `omnetpp-modeling`, `omnetpp-model-development`,
-`omnetpp-coding-conventions`, `omnetpp-sim-debugging`) through VS Code's skill
+(`omnetpp-tooling`, `omnetpp-model-development`, `omnetpp-model-coding-conventions`,
+`omnetpp-model-debugging`) through VS Code's skill
 contribution point, so Copilot needs no setup at all.
 
 **Advantage.** An AI assistant can *query your actual model* (resolved types, parameters,
@@ -802,9 +802,14 @@ configuration). For each selected agent it installs, at user level:
 
 - the **OMNeT++ agent plugin**, with
   - the **skills**: `omnetpp-tooling` (when to use the MCP tools and `opp_lint`),
-    `omnetpp-modeling`, `omnetpp-model-development`, `omnetpp-coding-conventions`,
-    `omnetpp-sim-debugging`, and optionally `omnetpp-fingerprint-testing` and
-    `omnetpp-model-refactoring`;
+    `omnetpp-model-development`, `omnetpp-model-coding-conventions` and
+    `omnetpp-model-debugging`, and optionally the model maintainers' skills
+    `omnetpp-model-fingerprint-testing`, `omnetpp-model-refactoring`,
+    `omnetpp-model-review-brief` (a reviewer's brief of a PR or branch),
+    `omnetpp-model-git-workflow`, `omnetpp-model-branch-cleanup` and
+    `omnetpp-model-branch-rebase`. An optional skill comes with the skills it refers to,
+    including the generic `dev-*` procedures (`dev-git-workflow`, `dev-commit-messages`,
+    `dev-branch-cleanup`, `dev-branch-rebase`, `dev-design`) that the Git skills build on;
   - a **post-edit lint hook**: after every edit of a `.ned`, `.msg` or `.ini` file, the
     agent gets the [`opp_lint --agent-hook`](#opp_lint--linter) diagnostics of that file;
   - for Claude Code, the **NED/MSG/INI language server** (`opp_lsp`);

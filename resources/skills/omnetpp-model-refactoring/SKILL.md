@@ -58,7 +58,7 @@ description: >
 
 - First, create an empty, do-nothing submodule, and update the fingerprints with
   that. (Only "tilx" fingerprints may change due to module IDs being shifted,
-  but nothing else.) (See omnetpp-fingerprint-testing/ingredients.md for ingredient semantics.) Then, gradually port the code into the new submodule.
+  but nothing else.) (See omnetpp-model-fingerprint-testing/ingredients.md for ingredient semantics.) Then, gradually port the code into the new submodule.
   E.g. first move just calls; then move just code but let it operate on data of the original submodule; then move relevant data fields.
 
 ### Flattening virtual methods
@@ -67,4 +67,4 @@ description: >
 
 ## Git usage
 
-Follow the staging, commit-prefix, and rename rules in the omnetpp-git-workflow skill. Prefix commit subjects with a very short refactoring name and step number, e.g. "RRC structuring step 1: ...".
+Follow the staging and rename rules in dev-git-workflow, and the commit subject format in dev-commit-messages. For a multi-step refactoring, the group prefix is a very short name of the refactoring plus the step number, e.g. "RRC structuring step 1: rrc: refactor: ...".

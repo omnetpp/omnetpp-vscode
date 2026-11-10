@@ -19,13 +19,61 @@ export const PLUGIN_DIR = 'plugins/omnetpp';
 /** Skills every installation gets; Copilot gets the same set through `contributes.chatSkills`. */
 export const DEFAULT_SKILLS = [
   'omnetpp-tooling',
-  'omnetpp-modeling',
   'omnetpp-model-development',
-  'omnetpp-coding-conventions',
-  'omnetpp-sim-debugging',
+  'omnetpp-model-coding-conventions',
+  'omnetpp-model-debugging',
 ];
 /** Skills for model maintainers, installed only on request. */
-export const OPTIONAL_SKILLS = ['omnetpp-fingerprint-testing', 'omnetpp-model-refactoring'];
+export const OPTIONAL_SKILLS = [
+  'omnetpp-model-fingerprint-testing',
+  'omnetpp-model-refactoring',
+  'omnetpp-model-review-brief',
+  'omnetpp-model-git-workflow',
+  'omnetpp-model-branch-cleanup',
+  'omnetpp-model-branch-rebase',
+];
+/**
+ * The non-default skills that each skill sends the agent to. They are installed with it,
+ * so that no reference in an installed skill points to a skill the agent does not have.
+ * The dev-* skills are generic procedures the omnetpp-model-* ones build on; they are
+ * never offered on their own.
+ */
+export const SKILL_REQUIRES: Record<string, string[]> = {
+  'omnetpp-model-fingerprint-testing': [],
+  'omnetpp-model-refactoring': ['dev-commit-messages', 'dev-git-workflow', 'omnetpp-model-fingerprint-testing'],
+  'omnetpp-model-review-brief': ['dev-commit-messages'],
+  'omnetpp-model-git-workflow': [
+    'dev-git-workflow',
+    'omnetpp-model-fingerprint-testing',
+    'omnetpp-model-branch-cleanup',
+    'omnetpp-model-branch-rebase',
+  ],
+  'omnetpp-model-branch-cleanup': ['dev-branch-cleanup', 'omnetpp-model-branch-rebase'],
+  'omnetpp-model-branch-rebase': ['dev-branch-rebase', 'omnetpp-model-branch-cleanup'],
+  'dev-git-workflow': [
+    'dev-branch-cleanup',
+    'dev-branch-rebase',
+    'dev-commit-messages',
+    'dev-design',
+    'omnetpp-model-git-workflow',
+  ],
+  'dev-commit-messages': [],
+  'dev-branch-cleanup': ['dev-branch-rebase', 'dev-commit-messages', 'omnetpp-model-branch-cleanup'],
+  'dev-branch-rebase': ['dev-branch-cleanup', 'dev-git-workflow', 'omnetpp-model-branch-rebase'],
+  'dev-design': [],
+};
+
+/** The given optional skills plus every skill they require, transitively, in a stable order. */
+export function withRequiredSkills(optionalSkills: readonly string[]): string[] {
+  const result = new Set<string>();
+  const visit = (name: string): void => {
+    if (result.has(name)) return;
+    result.add(name);
+    for (const r of SKILL_REQUIRES[name] ?? []) visit(r);
+  };
+  for (const s of optionalSkills) if (OPTIONAL_SKILLS.includes(s)) visit(s);
+  return Object.keys(SKILL_REQUIRES).filter((s) => result.has(s));
+}
 
 const DESCRIPTION =
   'OMNeT++ NED/MSG/INI support: lint feedback after edits, a NED/MSG/INI language server, and OMNeT++ modeling skills.';

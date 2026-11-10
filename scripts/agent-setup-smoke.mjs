@@ -23,6 +23,7 @@ const lines = [];
 const log = { info: (m) => lines.push(m), warn: (m) => lines.push(`WARN ${m}`), error: (m) => lines.push(`ERROR ${m}`), show() {} };
 mock.module('vscode', () => ({ window: { createOutputChannel: () => log } }));
 const { AGENT_CLIS, probeAgents, runSteps, writePlugin, pluginRoot } = await import('../client/src/agentPlugin.ts');
+const { DEFAULT_SKILLS } = await import('../shared/src/agents/plugin.ts');
 
 const context = {
   extension: { packageJSON: { version: '9.9.9' } },
@@ -41,11 +42,14 @@ try {
   }
   const pluginDir = writePlugin(context, ['omnetpp-model-refactoring']);
   const skills = join(pluginDir, 'plugins', 'omnetpp', 'skills');
-  check('plugin has the default and the chosen optional skills',
+  check('plugin has the default skills, the chosen optional skill and its requirements',
     existsSync(join(skills, 'omnetpp-tooling', 'SKILL.md')) && existsSync(join(skills, 'omnetpp-model-refactoring', 'SKILL.md')) &&
-      !existsSync(join(skills, 'omnetpp-fingerprint-testing')));
+      existsSync(join(skills, 'omnetpp-model-fingerprint-testing', 'SKILL.md')) &&
+      existsSync(join(skills, 'dev-git-workflow', 'SKILL.md')) &&
+      !existsSync(join(skills, 'omnetpp-model-review-brief')));
   writePlugin(context, []);
-  check('a rewrite drops a deselected optional skill', !existsSync(join(skills, 'omnetpp-model-refactoring')));
+  check('a rewrite drops a deselected optional skill and its requirements',
+    !existsSync(join(skills, 'omnetpp-model-refactoring')) && !existsSync(join(skills, 'dev-git-workflow')));
 
   for (const a of await probeAgents()) {
     if (!a.available) {
@@ -63,7 +67,7 @@ try {
     if (a.cli.id === 'claude') {
       const d = run(['plugin', 'details', 'omnetpp@omnetpp-local']);
       check('Claude Code: plugin has skills, the hook and the LSP server',
-        /Skills \(5\)/.test(d.stdout) && /Hooks \(1\)/.test(d.stdout) && /LSP servers \(1\)/.test(d.stdout) && /MCP servers \(0\)/.test(d.stdout), d.stdout + d.stderr);
+        d.stdout.includes(`Skills (${DEFAULT_SKILLS.length})`) && /Hooks \(1\)/.test(d.stdout) && /LSP servers \(1\)/.test(d.stdout) && /MCP servers \(0\)/.test(d.stdout), d.stdout + d.stderr);
     }
     if (a.cli.id === 'codex') {
       const l = run(['plugin', 'list']);

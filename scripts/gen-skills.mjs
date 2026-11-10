@@ -8,13 +8,22 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SKILLS = [
-  'omnetpp-modeling',
   'omnetpp-model-development',
-  'omnetpp-coding-conventions',
-  'omnetpp-sim-debugging',
-  'omnetpp-fingerprint-testing',
+  'omnetpp-model-coding-conventions',
+  'omnetpp-model-debugging',
+  'omnetpp-model-fingerprint-testing',
   'omnetpp-model-refactoring',
+  'omnetpp-model-review-brief',
+  'omnetpp-model-git-workflow',
+  'omnetpp-model-branch-cleanup',
+  'omnetpp-model-branch-rebase',
+  'dev-git-workflow',
+  'dev-commit-messages',
+  'dev-branch-cleanup',
+  'dev-branch-rebase',
+  'dev-design',
 ];
+const OWNED_HERE = ['omnetpp-tooling'];
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 if (!process.argv[2]) {
@@ -35,6 +44,14 @@ function checkFrontmatter(name, text) {
   if (nameValue !== name) throw new Error(`${name}: frontmatter name is "${nameValue}"`);
   const extra = keys.filter((k) => !['name', 'description', 'license', 'compatibility', 'metadata', 'allowed-tools'].includes(k));
   if (extra.length) throw new Error(`${name}: non-portable frontmatter keys: ${extra.join(', ')}`);
+}
+
+// A skill dropped or renamed upstream must not linger in the snapshot.
+for (const name of readdirSync(destDir)) {
+  if (!SKILLS.includes(name) && !OWNED_HERE.includes(name)) {
+    rmSync(join(destDir, name), { recursive: true, force: true });
+    console.log(`removed ${name}`);
+  }
 }
 
 for (const name of SKILLS) {

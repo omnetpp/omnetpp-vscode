@@ -11,10 +11,10 @@ import {
   DEFAULT_SKILLS,
   MARKETPLACE_NAME,
   MCP_SERVER,
-  OPTIONAL_SKILLS,
   PLUGIN_DIR,
   PLUGIN_NAME,
   pluginFiles,
+  withRequiredSkills,
 } from '@omnetpp/shared/agents';
 
 export type AgentId = 'claude' | 'codex' | 'devin';
@@ -189,7 +189,7 @@ export function writePlugin(context: vscode.ExtensionContext, optionalSkills: st
   }
   const skillsDir = path.join(root, ...PLUGIN_DIR.split('/'), 'skills');
   fs.rmSync(skillsDir, { recursive: true, force: true });
-  const skills = [...DEFAULT_SKILLS, ...optionalSkills.filter((s) => OPTIONAL_SKILLS.includes(s))];
+  const skills = [...DEFAULT_SKILLS, ...withRequiredSkills(optionalSkills)];
   for (const name of skills) {
     fs.cpSync(context.asAbsolutePath(path.join('dist', 'skills', name)), path.join(skillsDir, name), { recursive: true });
   }

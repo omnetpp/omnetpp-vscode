@@ -15,6 +15,7 @@ import {
   mergeMarkerBlock,
   parseJsonc,
   type ProjectFacts,
+  withRequiredSkills,
 } from '@omnetpp/shared/agents';
 import { ensureCliTools } from './cliTools';
 import {
@@ -29,8 +30,12 @@ import {
 
 const CLANGD = 'llvm-vs-code-extensions.vscode-clangd';
 const SKILL_LABELS: Record<string, string> = {
-  'omnetpp-fingerprint-testing': 'Fingerprint testing skill',
+  'omnetpp-model-fingerprint-testing': 'Fingerprint testing skill',
   'omnetpp-model-refactoring': 'Model refactoring skill',
+  'omnetpp-model-review-brief': 'Review brief skill',
+  'omnetpp-model-git-workflow': 'Git workflow skill',
+  'omnetpp-model-branch-cleanup': 'Branch cleanup skill',
+  'omnetpp-model-branch-rebase': 'Branch rebase skill',
 };
 
 interface FileChange {
@@ -193,7 +198,10 @@ async function setUpAiAgents(context: vscode.ExtensionContext, client: LanguageC
     ...OPTIONAL_SKILLS.map((s) => ({
       key: s,
       label: SKILL_LABELS[s] ?? s,
-      description: 'optional skill, for all projects',
+      description:
+        withRequiredSkills([s]).length > 1
+          ? 'optional skill, for all projects; also installs the skills it refers to'
+          : 'optional skill, for all projects',
       picked: previous?.optionalSkills.includes(s) ?? false,
     })),
   ];

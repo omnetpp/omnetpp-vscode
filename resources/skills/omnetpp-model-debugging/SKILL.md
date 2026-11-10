@@ -1,5 +1,5 @@
 ---
-name: omnetpp-sim-debugging
+name: omnetpp-model-debugging
 description: >
   Techniques for debugging OMNeT++/INET-family simulations: the vanishing-packet checklist
   (eventlog, crash-truncated logs), attaching gdb to the real binary, reproducing in Qtenv at
