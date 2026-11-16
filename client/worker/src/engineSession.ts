@@ -758,6 +758,12 @@ export class EngineSession {
     const transmissionDelay = withSend.getTransmissionDelay(beginMessage);
     const span = dep.getConsequenceSimulationTime().subtract(dep.getCauseSimulationTime());
     if (span.lessOrEqual(BigDecimal.ZERO)) return;
+    // Like Java's drawTransmissionDuration(): a transmission still in progress at the end of
+    // the log has no events to map its end times onto, and the index lookup would throw.
+    const lastSimulationTime = this.log.getLastSimulationTime();
+    const t3 = causeEvent.getSimulationTime().add(remainingDuration);
+    const t4 = endSendEntry.isDeliveredImmediately ? dep.getConsequenceSimulationTime().add(remainingDuration) : dep.getConsequenceSimulationTime();
+    if (t3.greater(lastSimulationTime) || t4.greater(lastSimulationTime)) return;
     const fraction = Number(transmissionDelay.toString()) / Number(span.toString());
     if (!Number.isFinite(fraction)) return;
     result.transmissionDurationFraction = Math.max(0, fraction);
@@ -767,7 +773,6 @@ export class EngineSession {
     const consequenceEvent = dep.getConsequenceEvent();
     if (consequenceEvent === null) return;
 
-    const causeSimulationTime = causeEvent.getSimulationTime();
     const consequenceSimulationTime = dep.getConsequenceSimulationTime();
 
     let causeModuleId = causeEvent.getModuleId();
@@ -776,9 +781,7 @@ export class EngineSession {
     }
     const consequenceModuleId = consequenceEvent.getModuleId();
 
-    const t3 = causeSimulationTime.add(remainingDuration);
     const isReceptionStart = endSendEntry.isDeliveredImmediately;
-    const t4 = isReceptionStart ? consequenceSimulationTime.add(remainingDuration) : consequenceSimulationTime;
 
     const tc1 = result.causeTc;
     const tc2 = isReceptionStart ? result.consequenceTc : Math.max(tc1, facade.getTimelineCoordinateForSimulationTimeAndEventInModule(consequenceSimulationTime.subtract(transmissionDelay), consequenceModuleId));

@@ -15,6 +15,8 @@
 
 import { test } from 'bun:test';
 import assert from 'node:assert';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
 import { join, resolve } from 'node:path';
 import { EngineSession } from '../engineSession';
 import { handleElogRequest } from '../handlers';
@@ -52,5 +54,35 @@ test('viewport on a transmission-delay log decorates send dependencies and does 
     }
   } finally {
     session.close();
+  }
+});
+
+// A log that ends while a transmission is still in progress (e.g. a run stopped by
+// sim-time-limit) has transmission end times beyond the last event; mapping those onto the
+// timeline threw "searchForOffset: invariant violated" and failed every viewport fetch.
+test('viewport does not throw when the log ends during a transmission', () => {
+  const lines = fs.readFileSync(alohaFixturePath, 'utf8').split('\n');
+  const eventLineIndices = lines.flatMap((line, i) => (line.startsWith('E #') ? [i] : []));
+  const dir = fs.mkdtempSync(join(os.tmpdir(), 'elog-truncated-'));
+  try {
+    for (const cut of eventLineIndices.slice(2)) {
+      const file = join(dir, `cut-${cut}.elog`);
+      fs.writeFileSync(file, lines.slice(0, cut).join('\n') + '\n');
+      const session = new EngineSession();
+      try {
+        const summary = call<LogSummary>(session, ElogMethods.open, { path: file });
+        for (const timelineMode of ['SIMULATION_TIME', 'EVENT_NUMBER']) {
+          call(session, ElogMethods.scSetTimelineMode, { timelineMode });
+          call(session, ElogMethods.scRelocateOrigin, { eventNumber: summary.firstEventNumber });
+          call<ViewportModel>(session, ElogMethods.scGetViewport, {
+            range: { kind: 'event', startEventNumber: summary.firstEventNumber, endEventNumber: summary.lastEventNumber },
+          });
+        }
+      } finally {
+        session.close();
+      }
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
