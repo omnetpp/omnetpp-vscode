@@ -261,7 +261,7 @@ class Extraction {
       diagrams: this.diagrams,
       warnings: this.warnings,
       externalTypes: this.externalTypes,
-      externalWarnings: this.unlinkedExternalWarnings(),
+      externalWarnings: [...this.unresolvedTypeWarnings(), ...this.unlinkedExternalWarnings()],
     };
   }
 
@@ -279,6 +279,37 @@ class Extraction {
         this.externalTypes.set(pageIdForType(t.fqName, 'msg'), resolver.resolveMsg(t.fqName, t.simpleName));
       }
     }
+  }
+
+  /** One line about the NED type names that resolve to nothing, which usually means a
+   *  library is missing from the NED path. Such references are silently left unlinked in
+   *  the pages, so they go with the dependency warnings, which do not count as generation
+   *  warnings (opp_docgen's exit code). */
+  private unresolvedTypeWarnings(): string[] {
+    const names = new Set<string>();
+    let refs = 0;
+    const check = (name: string | undefined, file: NedTypeInfo['file'], enclosing: string | undefined) => {
+      if (!name || this.nedCache.lookupType(name, file, enclosing)) return;
+      refs++;
+      names.add(name);
+    };
+    for (const t of this.nedTypes) {
+      // the lookups NedTypeInfo.resolve, resolveSubmoduleType and localUsedTypes use
+      const enclosing = t.isInnerType ? t.enclosingFqName : undefined;
+      for (const name of [...t.extendsNames(), ...t.interfaceNames()]) check(name, t.file, enclosing);
+      for (const [name, sub] of t.localSubmodules()) {
+        const owner = t.submoduleDecl(name)?.owner ?? t;
+        check(sub.isLike ? sub.likeType : sub.type, owner.file, owner.fqName);
+      }
+      for (const conn of t.localConnections()) check(conn.channel?.typeName, t.file, enclosing);
+    }
+    if (!refs) return [];
+    const list = [...names].sort();
+    const shown = list.length > 5 ? `${list.slice(0, 5).join(', ')}, ...` : list.join(', ');
+    return [
+      `${refs} reference${refs === 1 ? '' : 's'} to unresolved NED type${list.length === 1 ? '' : 's'} (${shown}); ` +
+        'check the NED path (--ned-path, OMNETPP_NED_PATH or omnetpp.nedPath)',
+    ];
   }
 
   /** Count references to dependency types that cannot be linked, per
