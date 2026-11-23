@@ -9,7 +9,6 @@ import {
   mergeExtensionRecommendations,
   mergeMarkerBlock,
 } from '../agents/projectFiles';
-import { DEFAULT_SKILLS, PLUGIN_DIR, pluginFiles } from '../agents/plugin';
 
 const CLANGD = 'llvm-vs-code-extensions.vscode-clangd';
 const facts = { nedRoots: ['src', 'simulations'], nedPathEntries: ['../inet/src'], iniFiles: ['simulations/omnetpp.ini'], hasMakefile: true };
@@ -74,21 +73,4 @@ test('mergeExtensionRecommendations refuses what it cannot edit safely', () => {
   assert.equal(mergeExtensionRecommendations('{ "recommendations": ', [CLANGD]), undefined);
   assert.equal(mergeExtensionRecommendations('[]', [CLANGD]), undefined);
   assert.equal(mergeExtensionRecommendations('{ "recommendations": "x" }', [CLANGD]), undefined);
-});
-
-test('pluginFiles gives every agent its manifest, the hook and the LSP server', () => {
-  const files = pluginFiles('1.2.3');
-  const read = (p: string) => JSON.parse(files[p]);
-  assert.equal(read('.claude-plugin/marketplace.json').plugins[0].source, `./${PLUGIN_DIR}`);
-  assert.deepEqual(read('.agents/plugins/marketplace.json').plugins[0].source, { source: 'local', path: `./${PLUGIN_DIR}` });
-  assert.equal(read(`${PLUGIN_DIR}/.claude-plugin/plugin.json`).version, '1.2.3');
-  assert.equal(read(`${PLUGIN_DIR}/plugin.json`).version, '1.2.3');
-  for (const p of [`${PLUGIN_DIR}/hooks/hooks.json`, `${PLUGIN_DIR}/hooks.json`]) {
-    const hook = read(p).hooks.PostToolUse[0];
-    assert.equal(hook.hooks[0].command, 'opp_lint --agent-hook');
-    for (const tool of ['Edit', 'Write', 'MultiEdit', 'apply_patch']) assert.match(tool, new RegExp(`^(${hook.matcher})$`));
-  }
-  assert.deepEqual(Object.keys(read(`${PLUGIN_DIR}/.lsp.json`).omnetpp.extensionToLanguage), ['.ned', '.msg', '.ini']);
-  assert.ok(!Object.keys(files).some((p) => /mcp\.json$/.test(p)), 'the MCP server is registered per agent, not in the plugin');
-  assert.ok(DEFAULT_SKILLS.includes('omnetpp-tooling'));
 });

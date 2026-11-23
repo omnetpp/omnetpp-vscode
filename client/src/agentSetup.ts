@@ -1,42 +1,48 @@
-// "OMNeT++: Set Up AI Agents…": installs the OMNeT++ agent plugin (skills, lint hook,
-// language server) and the MCP server into the selected agent CLIs, and writes the
-// project files that describe the project to any agent (AGENTS.md) and recommend
-// the clangd C++ extension. Copilot in VS Code needs none of this: it gets the
-// skills through contributes.chatSkills and the tools through the live MCP bridge.
+// "OMNeT++: Set Up AI Agents…": installs the OMNeT++ agent plugins (skills, lint hook,
+// language server, MCP server) from the `omnetpp` marketplace into the selected agent
+// CLIs and into Copilot in VS Code, and writes the project files that describe the
+// project to any agent (AGENTS.md) and recommend the clangd C++ extension.
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { LanguageClient } from 'vscode-languageclient/node';
 import { OmnetppMethods, type ProjectFactsResult } from '@omnetpp/shared/protocol';
 import {
-  OPTIONAL_SKILLS,
+  BASE_PLUGIN,
+  PLUGINS,
   agentsMdBlock,
   ensureClaudeImport,
   mergeExtensionRecommendations,
   mergeMarkerBlock,
   parseJsonc,
   type ProjectFacts,
-  withRequiredSkills,
+  withDependencies,
 } from '@omnetpp/shared/agents';
 import { ensureCliTools } from './cliTools';
 import {
   type AgentId,
   agentLog,
+  extensionVersion,
+  marketplaceSource,
   pluginState,
+  pluginUpdateDone,
   probeAgents,
   runSteps,
-  savePluginState,
-  writePlugin,
+  updatePluginState,
 } from './agentPlugin';
+import { copilotAvailability, setUpCopilot } from './copilotPlugins';
 
 const CLANGD = 'llvm-vs-code-extensions.vscode-clangd';
-const SKILL_LABELS: Record<string, string> = {
-  'omnetpp-model-fingerprint-testing': 'Fingerprint testing skill',
-  'omnetpp-model-refactoring': 'Model refactoring skill',
-  'omnetpp-model-review-brief': 'Review brief skill',
-  'omnetpp-model-git-workflow': 'Git workflow skill',
-  'omnetpp-model-branch-cleanup': 'Branch cleanup skill',
-  'omnetpp-model-branch-rebase': 'Branch rebase skill',
+const PLUGIN_DETAILS: Record<string, string> = {
+  'omnetpp-dev': 'fingerprint testing, refactoring, git workflow, branch cleanup and rebase, review briefs',
+  inet: 'INET build environment, test suites, module development, release notes, showcases',
+  simu5g: 'Simu5G development rules and fingerprint tests',
 };
+
+/** Arguments of the command, for callers that open it with choices made. */
+export interface SetupArgs {
+  /** Agents to preselect in the first picker ('copilot' for Copilot in VS Code). */
+  preselect?: (AgentId | 'copilot')[];
+}
 
 interface FileChange {
   uri: vscode.Uri;
@@ -159,7 +165,7 @@ async function plannedChanges(
   return changes;
 }
 
-async function setUpAiAgents(context: vscode.ExtensionContext, client: LanguageClient): Promise<void> {
+async function setUpAiAgents(context: vscode.ExtensionContext, client: LanguageClient, args?: SetupArgs): Promise<void> {
   const folder = await pickFolder();
   if (!folder) {
     void vscode.window.showErrorMessage('OMNeT++: open a project folder first.');
@@ -168,57 +174,70 @@ async function setUpAiAgents(context: vscode.ExtensionContext, client: LanguageC
   const tools = await ensureCliTools(context);
   if (!tools) return;
 
-  const availability = await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: 'OMNeT++: looking for AI agent CLIs…' },
-    () => probeAgents(),
+  const [availability, copilot] = await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: 'OMNeT++: looking for AI agents…' },
+    () => Promise.all([probeAgents(), copilotAvailability()]),
   );
-  type AgentItem = vscode.QuickPickItem & { id?: AgentId };
-  const agentItems: AgentItem[] = availability
-    .filter((a) => a.available)
-    .map((a) => ({ label: a.cli.label, description: a.cli.exe, id: a.cli.id, picked: true }));
-  const unavailable = availability.filter((a) => !a.available);
-  for (const a of unavailable) agentLog().info(`${a.cli.label} is not available: ${a.reason}`);
+  const preselected = (id: AgentId | 'copilot') => !args?.preselect || args.preselect.includes(id);
+  type AgentItem = vscode.QuickPickItem & { id?: AgentId | 'copilot' };
+  const agentItems: AgentItem[] = [
+    ...(copilot.available
+      ? [{ label: 'Copilot in VS Code', description: 'installs from the VS Code plugin page', id: 'copilot' as const, picked: preselected('copilot') }]
+      : []),
+    ...availability.filter((a) => a.available).map((a) => ({ label: a.cli.label, description: a.cli.exe, id: a.cli.id, picked: preselected(a.cli.id) })),
+  ];
+  const unavailable = [
+    ...(copilot.available ? [] : [{ label: 'Copilot in VS Code', reason: copilot.reason }]),
+    ...availability.filter((a) => !a.available).map((a) => ({ label: a.cli.label, reason: a.reason })),
+  ];
+  for (const a of unavailable) agentLog().info(`${a.label} is not available: ${a.reason}`);
   if (unavailable.length) {
     agentItems.push({ label: 'Not available', kind: vscode.QuickPickItemKind.Separator });
-    for (const a of unavailable) agentItems.push({ label: `$(circle-slash) ${a.cli.label}`, description: a.reason });
+    for (const a of unavailable) agentItems.push({ label: `$(circle-slash) ${a.label}`, description: a.reason });
   }
   const pickedAgents = await vscode.window.showQuickPick(agentItems, {
     canPickMany: true,
-    title: 'Set Up AI Agents (1/2): agents to install the OMNeT++ plugin and MCP server into',
-    placeHolder: 'Copilot in VS Code needs no setup. Pick none to write only the project files.',
+    title: 'Set Up AI Agents (1/2): agents to install the OMNeT++ agent plugins into',
+    placeHolder: 'Pick none to write only the project files.',
   });
   if (!pickedAgents) return;
   const agents = availability.filter((a) => a.available && pickedAgents.some((p) => p.id === a.cli.id)).map((a) => a.cli);
+  const withCopilot = pickedAgents.some((p) => p.id === 'copilot');
 
   const previous = pluginState(context);
   type OptionItem = vscode.QuickPickItem & { key: string };
   const optionItems: OptionItem[] = [
     { key: 'agentsMd', label: 'Describe the project in AGENTS.md', detail: 'A managed section that every agent reads; your own text stays.', picked: true },
     { key: 'clangd', label: 'Recommend the clangd C++ extension', detail: 'In .vscode/extensions.json; clangd needs a compile_commands.json.', picked: true },
-    ...OPTIONAL_SKILLS.map((s) => ({
-      key: s,
-      label: SKILL_LABELS[s] ?? s,
-      description:
-        withRequiredSkills([s]).length > 1
-          ? 'optional skill, for all projects; also installs the skills it refers to'
-          : 'optional skill, for all projects',
-      picked: previous?.optionalSkills.includes(s) ?? false,
-    })),
+    ...PLUGINS.filter((p) => p.name !== BASE_PLUGIN).map((p) => {
+      const alsoInstalls = withDependencies([p.name]).filter((n) => n !== BASE_PLUGIN && n !== p.name);
+      return {
+        key: p.name,
+        label: `${p.label} plugin`,
+        description: alsoInstalls.length ? `also installs ${alsoInstalls.join(', ')}` : undefined,
+        detail: PLUGIN_DETAILS[p.name],
+        picked: previous?.plugins.includes(p.name) ?? false,
+      };
+    }),
   ];
   const options = await vscode.window.showQuickPick(optionItems, {
     canPickMany: true,
-    title: 'Set Up AI Agents (2/2): project files and optional skills',
+    title: `Set Up AI Agents (2/2): project files and plugins (the ${BASE_PLUGIN} plugin is always installed)`,
   });
   if (!options) return;
   const chosen = new Set(options.map((o) => o.key));
-  const optionalSkills = OPTIONAL_SKILLS.filter((s) => chosen.has(s));
+  const plugins = withDependencies(PLUGINS.map((p) => p.name).filter((n) => chosen.has(n)));
 
   const { facts, warnings } = await projectFacts(client, folder);
   const changes = await plannedChanges(folder, facts, chosen.has('agentsMd'), chosen.has('clangd'), warnings);
 
+  const pluginList = plugins.join(', ');
   const lines = [
     ...changes.map((c) => `${c.created ? 'Create' : 'Update'} ${toPosix(path.relative(folder.uri.fsPath, c.uri.fsPath))}`),
-    ...agents.map((a) => `Install the OMNeT++ plugin and MCP server into ${a.label} (user level)`),
+    ...agents.map(
+      (a) => `Install the plugins ${pluginList} into ${a.label} (user level)${a.id === 'codex' ? ' and register the omnetpp MCP server' : ''}`,
+    ),
+    ...(withCopilot ? [`Add the omnetpp marketplace to VS Code and open the install page of ${pluginList} for Copilot`] : []),
   ];
   if (!lines.length) {
     void vscode.window.showInformationMessage('OMNeT++: nothing to do — the project files are up to date and no agent was selected.');
@@ -240,36 +259,39 @@ async function setUpAiAgents(context: vscode.ExtensionContext, client: LanguageC
   const ok: AgentId[] = [];
   const failed: string[] = [];
   if (agents.length) {
+    const source = marketplaceSource();
+    log.info(`marketplace source: ${source.location}${source.ref ? `#${source.ref}` : ''}`);
     await vscode.window.withProgress(
       { location: vscode.ProgressLocation.Notification, title: 'OMNeT++: setting up AI agents' },
       async (progress) => {
-        let root: string;
-        try {
-          root = writePlugin(context, optionalSkills);
-        } catch (e) {
-          log.error(`could not write the agent plugin: ${(e as Error).message}`);
-          failed.push(...agents.map((a) => a.label));
-          return;
-        }
-        log.info(`agent plugin written to ${root}`);
+        progress.report({ message: 'waiting for the update of the installed plugins' });
+        await pluginUpdateDone();
         for (const cli of agents) {
           progress.report({ message: cli.label });
-          if (await runSteps(cli, cli.install(root), log)) ok.push(cli.id);
+          if (await runSteps(cli, cli.install(plugins, source), log)) ok.push(cli.id);
           else failed.push(cli.label);
         }
       },
     );
   }
-  await savePluginState(context, {
-    version: (context.extension.packageJSON as { version: string }).version,
-    optionalSkills,
-    agents: [...new Set([...(previous?.agents ?? []), ...ok])],
-  });
+  const copilotOk = withCopilot && (await setUpCopilot(plugins, log));
+  if (withCopilot && !copilotOk) failed.push('Copilot in VS Code');
+  await updatePluginState(context, (current) => ({
+    ...current,
+    version: extensionVersion(context),
+    plugins,
+    agents: [...new Set([...(current?.agents ?? []), ...ok])],
+    copilot: current?.copilot || copilotOk,
+  }));
 
-  if (!tools.onPath) warnings.push(`${tools.binDir} is not on PATH, so agents cannot start opp_lint, opp_lsp and opp_ide_mcp. Add it to PATH.`);
-  if (ok.includes('codex')) warnings.push('Codex runs the plugin\'s lint hook only after you trust it: run /hooks in Codex once.');
+  if (!tools.onPath) {
+    warnings.push(
+      `${tools.binDir} is not on PATH: the plugins then fetch the tools through npx, and Codex cannot start opp_ide_mcp. Add it to PATH.`,
+    );
+  }
+  if (ok.includes('codex')) warnings.push('Codex runs the plugin\'s lint hook only after you trust it, and again after each update: run /hooks in Codex.');
   const hints = [
-    'Restart running agent sessions so that they load the plugin and the MCP server.',
+    'Restart running agent sessions so that they load the plugins.',
     'clangd needs a compile_commands.json: for example "bear -- make -B MODE=debug" in the project folder.',
   ];
   if (ok.includes('claude')) hints.push('For C++ intelligence in Claude Code: /plugin install clangd-lsp@claude-plugins-official');
@@ -279,6 +301,7 @@ async function setUpAiAgents(context: vscode.ExtensionContext, client: LanguageC
   const summary = [
     changes.length ? `wrote ${changes.length} project file(s)` : undefined,
     ok.length ? `set up ${ok.length} agent(s)` : undefined,
+    copilotOk ? 'opened the Copilot plugin install page(s)' : undefined,
   ].filter(Boolean);
   const message = `OMNeT++: ${summary.join(', ') || 'done'}${failed.length ? `; failed for ${failed.join(', ')}` : ''}.`;
   const show = 'Show Details';
@@ -290,6 +313,6 @@ async function setUpAiAgents(context: vscode.ExtensionContext, client: LanguageC
 
 export function registerAgentSetupCommand(context: vscode.ExtensionContext, client: LanguageClient): void {
   context.subscriptions.push(
-    vscode.commands.registerCommand('omnetpp.setupAiAgents', () => setUpAiAgents(context, client)),
+    vscode.commands.registerCommand('omnetpp.setupAiAgents', (args?: SetupArgs) => setUpAiAgents(context, client, args)),
   );
 }

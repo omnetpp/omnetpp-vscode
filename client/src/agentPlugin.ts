@@ -1,45 +1,76 @@
-// The OMNeT++ agent plugin on disk, and the agent CLIs that install it. The plugin
-// lives in a stable per-user directory (a local marketplace root), not in the
-// extension directory, which changes with every update. Agents are configured only
-// through their own CLIs; their private config files are never edited here.
+// The OMNeT++ agent plugins, installed from the public marketplace `omnetpp`
+// (github.com/omnetpp/agent-plugins) into the agent CLIs. Agents are configured only through
+// their own CLIs; their private config files are never edited here.
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import {
-  DEFAULT_SKILLS,
+  LEGACY_MARKETPLACE_NAME,
+  LEGACY_PLUGIN_ID,
   MARKETPLACE_NAME,
+  MARKETPLACE_SOURCE,
   MCP_SERVER,
-  PLUGIN_DIR,
-  PLUGIN_NAME,
-  pluginFiles,
-  withRequiredSkills,
+  pluginId,
+  withDependencies,
 } from '@omnetpp/shared/agents';
+import { claimOnce } from '@omnetpp/shared/node';
 
 export type AgentId = 'claude' | 'codex' | 'devin';
 
-/** One CLI invocation; skipped when `unlessOk` (a check command) exits 0. */
+/** One CLI invocation. */
 interface Step {
   args: string[];
+  /** Skip the step when this check command exits 0. */
   unlessOk?: string[];
+  /** Run the step only when this check command exits 0 and its output matches. */
+  onlyIf?: { args: string[]; match: RegExp };
+  /** A failure is logged but does not stop the remaining steps. */
+  optional?: boolean;
 }
+
+/** Where to fetch the marketplace from: a GitHub `owner/repo`, a git URL or a local path, plus a ref. */
+export interface MarketplaceSource {
+  location: string;
+  ref?: string;
+  local: boolean;
+}
+
+/**
+ * The marketplace source. OMNETPP_AGENT_MARKETPLACE overrides it for testing, e.g.
+ * `omnetpp/agent-plugins#agent-plugins` or the path of a local checkout.
+ */
+export function marketplaceSource(): MarketplaceSource {
+  const value = process.env.OMNETPP_AGENT_MARKETPLACE?.trim() || MARKETPLACE_SOURCE;
+  const local = path.isAbsolute(value) || value.startsWith('.') || value.startsWith('~');
+  if (local) return { location: value.replace(/^~(?=$|[\\/])/, os.homedir()), local: true };
+  const hash = value.lastIndexOf('#');
+  return hash < 0 ? { location: value, local: false } : { location: value.slice(0, hash), ref: value.slice(hash + 1), local: false };
+}
+
+const withRef = (s: MarketplaceSource): string => (s.ref ? `${s.location}#${s.ref}` : s.location);
 
 export interface AgentCli {
   id: AgentId;
   label: string;
   exe: string;
-  /** Exits 0 only when the CLI can install plugins from a local directory. */
+  /** Exits 0 only when the CLI can install plugins from a marketplace. */
   probe: string[];
-  install(root: string): Step[];
-  /** What to run after the plugin directory was rewritten for a new extension version. */
-  refresh(root: string): Step[];
+  install(plugins: string[], source: MarketplaceSource): Step[];
+  /** What to run after an extension update, to bring the installed plugins up to date. */
+  refresh(plugins: string[]): Step[];
+  /** Removes the plugin that extension versions up to 1.0.x generated locally. */
+  removeLegacy(): Step[];
 }
 
-const PLUGIN_ID = `${PLUGIN_NAME}@${MARKETPLACE_NAME}`;
-const mcpStep = (scope: string[]): Step => ({
-  args: ['mcp', 'add', ...scope, MCP_SERVER.name, '--', MCP_SERVER.command, ...MCP_SERVER.args],
-  unlessOk: ['mcp', 'get', MCP_SERVER.name],
+// The extension registered `<agent> mcp add omnetpp -- opp_ide_mcp` before the plugins
+// brought the MCP server themselves. Only that exact registration is removed; a server
+// the user set up differently is theirs.
+const legacyMcpCleanup = (removeArgs: string[]): Step => ({
+  args: removeArgs,
+  onlyIf: { args: ['mcp', 'get', MCP_SERVER.name], match: new RegExp(`^\\s*Command:\\s*${MCP_SERVER.command}\\s*$`, 'm') },
+  optional: true,
 });
 
 export const AGENT_CLIS: AgentCli[] = [
@@ -48,34 +79,74 @@ export const AGENT_CLIS: AgentCli[] = [
     label: 'Claude Code',
     exe: 'claude',
     probe: ['plugin', 'marketplace', 'add', '--help'],
-    install: (root) => [
-      { args: ['plugin', 'install', PLUGIN_NAME, '--marketplace', root, '--scope', 'user'] },
-      mcpStep(['--scope', 'user']),
+    // Both commands succeed when the marketplace or plugin is already there.
+    install: (plugins, source) => [
+      { args: ['plugin', 'marketplace', 'add', withRef(source)] },
+      ...plugins.map((p) => ({ args: ['plugin', 'install', pluginId(p), '--scope', 'user'] })),
+      legacyMcpCleanup(['mcp', 'remove', MCP_SERVER.name, '--scope', 'user']),
     ],
-    // Plugins from a local-path marketplace load in place; only the catalog is re-read.
-    refresh: () => [{ args: ['plugin', 'marketplace', 'update', MARKETPLACE_NAME] }],
+    // Claude updates an installed plugin only when the marketplace has a new version of it.
+    refresh: (plugins) => [
+      { args: ['plugin', 'marketplace', 'update', MARKETPLACE_NAME] },
+      ...plugins.map((p) => ({ args: ['plugin', 'update', pluginId(p)], optional: true })),
+    ],
+    removeLegacy: () => [
+      { args: ['plugin', 'uninstall', LEGACY_PLUGIN_ID, '--scope', 'user'], optional: true },
+      { args: ['plugin', 'marketplace', 'remove', LEGACY_MARKETPLACE_NAME], optional: true },
+    ],
   },
   {
     id: 'codex',
     label: 'Codex',
     exe: 'codex',
     probe: ['plugin', 'marketplace', 'add', '--help'],
-    install: (root) => [
-      { args: ['plugin', 'marketplace', 'add', root] },
-      { args: ['plugin', 'add', PLUGIN_ID] },
-      mcpStep([]),
+    // Codex starts plugin MCP servers in the plugin directory, so the server is
+    // registered here and starts in the session directory, which opp_ide_mcp indexes.
+    install: (plugins, source) => [
+      { args: ['plugin', 'marketplace', 'add', source.location, ...(source.ref ? ['--ref', source.ref] : [])] },
+      ...plugins.map((p) => ({ args: ['plugin', 'add', pluginId(p)] })),
+      {
+        args: ['mcp', 'add', MCP_SERVER.name, '--', MCP_SERVER.command, ...MCP_SERVER.args],
+        unlessOk: ['mcp', 'get', MCP_SERVER.name],
+      },
     ],
-    // Codex installs a copy per plugin version, so the new version must be added again.
-    refresh: () => [{ args: ['plugin', 'add', PLUGIN_ID] }],
+    // `upgrade` refreshes a git marketplace and reinstalls its plugins when it has moved on;
+    // a local marketplace (the test override) has nothing to upgrade, and `plugin add`
+    // reinstalls a plugin whose version changed.
+    refresh: (plugins) => [
+      { args: ['plugin', 'marketplace', 'upgrade', MARKETPLACE_NAME], optional: true },
+      ...plugins.map((p) => ({ args: ['plugin', 'add', pluginId(p)] })),
+    ],
+    removeLegacy: () => [
+      { args: ['plugin', 'remove', LEGACY_PLUGIN_ID], optional: true },
+      { args: ['plugin', 'marketplace', 'remove', LEGACY_MARKETPLACE_NAME], optional: true },
+    ],
   },
   {
     id: 'devin',
     label: 'Devin',
     exe: 'devin',
     probe: ['plugins', '--help'],
-    install: (root) => [{ args: ['plugins', 'install', '--local', path.join(root, PLUGIN_DIR)] }, mcpStep(['--scope', 'user'])],
-    // Local Devin plugins are linked to their folder, so edits are live.
-    refresh: () => [],
+    // Devin installs a plugin from a repository path and has no marketplace of its own; it
+    // takes no ref, so an override with a ref falls back to the default branch. -y answers
+    // its trust prompt, which would otherwise abort the install: the user confirmed the
+    // setup in the extension's own dialog. Devin loads the plugin's MCP server itself.
+    install: (plugins, source) => [
+      ...plugins.map((p) => ({
+        args: [
+          'plugins',
+          'install',
+          '-y',
+          '--local',
+          source.local ? path.join(source.location, 'plugins', p) : `${source.location}#plugins/${p}`,
+        ],
+      })),
+      legacyMcpCleanup(['mcp', 'remove', MCP_SERVER.name]),
+    ],
+    refresh: (plugins) => plugins.map((p) => ({ args: ['plugins', 'update', p], optional: true })),
+    // Older extension versions installed Devin's plugin without answering the trust
+    // prompt, which aborts the install, so there is nothing to remove.
+    removeLegacy: () => [],
   },
 ];
 
@@ -98,6 +169,8 @@ export function runCli(exe: string, args: string[], timeoutMs = 120_000): Promis
     const timer = setTimeout(() => child.kill(), timeoutMs);
     child.stdout?.on('data', (d) => (output += d));
     child.stderr?.on('data', (d) => (output += d));
+    // A CLI that prompts gets end-of-input instead of waiting until the timeout.
+    child.stdin?.end();
     child.on('error', (e: NodeJS.ErrnoException) => {
       clearTimeout(timer);
       resolve({ code: null, output: e.message, missing: e.code === 'ENOENT' });
@@ -122,13 +195,13 @@ export async function probeAgents(): Promise<AgentAvailability[]> {
     AGENT_CLIS.map(async (cli) => {
       const r = await runCli(cli.exe, cli.probe, 30_000);
       if (r.missing) return { cli, available: false, reason: `${cli.exe} not found on PATH` };
-      if (r.code !== 0) return { cli, available: false, reason: `this ${cli.exe} version cannot install local plugins; update it` };
+      if (r.code !== 0) return { cli, available: false, reason: `this ${cli.exe} version cannot install plugins; update it` };
       return { cli, available: true };
     }),
   );
 }
 
-/** Run the steps in order; stop at the first failure. Every command and its output goes to `log`. */
+/** Run the steps in order; stop at the first failure of a required step. Every command and its output goes to `log`. */
 export async function runSteps(cli: AgentCli, steps: Step[], log: vscode.LogOutputChannel): Promise<boolean> {
   for (const step of steps) {
     if (step.unlessOk) {
@@ -138,10 +211,18 @@ export async function runSteps(cli: AgentCli, steps: Step[], log: vscode.LogOutp
         continue;
       }
     }
+    if (step.onlyIf) {
+      const check = await runCli(cli.exe, step.onlyIf.args);
+      if (check.code !== 0 || !step.onlyIf.match.test(check.output)) continue;
+    }
     log.info(`$ ${cli.exe} ${step.args.join(' ')}`);
     const r = await runCli(cli.exe, step.args);
     if (r.output.trim()) log.info(r.output.trim());
     if (r.code !== 0) {
+      if (step.optional) {
+        log.info(`${cli.exe} exited with ${r.code}; not needed, continuing`);
+        continue;
+      }
       log.error(`${cli.exe} failed (exit code ${r.code})`);
       return false;
     }
@@ -149,8 +230,8 @@ export async function runSteps(cli: AgentCli, steps: Step[], log: vscode.LogOutp
   return true;
 }
 
-/** The per-user marketplace root that holds the plugin. */
-export function pluginRoot(): string {
+/** The folder where extension versions up to 1.0.x wrote the generated plugin. */
+export function legacyPluginRoot(): string {
   if (process.platform === 'win32') {
     return path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'omnetpp', 'agent-plugins');
   }
@@ -162,38 +243,51 @@ const STATE_KEY = 'omnetpp.agentPlugin';
 
 export interface PluginState {
   version: string;
+  /** The installed plugins, with their dependencies, in install order. */
+  plugins: string[];
+  /** Agent CLIs the plugins were installed into, for the refresh after an update. */
+  agents: AgentId[];
+  /** Copilot in VS Code was set up. */
+  copilot?: boolean;
+  /** The one-time notice about Copilot's skills was shown. */
+  copilotNoticeShown?: boolean;
+}
+
+/** The state written by extension versions up to 1.0.x, which generated the plugin locally. */
+interface LegacyPluginState {
+  version: string;
   optionalSkills: string[];
-  /** Agents the plugin was installed into, for the refresh after an update. */
   agents: AgentId[];
 }
 
+function isLegacy(s: PluginState | LegacyPluginState): s is LegacyPluginState {
+  return !('plugins' in s);
+}
+
 export function pluginState(context: vscode.ExtensionContext): PluginState | undefined {
-  return context.globalState.get<PluginState>(STATE_KEY);
+  const s = context.globalState.get<PluginState | LegacyPluginState>(STATE_KEY);
+  if (!s || !isLegacy(s)) return s;
+  // The optional skills were the maintainer skills, which are now the omnetpp-dev plugin.
+  return { version: s.version, plugins: withDependencies(s.optionalSkills.length ? ['omnetpp-dev'] : []), agents: s.agents };
 }
 
-export async function savePluginState(context: vscode.ExtensionContext, state: PluginState): Promise<void> {
-  await context.globalState.update(STATE_KEY, state);
+function hasLegacyState(context: vscode.ExtensionContext): boolean {
+  const s = context.globalState.get<PluginState | LegacyPluginState>(STATE_KEY);
+  return !!s && isLegacy(s);
 }
 
-function extensionVersion(context: vscode.ExtensionContext): string {
+/** Changes the saved state. The current state is read here, not passed in, because the
+ *  startup update and the setup command run concurrently and each would overwrite the
+ *  other's changes with the state it read before its slow installs. */
+export async function updatePluginState(
+  context: vscode.ExtensionContext,
+  change: (state: PluginState | undefined) => PluginState,
+): Promise<void> {
+  await context.globalState.update(STATE_KEY, change(pluginState(context)));
+}
+
+export function extensionVersion(context: vscode.ExtensionContext): string {
   return (context.extension.packageJSON as { version: string }).version;
-}
-
-/** (Re)write the plugin directory: the generated files plus the selected skills. */
-export function writePlugin(context: vscode.ExtensionContext, optionalSkills: string[]): string {
-  const root = pluginRoot();
-  for (const [rel, text] of Object.entries(pluginFiles(extensionVersion(context)))) {
-    const file = path.join(root, ...rel.split('/'));
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, text);
-  }
-  const skillsDir = path.join(root, ...PLUGIN_DIR.split('/'), 'skills');
-  fs.rmSync(skillsDir, { recursive: true, force: true });
-  const skills = [...DEFAULT_SKILLS, ...withRequiredSkills(optionalSkills)];
-  for (const name of skills) {
-    fs.cpSync(context.asAbsolutePath(path.join('dist', 'skills', name)), path.join(skillsDir, name), { recursive: true });
-  }
-  return root;
 }
 
 let logChannel: vscode.LogOutputChannel | undefined;
@@ -202,20 +296,75 @@ export function agentLog(): vscode.LogOutputChannel {
   return logChannel;
 }
 
-/** After an extension update, bring the installed plugin up to the new version. */
-export async function refreshPluginIfUpdated(context: vscode.ExtensionContext): Promise<void> {
-  const state = pluginState(context);
-  if (!state) return;
-  const version = extensionVersion(context);
-  if (state.version === version) return;
+/** Replace the locally generated plugin of older extension versions with the marketplace plugins. */
+async function moveOffLegacyPlugin(context: vscode.ExtensionContext, state: PluginState): Promise<void> {
+  const log = agentLog();
+  const moved: string[] = [];
+  const failed: string[] = [];
+  for (const id of state.agents) {
+    const cli = AGENT_CLIS.find((c) => c.id === id);
+    if (!cli) continue;
+    const ok = (await runSteps(cli, cli.removeLegacy(), log)) && (await runSteps(cli, cli.install(state.plugins, marketplaceSource()), log));
+    (ok ? moved : failed).push(cli.label);
+  }
   try {
-    const root = writePlugin(context, state.optionalSkills);
-    for (const id of state.agents) {
-      const cli = AGENT_CLIS.find((c) => c.id === id);
-      if (cli) await runSteps(cli, cli.refresh(root), agentLog());
-    }
-    await savePluginState(context, { ...state, version });
+    fs.rmSync(legacyPluginRoot(), { recursive: true, force: true });
   } catch (e) {
-    agentLog().error(`could not update the OMNeT++ agent plugin: ${(e as Error).message}`);
+    log.warn(`could not delete ${legacyPluginRoot()}: ${(e as Error).message}`);
+  }
+  await updatePluginState(context, (s) => ({ ...(s ?? state), version: extensionVersion(context) }));
+  if (!moved.length && !failed.length) return;
+  const message =
+    `OMNeT++: the AI agent plugins now come from the "${MARKETPLACE_NAME}" marketplace (github.com/${MARKETPLACE_SOURCE}).` +
+    (moved.length ? ` Moved ${moved.join(', ')} to it.` : '') +
+    (failed.length ? ` Failed for ${failed.join(', ')}; run "OMNeT++: Set Up AI Agents…" again.` : '');
+  const show = 'Show Details';
+  // Not awaited: the setup command waits for this update, and the notice stays until dismissed.
+  void (failed.length ? vscode.window.showWarningMessage(message, show) : vscode.window.showInformationMessage(message, show)).then(
+    (answer) => answer === show && log.show(true),
+  );
+}
+
+let pendingUpdate: Promise<void> = Promise.resolve();
+
+/** Resolves once the startup update of the installed plugins is done. */
+export function pluginUpdateDone(): Promise<void> {
+  return pendingUpdate;
+}
+
+/** Moves older setups off the locally generated plugin, and brings the installed plugins up
+ *  to date after an extension update. */
+async function updatePlugins(context: vscode.ExtensionContext): Promise<void> {
+  const state = pluginState(context);
+  const version = extensionVersion(context);
+  const legacy = hasLegacyState(context);
+  if (!state || (!legacy && state.version === version)) return;
+  // All windows start together after an extension update; one of them does the update.
+  if (!claimOnce(context.globalStorageUri.fsPath, `agent-plugins-update-${version}`)) return;
+  if (legacy) {
+    await moveOffLegacyPlugin(context, state);
+    return;
+  }
+  for (const id of state.agents) {
+    const cli = AGENT_CLIS.find((c) => c.id === id);
+    if (cli) await runSteps(cli, cli.refresh(state.plugins), agentLog());
+  }
+  await updatePluginState(context, (s) => ({ ...(s ?? state), version }));
+}
+
+/** On startup: update the installed plugins, then point Copilot users to the setup once. */
+export async function refreshPluginIfUpdated(
+  context: vscode.ExtensionContext,
+  copilotNotice: (state: PluginState | undefined) => Promise<void>,
+): Promise<void> {
+  pendingUpdate = updatePlugins(context).catch((e) =>
+    agentLog().error(`could not update the OMNeT++ agent plugins: ${(e as Error).message}`),
+  );
+  await pendingUpdate;
+  // Not part of pendingUpdate: the notice can run the setup command, which waits for it.
+  try {
+    await copilotNotice(pluginState(context));
+  } catch (e) {
+    agentLog().error(`could not show the Copilot notice: ${(e as Error).message}`);
   }
 }

@@ -24,6 +24,7 @@ import { registerCounterpartCommand } from './counterparts';
 import { registerCliToolsCommands } from './cliTools';
 import { registerAgentSetupCommand } from './agentSetup';
 import { refreshPluginIfUpdated } from './agentPlugin';
+import { copilotNotice } from './copilotPlugins';
 import { startMcpBridge } from './mcpBridge';
 import { registerEventLog } from './eventlog';
 
@@ -102,7 +103,7 @@ export function activate(context: ExtensionContext): void {
   registerNedPreview(context, client);
   registerDocsCommand(context, client);
   registerAgentSetupCommand(context, client);
-  void refreshPluginIfUpdated(context);
+  void refreshPluginIfUpdated(context, (state) => copilotNotice(context, state));
   registerCounterpartCommand(context, client);
   registerEventLog(context, client);
   registerRevalidationTriggers(context);

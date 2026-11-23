@@ -7,3 +7,4 @@ export { NodeRandomAccessFile, NodeRandomAccessFileProvider } from './nodeRandom
 export { loadExternalDocSets } from './externalDocSets';
 export { readNedPathSetting, resolveNedPath } from './nedPathSetting';
 export { NEDDOC_MANIFEST, NeddocOutputTracker } from './neddocOutput';
+export { claimOnce } from './runOnce';
