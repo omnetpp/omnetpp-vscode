@@ -24,7 +24,7 @@ tsc projects inside the `client` workspace):
   model, and all analyzers for NED/MSG/INI (diagnostics, navigation, completion, rename,
   hierarchy, INI param resolution), plus the xref graph, C++ scanner, neddoc generator,
   match expressions, eventlog engine, and the AI agent setup generators
-  (`shared/src/agents/`: the agent plugin files and the AGENTS.md / extensions.json
+  (`shared/src/agents/`: the agent plugin marketplace contract and the AGENTS.md / extensions.json
   mergers). **It must never import `vscode` or Node-specific APIs**, except
   `shared/src/node/` (`NodeFileSystem`, `NodeRandomAccessFile`, …), which is published only as the `@omnetpp/shared/node` subpath and imported explicitly by Node
   hosts. File access goes through the `FileSystem` interface in
@@ -153,11 +153,13 @@ Sequence Chart editor, and the Event Log table; keep any new webview code under
   via `bun scripts/gen-config-options.mjs <omnetpp-src-dir>`. The other snapshots:
   `resources/config/msg-builtin-types.json` (`gen-msg-builtins.mjs <omnetpp-src-dir>`),
   `resources/neddoc-material/` (`gen-neddoc-material-assets.mjs <omnetpp-src-dir>`),
-  `shared/src/eventlog/entries.ts` (`gen-eventlog-entries.mjs [<omnetpp-src-dir>]`), and
-  the end-user agent skills in `resources/skills/` (`gen-skills.mjs <skills-dir>`, from
-  the shared OMNeT++ skill collection). `resources/skills/omnetpp-tooling/` is the
-  exception: it documents this extension's own tools, so it is edited here directly and
-  must follow the MCP tool list and the `opp_lint` options.
+  and `shared/src/eventlog/entries.ts` (`gen-eventlog-entries.mjs [<omnetpp-src-dir>]`).
+- **AI agent skills** are not bundled: they come from the `omnetpp` agent plugin
+  marketplace (github.com/omnetpp/agent-plugins), which "Set Up AI Agents" installs. Its
+  `omnetpp-tooling` skill documents this extension's MCP tools and `opp_lint` options, so a
+  change to those needs a matching change there. `PLUGINS` in `shared/src/agents/plugin.ts`
+  copies the marketplace's plugin list and dependencies; run the agent tests with
+  `AGENT_PLUGINS_DIR=<agent-plugins checkout>` to check it against `plugins.json`.
 
 ## Commands
 

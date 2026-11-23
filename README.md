@@ -60,11 +60,11 @@ command-line tools, how to install the tools, and the MCP tool reference.
 - **MCP tools** — 23 read/refactor tools that let an AI agent query and safely refactor
   your model, served live from the editor and by `opp_ide_mcp`, plus 7 `elog_*` tools
   for reading event logs (`opp_ide_mcp` only).
-- **AI agent setup** — **OMNeT++: Set Up AI Agents…** installs OMNeT++ skills, the MCP
-  server, a post-edit lint hook, and (for Claude Code) the language server into Claude
-  Code, Codex and Devin, describes the project in `AGENTS.md`, and recommends the clangd
-  C++ extension. Copilot in VS Code gets the skills and the live MCP tools with no
-  setup.
+- **AI agent setup** — **OMNeT++: Set Up AI Agents…** installs the OMNeT++ agent plugins
+  (skills, the MCP server, a post-edit lint hook, and for Claude Code the language server)
+  from the `omnetpp` marketplace into Claude Code, Codex, Devin and Copilot in VS Code,
+  describes the project in `AGENTS.md`, and recommends the clangd C++ extension. Copilot
+  in VS Code gets the live MCP tools with no setup.
 
 See the [User Guide](docs/USER_GUIDE.md) for the full list and usage details.
 

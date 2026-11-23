@@ -789,10 +789,10 @@ terminal agents (Claude Code, Codex) do not see the bridge — set them up with
 [Set Up AI Agents](#ai-agents-set-up-ai-agents), which gives them the standalone
 `opp_ide_mcp` server.
 
-The extension also gives Copilot the OMNeT++ [skills](#ai-agents-set-up-ai-agents)
-(`omnetpp-tooling`, `omnetpp-model-development`, `omnetpp-model-coding-conventions`,
-`omnetpp-model-debugging`) through VS Code's skill
-contribution point, so Copilot needs no setup at all.
+Copilot gets the OMNeT++ skills from the same agent plugins as the other agents: select
+**Copilot in VS Code** in [Set Up AI Agents](#ai-agents-set-up-ai-agents). VS Code loads
+only the plugins' skills, so the tools still come from this bridge, and not a second time
+from the plugin.
 
 **Advantage.** An AI assistant can *query your actual model* (resolved types, parameters,
 topology, cross-references, diagnostics) instead of guessing from raw text, and tool
@@ -800,26 +800,31 @@ results reflect exactly what you're editing right now, unsaved changes included.
 
 ### AI agents: Set Up AI Agents
 
-**Feature.** **"OMNeT++: Set Up AI Agents…"** prepares a project, and the AI agent CLIs on
-your machine, for OMNeT++ work. It supports **Claude Code**, **Codex** and **Devin**
-(terminal agents, and their VS Code extensions or desktop apps, which use the same
-configuration). For each selected agent it installs, at user level:
+**Feature.** **"OMNeT++: Set Up AI Agents…"** prepares a project, and the AI agents on your
+machine, for OMNeT++ work. It installs the **OMNeT++ agent plugins** from the public
+`omnetpp` plugin marketplace ([github.com/omnetpp/agent-plugins](https://github.com/omnetpp/agent-plugins))
+into **Claude Code**, **Codex** and **Devin** (terminal agents, and their VS Code extensions
+or desktop apps, which use the same configuration), and into **Copilot in VS Code**.
 
-- the **OMNeT++ agent plugin**, with
-  - the **skills**: `omnetpp-tooling` (when to use the MCP tools and `opp_lint`),
-    `omnetpp-model-development`, `omnetpp-model-coding-conventions` and
-    `omnetpp-model-debugging`, and optionally the model maintainers' skills
-    `omnetpp-model-fingerprint-testing`, `omnetpp-model-refactoring`,
-    `omnetpp-model-review-brief` (a reviewer's brief of a PR or branch),
-    `omnetpp-model-git-workflow`, `omnetpp-model-branch-cleanup` and
-    `omnetpp-model-branch-rebase`. An optional skill comes with the skills it refers to,
-    including the generic `dev-*` procedures (`dev-git-workflow`, `dev-commit-messages`,
-    `dev-branch-cleanup`, `dev-branch-rebase`, `dev-design`) that the Git skills build on;
-  - a **post-edit lint hook**: after every edit of a `.ned`, `.msg` or `.ini` file, the
-    agent gets the [`opp_lint --agent-hook`](#opp_lint--linter) diagnostics of that file;
-  - for Claude Code, the **NED/MSG/INI language server** (`opp_lsp`);
-- the **`omnetpp` MCP server** ([`opp_ide_mcp`](#opp_ide_mcp--mcp-server-for-ai-agents)),
-  which indexes the directory the agent session runs in.
+The plugins:
+
+| Plugin | Contents |
+|---|---|
+| `omnetpp` (always installed) | the skills `omnetpp-tooling`, `omnetpp-model-development`, `omnetpp-model-coding-conventions`, `omnetpp-model-debugging` and `omnetpp-model-doc-generation`; a **post-edit lint hook** (after every edit of a `.ned`, `.msg` or `.ini` file, the agent gets the [`opp_lint --agent-hook`](#opp_lint--linter) diagnostics of that file); the **NED/MSG/INI language server** (`opp_lsp`, Claude Code); the **`omnetpp` MCP server** ([`opp_ide_mcp`](#opp_ide_mcp--mcp-server-for-ai-agents)) |
+| `omnetpp-dev` | for maintainers of a model library: fingerprint testing, refactoring, git workflow, branch cleanup and rebase, review briefs, and the generic `dev-*` procedures they build on |
+| `inet` | for INET contributors |
+| `simu5g` | for Simu5G contributors |
+
+What each agent gets:
+
+- **Claude Code:** everything above. Claude installs a plugin's dependencies by itself.
+- **Codex:** the skills and the hook. Codex starts a plugin's MCP server in the plugin
+  folder rather than in your project, so the command registers the `omnetpp` MCP server
+  with Codex separately (`codex mcp add`); then it indexes the directory the session runs
+  in.
+- **Devin:** the skills, the hook and the MCP server.
+- **Copilot in VS Code** (needs VS Code 1.110 or newer, with agent plugins on): the skills
+  only. The MCP tools come from the [live MCP bridge](#ai-agents-the-live-mcp-bridge).
 
 In the project folder it writes, after it shows you the list of files:
 
@@ -839,24 +844,35 @@ In the project folder it writes, after it shows you the list of files:
 1. Run **OMNeT++: Set Up AI Agents…** from the Command Palette (in a multi-root
    workspace, pick the project folder).
 2. If the [command-line tools](#installation) are not installed yet, the command installs
-   them first: the agents start `opp_lint`, `opp_lsp` and `opp_ide_mcp` by name, so their
-   folder must be on your `PATH`.
+   them first. The plugins start `opp_lint`, `opp_lsp` and `opp_ide_mcp` from your `PATH`,
+   and fetch them through `npx` when they are not there; Codex's MCP server needs them on
+   `PATH`.
 3. Pick the agents. An agent is listed as *not available*, with the reason, when its CLI
-   is not on `PATH` or is too old to install a plugin from a local folder (for Devin:
-   run `devin update`).
-4. Pick the project files and the optional skills, check the list of changes, and
-   confirm. **Show Details** opens the log with every agent command and its output.
-5. Restart running agent sessions. In **Codex**, trust the plugin's hook once with
-   `/hooks`; Codex does not run untrusted hooks.
+   is not on `PATH` or is too old to install plugins (for Devin: run `devin update`), or,
+   for Copilot, when this VS Code has no agent plugins or they are turned off
+   (`chat.plugins.enabled`).
+4. Pick the project files and the plugins (a plugin comes with the plugins it depends on),
+   check the list of changes, and confirm. **Show Details** opens the log with every agent
+   command and its output.
+5. For **Copilot**, VS Code opens the install page of each plugin; confirm each install.
+6. Restart running agent sessions. In **Codex**, trust the plugin's hook with `/hooks`;
+   Codex does not run untrusted hooks, and asks again after each plugin update.
 
-The command uses only the agents' own CLIs (`claude plugin install` / `claude mcp add`,
-`codex plugin marketplace add` / `codex plugin add` / `codex mcp add`,
-`devin plugins install --local` / `devin mcp add`) and never edits their configuration
-files directly. An existing MCP server named `omnetpp` is left unchanged. The plugin
-itself lives in `~/.local/share/omnetpp/agent-plugins` (macOS:
-`~/Library/Application Support/omnetpp/agent-plugins`, Windows:
-`%LOCALAPPDATA%\omnetpp\agent-plugins`); after an extension update it is rewritten on the
-next start, and the agents are brought up to the new version.
+The command uses only the agents' own CLIs (`claude plugin marketplace add` /
+`claude plugin install`, `codex plugin marketplace add` / `codex plugin add` /
+`codex mcp add`, `devin plugins install`) and never edits their configuration files
+directly. For Copilot it adds the marketplace to the `chat.plugins.marketplaces` setting
+and opens VS Code's plugin install page. After an extension update, the installed plugins
+are brought up to date on the next start. Claude Code updates a plugin only when the
+marketplace publishes a new version of it.
+
+**Upgrading from extension 1.0.x.** Older versions generated their own plugin
+(`omnetpp@omnetpp-local`) in `~/.local/share/omnetpp/agent-plugins`, registered the MCP
+server with each agent, and gave Copilot the skills directly. On the first start after the
+update, the extension replaces that plugin with the marketplace plugins in the agents it
+was installed into, deletes the old folder, and removes the `omnetpp` MCP server it had
+registered with Claude Code (only when its command is still `opp_ide_mcp`). Copilot users
+get a one-time notice with a **Set Up** button.
 
 **The NED path.** Agents and the command-line tools read `omnetpp.nedPath` only from the
 project folder's `.vscode/settings.json`. The command warns when the setting comes from
