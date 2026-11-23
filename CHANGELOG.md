@@ -1,5 +1,12 @@
 # Change Log
 
+## Unreleased
+
+- **Fix:** on Windows, `opp_lint` reported "No problems found." for files with errors, in
+  every mode (directory, single file, `--agent-hook`), and `opp_docgen` treated the
+  project's own files as library files. Both compared a path from the user's input with a
+  path from the index, whose drive letter is lowercase
+
 ## 1.0.2
 
 - **License change:** from 1.0.0 on, the extension and the command-line tools are licensed

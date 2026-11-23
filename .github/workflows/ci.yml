@@ -45,3 +45,39 @@ jobs:
 
     - name: Smoke-test opp_lsp as a standalone server (dist/opp_lsp.js)
       run: bun scripts/lsp-cli-smoke.mjs
+
+    - name: Smoke-test opp_docgen (dist/opp_docgen.js)
+      run: bun scripts/docgen-cli-smoke.mjs
+
+    # The command-line tools compare file paths, which Windows spells differently (drive
+    # letter case, separators), so their smokes also run there, on this job's bundle:
+    # building the grammars needs emscripten or docker, which the Windows runner lacks.
+    - name: Keep the bundle for the Windows smokes
+      uses: actions/upload-artifact@v7
+      with:
+        name: dist
+        path: dist/
+        retention-days: 1
+
+  cli-windows:
+    needs: ci
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v7
+
+    - name: Set up Bun
+      uses: oven-sh/setup-bun@v2
+
+    - name: Get the bundle
+      uses: actions/download-artifact@v8
+      with:
+        name: dist
+        path: dist/
+
+    - name: Smoke-test CLI linter (dist/opp_lint.js)
+      run: bun scripts/lint-cli-smoke.mjs
+
+    - name: Smoke-test opp_docgen (dist/opp_docgen.js)
+      run: bun scripts/docgen-cli-smoke.mjs

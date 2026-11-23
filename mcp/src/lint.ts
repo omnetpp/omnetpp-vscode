@@ -9,7 +9,7 @@
 // Usage:  opp_lint [options] [path ...]
 // Env:    OMNETPP_NED_PATH, OMNETPP_WASM_DIR, OMNETPP_CONFIG_DIR
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   BUILTIN_URI,
@@ -17,6 +17,7 @@ import {
   editedFiles,
   lintFile,
 } from '@omnetpp/shared';
+import { indexRelative, uriToIndexPath } from '@omnetpp/shared/node';
 import { createDiskToolSetup, nedPathDirsFor } from './context.js';
 
 /** Injected by esbuild from package.json. */
@@ -188,12 +189,10 @@ async function main(): Promise<void> {
   const indexRoots = unique([...dirArgs, ...fileArgs.map((f) => dirname(f))]);
 
   // Which indexed files are lint targets: explicit files, or anything under a dir arg.
-  const explicitFiles = new Set(fileArgs);
-  const underDir = (p: string) => dirArgs.some((d) => p === d || p.startsWith(d + sep));
   const { results, counts } = await lintTargets(
     indexRoots,
     nedPathDirsFor(opts.nedPath, process.cwd()),
-    (p) => explicitFiles.has(p) || underDir(p),
+    (p) => fileArgs.some((f) => indexRelative(f, p) === '') || dirArgs.some((d) => indexRelative(d, p) !== undefined),
     opts.minSeverity,
   );
 
@@ -241,16 +240,11 @@ async function runAgentHook(opts: Options): Promise<void> {
   if (!files.length) process.exit(0);
 
   const projectDir = process.env.CLAUDE_PROJECT_DIR || cwd;
-  const isInside = (f: string) => {
-    const rel = relative(projectDir, f);
-    return !isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`);
-  };
-  const outside = files.filter((f) => !isInside(f)).map((f) => dirname(f));
-  const targets = new Set(files);
+  const outside = files.filter((f) => indexRelative(projectDir, f) === undefined).map((f) => dirname(f));
   const { results, counts } = await lintTargets(
     unique([projectDir, ...outside]),
     nedPathDirsFor(opts.nedPath, projectDir),
-    (p) => targets.has(p),
+    (p) => files.some((f) => indexRelative(f, p) === ''),
     opts.severityGiven ? opts.minSeverity : DiagnosticSeverity.Warning,
   );
   const total = counts[1] + counts[2] + counts[3] + counts[4];
@@ -259,7 +253,11 @@ async function runAgentHook(opts: Options): Promise<void> {
   process.exit(2);
 }
 
-/** Index `indexRoots` (+ the NED path) and lint the indexed files that `isTarget` selects. */
+/**
+ * Index `indexRoots` (+ the NED path) and lint the indexed files that `isTarget` selects.
+ * `isTarget` gets the file's index path (see indexPath), which on Windows differs from a
+ * resolve()d path in the drive-letter case, so compare it only through indexRelative.
+ */
 async function lintTargets(
   indexRoots: string[],
   nedPathDirs: string[],
@@ -277,13 +275,13 @@ async function lintTargets(
     .filter((uri) => uri !== BUILTIN_URI)
     .map((uri) => {
       try {
-        return { uri, path: fileURLToPath(uri) };
+        return { uri, path: fileURLToPath(uri), key: uriToIndexPath(uri) };
       } catch {
         return undefined;
       }
     })
-    .filter((t): t is { uri: string; path: string } => !!t)
-    .filter((t) => isTarget(t.path))
+    .filter((t): t is { uri: string; path: string; key: string } => !!t)
+    .filter((t) => isTarget(t.key))
     .sort((a, b) => a.path.localeCompare(b.path));
 
   // Run the analyzers and collect (severity-filtered) results.

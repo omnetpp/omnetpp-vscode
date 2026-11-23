@@ -364,7 +364,8 @@ directly and need only `bun run compile` (and built WASM).
 GitHub Actions in `.github/workflows/`:
 
 - `ci.yml` — every push/PR: `build:wasm`, compile, unit tests, `dev:build`,
-  `lint-cli-smoke.mjs`, `lsp-smoke.mjs` and `lsp-cli-smoke.mjs`.
+  `lint-cli-smoke.mjs`, `lsp-smoke.mjs`, `lsp-cli-smoke.mjs` and `docgen-cli-smoke.mjs`
+  on Linux, and the two CLI smokes again on Windows, with the Linux job's bundle.
 - `release.yml` — on a pushed `X.Y.Z` tag (no `v` prefix): builds the `.vsix` and the
   npm package (`omnetpp-opp-tools-X.Y.Z.tgz`) and creates the GitHub release with both
   attached, its notes taken from the `## X.Y.Z` section of `CHANGELOG.md`. It fails early

@@ -9,7 +9,7 @@
 // Usage:  opp_docgen [options] [projectdir ...]
 // Env:    OMNETPP_NED_PATH, OMNETPP_WASM_DIR, OMNETPP_CONFIG_DIR
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   createDiagramRenderer,
@@ -25,7 +25,7 @@ import {
   type NeddocOptions,
   type NeddocResult,
 } from '@omnetpp/shared';
-import { NeddocOutputTracker, createNodeIconProvider, loadExternalDocSets } from '@omnetpp/shared/node';
+import { NeddocOutputTracker, createNodeIconProvider, indexRelative, loadExternalDocSets } from '@omnetpp/shared/node';
 import { createDiskToolSetup, nedPathDirsFor } from './context.js';
 
 /** Injected by esbuild from package.json. */
@@ -232,9 +232,12 @@ async function main(): Promise<void> {
   const { index } = await createDiskToolSetup(opts.projectDirs, nedPathDirsFor(opts.nedPath, opts.projectDirs[0]), fail);
 
   const excludes = opts.excludePatterns.map(excludePatternRegex);
+  // indexRelative compares in the index's spelling: on Windows, a path from an index URI
+  // has a lowercase drive letter, which a resolve()d project directory need not have.
   const projectRelative = (path: string): string | undefined => {
     for (const dir of opts.projectDirs) {
-      if (path === dir || path.startsWith(dir + sep)) return relative(dir, path).split(sep).join('/');
+      const rel = indexRelative(dir, path);
+      if (rel !== undefined) return rel;
     }
     return undefined;
   };

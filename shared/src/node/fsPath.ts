@@ -16,6 +16,19 @@ export function uriToIndexPath(uri: string, platform: NodeJS.Platform = process.
   return indexPath(fileURLToPath(uri, { windows: platform === 'win32' }), platform);
 }
 
+/**
+ * `path` relative to the directory `dir`, '/'-separated ('' for `dir` itself), or
+ * undefined when it lies outside. Both are compared in their index form, so a path that
+ * resolve() spelled from user input (`C:\\proj`) matches one that came from an index URI
+ * (`c:/proj/...`).
+ */
+export function indexRelative(dir: string, path: string, platform: NodeJS.Platform = process.platform): string | undefined {
+  const d = indexPath(dir, platform).replace(/\/+$/, '');
+  const p = indexPath(path, platform);
+  if (p === d) return '';
+  return p.startsWith(`${d}/`) ? p.slice(d.length + 1) : undefined;
+}
+
 /** Split a NED path list. Windows uses ';' only, since ':' follows the drive
  *  letter; elsewhere ':' (the OS path-list separator) and ';' both work. */
 export function splitNedPath(list: string, platform: NodeJS.Platform = process.platform): string[] {
