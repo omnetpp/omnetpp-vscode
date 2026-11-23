@@ -995,21 +995,33 @@ opp_lint --ned-path=/opt/inet/src src/   # add libraries for cross-file resoluti
 | `--severity=error\|warning\|info\|hint` | Minimum severity to report (default `hint` — report everything). |
 | `--fail-on=error\|warning\|info\|hint\|never` | Exit non-zero if a diagnostic at this severity or worse is found (default `error`). |
 | `--no-color` | Disable ANSI colors (also off when stdout is not a TTY, or when `NO_COLOR` is set). |
-| `--agent-hook` | Run as an AI agent post-edit hook (see below). |
+| `--agent-hook[=claude\|copilot\|cursor]` | Run as an AI agent post-edit hook (see below). |
 | `-h`, `--help` | Show help. |
 | `--version` | Show the version. |
 
 **Exit codes.** `0` — no diagnostics at/above `--fail-on`; `1` — diagnostics found
 at/above `--fail-on`; `2` — usage or runtime error.
 
-**As an agent post-edit hook.** `opp_lint --agent-hook` reads the JSON that Claude
-Code, Codex and Devin pass to a `PostToolUse` hook on stdin, takes the edited files from
-it (`tool_input.file_path`, or the file headers of a Codex `apply_patch`), and lints only
-the edited `.ned`/`.msg`/`.ini` files against the whole project at the hook's `cwd`
-(`CLAUDE_PROJECT_DIR` when set). When there are diagnostics (default
-`--severity=warning`), it writes them to **stderr** and exits with **2**, which these
-agents show to the model; otherwise it exits 0 silently. It returns at once, without
-loading the grammars, for edits of other files, so it can match every edit tool. The
+**As an agent post-edit hook.** `opp_lint --agent-hook` reads the JSON that the agent
+passes to a post-edit hook on stdin, takes the edited files from it
+(`tool_input.file_path` or `path`, Copilot CLI's `toolArgs`, or the file headers of a
+Codex `apply_patch`), and lints only the edited `.ned`/`.msg`/`.ini` files against the
+whole project (`CLAUDE_PROJECT_DIR`, `CURSOR_PROJECT_DIR`, Cursor's first workspace root,
+or the hook's `cwd`). It returns at once, without loading the grammars, for edits of
+other files, so it can match every edit tool. When there are diagnostics (default
+`--severity=warning`), it reports them the way the agent shows hook output to the model:
+
+| Agent | Hook event | Report |
+| --- | --- | --- |
+| Claude Code, Codex, Devin (`claude`) | `PostToolUse` | on **stderr**, exit code **2** |
+| Copilot CLI (`copilot`) | `PostToolUse` / `postToolUse` | `{"additionalContext": …}` on stdout, exit code 0; at most 10 KB |
+| Cursor (`cursor`) | `postToolUse`, matcher `Write` | `{"additional_context": …}` on stdout, exit code 0 |
+
+Without a value, `--agent-hook` detects Copilot CLI (`COPILOT_PLUGIN_ROOT`, or its own
+input fields) and Cursor (`cursor_version` in the input), and uses `claude` otherwise.
+Copilot CLI runs Claude-format plugin hooks too, but shows their stderr only to the
+user, hence its own mode. The `copilot` and `cursor` modes follow the vendors' hook
+documentation and have not yet been tried in a live session. Without diagnostics, the hook exits 0 silently. The
 **OMNeT++: Set Up AI Agents** command installs it for you (see
 [AI agents](#ai-agents-set-up-ai-agents)).
 

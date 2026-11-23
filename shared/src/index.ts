@@ -97,7 +97,8 @@ export {
 export { parseJsonc, stripJsonc } from './project/jsonc';
 
 // AI agent integration
-export { editedFiles } from './agents/hookInput';
+export { COPILOT_CONTEXT_LIMIT, editedFiles, HOOK_AGENTS, hookAgent, hookProjectDir, hookReply } from './agents/hookInput';
+export type { HookAgent, HookReply } from './agents/hookInput';
 
 // Cross-reference graph + unified query surface
 export {

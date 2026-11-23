@@ -15,6 +15,11 @@ import {
   BUILTIN_URI,
   DiagnosticSeverity,
   editedFiles,
+  HOOK_AGENTS,
+  type HookAgent,
+  hookAgent,
+  hookProjectDir,
+  hookReply,
   lintFile,
 } from '@omnetpp/shared';
 import { indexRelative, uriToIndexPath } from '@omnetpp/shared/node';
@@ -32,8 +37,9 @@ interface Options {
   /** Exit non-zero when a diagnostic at least this severe is found; null = never fail. */
   failOn: DiagnosticSeverity | null;
   color: boolean;
-  /** Read an agent post-edit hook's JSON from stdin and lint only the edited files. */
-  agentHook: boolean;
+  /** Read an agent post-edit hook's JSON from stdin and lint only the edited files;
+   *  'auto' detects the agent from the hook input. */
+  agentHook: HookAgent | 'auto' | null;
   severityGiven: boolean;
 }
 
@@ -74,23 +80,34 @@ Options:
   --fail-on=<level>   Exit non-zero if a diagnostic at this severity or worse is
                       found: error (default) | warning | info | hint | never.
   --no-color          Disable ANSI colors (also off when stdout is not a TTY).
-  --agent-hook        Run as an AI agent post-edit hook (Claude Code, Codex,
-                      Devin): read the hook JSON from stdin, lint only the
-                      edited .ned/.msg/.ini files against the project at the
-                      hook's cwd, and report to stderr with exit code 2 when
-                      there are diagnostics (default --severity=warning).
-                      Path arguments are ignored.
+  --agent-hook[=<agent>]
+                      Run as an AI agent post-edit hook: read the hook JSON
+                      from stdin and lint only the edited .ned/.msg/.ini files
+                      against the hook's project (default --severity=warning).
+                      Path arguments are ignored. The report reaches the model
+                      the way the agent expects:
+                        claude   stderr, exit code 2 (Claude Code, Codex, Devin)
+                        copilot  {"additionalContext"} on stdout, exit code 0
+                                 (Copilot CLI)
+                        cursor   {"additional_context"} on stdout, exit code 0
+                                 (Cursor, postToolUse)
+                      Without <agent>, it is detected from the hook input and
+                      environment.
   -h, --help          Show this help.
   --version           Show the version.
 
 Exit codes:
   0  no diagnostics at or above the --fail-on level
   1  diagnostics found at or above the --fail-on level
-  2  usage or runtime error; with --agent-hook: diagnostics found`;
+  2  usage or runtime error; with --agent-hook (claude): diagnostics found
+     (with --agent-hook copilot or cursor, a runtime error exits with 1)`;
+
+/** Cursor reads exit code 2 as "block", so the JSON-reply hook modes fail open. */
+let errorExitCode = 2;
 
 function fail(msg: string): never {
   process.stderr.write(`opp_lint: ${msg}\n`);
-  process.exit(2);
+  process.exit(errorExitCode);
 }
 
 function parseArgs(argv: string[]): Options {
@@ -101,7 +118,7 @@ function parseArgs(argv: string[]): Options {
     minSeverity: DiagnosticSeverity.Hint,
     failOn: DiagnosticSeverity.Error,
     color: process.stdout.isTTY === true && !process.env.NO_COLOR,
-    agentHook: false,
+    agentHook: null,
     severityGiven: false,
   };
   for (const a of argv) {
@@ -114,7 +131,11 @@ function parseArgs(argv: string[]): Options {
     } else if (a === '--no-color') {
       opts.color = false;
     } else if (a === '--agent-hook') {
-      opts.agentHook = true;
+      opts.agentHook = 'auto';
+    } else if (a.startsWith('--agent-hook=')) {
+      const v = a.slice('--agent-hook='.length) as HookAgent;
+      if (!HOOK_AGENTS.includes(v)) fail(`invalid --agent-hook: ${v} (expected ${HOOK_AGENTS.join('|')})`);
+      opts.agentHook = v;
     } else if (a.startsWith('--ned-path=')) {
       opts.nedPath = a.slice('--ned-path='.length);
     } else if (a.startsWith('--format=')) {
@@ -165,7 +186,7 @@ function unique(xs: string[]): string[] {
 
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2));
-  if (opts.agentHook) return runAgentHook(opts);
+  if (opts.agentHook) return runAgentHook(opts, opts.agentHook);
 
   // Classify positionals into files vs directories.
   const positionals = opts.paths.map((p) => resolve(p));
@@ -212,6 +233,11 @@ async function main(): Promise<void> {
 
 const HOOK_EXTENSIONS = ['.ned', '.msg', '.ini'];
 
+/** Pipes are asynchronous on macOS, and process.exit() would cut off the JSON reply. */
+function writeAll(stream: NodeJS.WriteStream, text: string): Promise<void> {
+  return new Promise((done) => (text ? stream.write(text, () => done()) : done()));
+}
+
 function readStdin(): string {
   try {
     return readFileSync(0, 'utf8');
@@ -222,10 +248,9 @@ function readStdin(): string {
 
 /**
  * Post-edit hook mode. The agent waits for this on every edit of any file, so it
- * returns before loading the grammars when no NED/MSG/INI file was edited. Exit 2
- * with the report on stderr is the hook contract that shows the text to the model.
+ * returns before loading the grammars when no NED/MSG/INI file was edited.
  */
-async function runAgentHook(opts: Options): Promise<void> {
+async function runAgentHook(opts: Options, mode: HookAgent | 'auto'): Promise<void> {
   let input: { cwd?: unknown } = {};
   try {
     input = JSON.parse(readStdin() || '{}');
@@ -233,13 +258,15 @@ async function runAgentHook(opts: Options): Promise<void> {
     process.exit(0);
   }
   if (!input || typeof input !== 'object') process.exit(0);
-  const cwd = typeof input.cwd === 'string' ? input.cwd : process.cwd();
+  const agent = mode === 'auto' ? hookAgent(input, process.env) : mode;
+  if (agent !== 'claude') errorExitCode = 1;
+  const projectDir = hookProjectDir(input, process.env) ?? process.cwd();
+  const cwd = typeof input.cwd === 'string' && input.cwd ? input.cwd : projectDir;
   const files = unique(editedFiles(input).map((p) => resolve(cwd, p))).filter(
     (p) => HOOK_EXTENSIONS.some((ext) => p.endsWith(ext)) && existsSync(p),
   );
   if (!files.length) process.exit(0);
 
-  const projectDir = process.env.CLAUDE_PROJECT_DIR || cwd;
   const outside = files.filter((f) => indexRelative(projectDir, f) === undefined).map((f) => dirname(f));
   const { results, counts } = await lintTargets(
     unique([projectDir, ...outside]),
@@ -249,8 +276,11 @@ async function runAgentHook(opts: Options): Promise<void> {
   );
   const total = counts[1] + counts[2] + counts[3] + counts[4];
   if (total === 0) process.exit(0);
-  process.stderr.write(`opp_lint: problems in the edited file(s):\n${formatText(results, counts, total, false, projectDir)}`);
-  process.exit(2);
+  const report = `opp_lint: problems in the edited file(s):\n${formatText(results, counts, total, false, projectDir)}`;
+  const reply = hookReply(agent, report);
+  await writeAll(process.stdout, reply.stdout);
+  await writeAll(process.stderr, reply.stderr);
+  process.exit(reply.exitCode);
 }
 
 /**
@@ -371,5 +401,5 @@ function emitJson(results: FileResult[], counts: Record<number, number>): void {
 
 main().catch((e) => {
   process.stderr.write(`opp_lint: ${e instanceof Error ? e.stack : String(e)}\n`);
-  process.exit(2);
+  process.exit(errorExitCode);
 });

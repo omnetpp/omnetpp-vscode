@@ -1,8 +1,9 @@
 // Drives the bundled CLI linter (dist/opp_lint.js) against a throwaway project
 // and asserts: diagnostics are reported, inline suppression is honored, the JSON
 // shape is correct, exit codes follow --fail-on, --version prints the package
-// version, and --agent-hook follows the agent post-edit hook contract (stdin JSON,
-// report on stderr, exit 2). Run after `bun run dev:build`.
+// version, and --agent-hook follows each agent's post-edit hook contract (stdin JSON;
+// report on stderr with exit 2, or as a JSON context field on stdout for Copilot CLI and
+// Cursor). Run after `bun run dev:build`.
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -23,11 +24,13 @@ writeFileSync(join(proj, 'Ok.ned'), 'simple Ok {\n  parameters:\n    int k;\n   
 mkdirSync(join(proj, 'sub'));
 writeFileSync(join(proj, 'sub', 'Uses.ned'), 'package sub;\nimport Host;\nnetwork Uses {\n  submodules:\n    h: Host;\n}\n');
 
-function run(args, input) {
-  const r = spawnSync(process.execPath, [cli, '--no-color', ...args], { encoding: 'utf8', input, cwd: proj });
+// The hook tests must not see the agent variables of a session that runs this script.
+const { CLAUDE_PROJECT_DIR, CURSOR_PROJECT_DIR, COPILOT_PLUGIN_ROOT, ...cleanEnv } = process.env;
+function run(args, input, env = cleanEnv) {
+  const r = spawnSync(process.execPath, [cli, '--no-color', ...args], { encoding: 'utf8', input, cwd: proj, env });
   return { code: r.status, out: r.stdout, err: r.stderr };
 }
-const hook = (input) => run(['--agent-hook'], JSON.stringify(input));
+const hook = (input, env, args = ['--agent-hook']) => run(args, JSON.stringify(input), env);
 function cleanup() {
   try { rmSync(proj, { recursive: true, force: true }); } catch { /* ignore */ }
 }
@@ -96,6 +99,42 @@ try {
     assert(run(['--agent-hook'], text).code === 0, `hook must ignore input that is not a JSON object: ${text}`);
   }
   console.log('agent hook: OK');
+
+  // 8) Copilot CLI, in its Claude-compatible input (detected by COPILOT_PLUGIN_ROOT) and
+  // in its camelCase input with toolArgs as a JSON string: context on stdout, exit 0
+  const copilotEnv = { ...cleanEnv, COPILOT_PLUGIN_ROOT: '/plugins/omnetpp', CLAUDE_PROJECT_DIR: proj };
+  for (const input of [
+    { hook_event_name: 'PostToolUse', cwd: proj, tool_name: 'Edit', tool_input: { path: join(proj, 'Host.ned') } },
+    { cwd: proj, toolName: 'edit', toolArgs: JSON.stringify({ path: 'Host.ned', old_str: 'a', new_str: 'b' }) },
+  ]) {
+    const r = hook(input, input.toolName ? cleanEnv : copilotEnv);
+    assert(r.code === 0 && r.err === '', `copilot hook: exit ${r.code}, stderr ${r.err}`);
+    assert(/Duplicate parameter 'n'/.test(JSON.parse(r.out).additionalContext), `copilot hook stdout: ${r.out}`);
+  }
+
+  // 9) Cursor postToolUse: empty cwd, project from workspace_roots, context on stdout
+  const cursorInput = {
+    hook_event_name: 'postToolUse', cursor_version: '2.1.0', cwd: '', workspace_roots: [proj],
+    tool_name: 'Write', tool_input: { file_path: join(proj, 'Net.ned') },
+  };
+  for (const args of [['--agent-hook'], ['--agent-hook=cursor']]) {
+    const r = hook(cursorInput, cleanEnv, args);
+    assert(r.code === 0 && r.err === '', `cursor hook ${args}: exit ${r.code}, stderr ${r.err}`);
+    assert(/Unknown type 'Nonexistent'/.test(JSON.parse(r.out).additional_context), `cursor hook stdout: ${r.out}`);
+  }
+
+  // 10) an explicit mode wins over detection; an unknown one is a usage error
+  const forced = hook(cursorInput, cleanEnv, ['--agent-hook=claude']);
+  assert(forced.code === 2 && forced.out === '' && /Nonexistent/.test(forced.err), `--agent-hook=claude: exit ${forced.code}`);
+  assert(run(['--agent-hook=gemini'], '{}').code === 2, 'unknown --agent-hook value must be rejected');
+  // without the grammars: a runtime error, which must not exit 2 ("block") in Cursor
+  const noWasm = { ...cleanEnv, OMNETPP_WASM_DIR: join(proj, 'sub') };
+  const okInput = { cwd: proj, tool_input: { file_path: join(proj, 'Ok.ned') } };
+  for (const [mode, code] of [['cursor', 1], ['claude', 2]]) {
+    const r = hook(okInput, noWasm, [`--agent-hook=${mode}`]);
+    assert(r.code === code && r.out === '' && /grammar wasm not found/.test(r.err), `${mode} hook runtime error: exit ${r.code}, ${r.err}`);
+  }
+  console.log('agent hook modes: OK');
 
   console.log('LINT CLI SMOKE PASSED');
   cleanup();
