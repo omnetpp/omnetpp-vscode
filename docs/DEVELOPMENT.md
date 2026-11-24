@@ -206,9 +206,15 @@ The source is not released, so end users get the `opp_*` tools in one of two way
   shim per tool into `~/.local/bin` (Linux, macOS) or `%LOCALAPPDATA%\omnetpp\bin`
   (Windows, `.cmd`). A shim runs the bundle in the installed extension's `dist/` with VS
   Code's own runtime (`process.execPath` with `ELECTRON_RUN_AS_NODE=1`), so no Node is
-  needed. Both paths change on updates, so the install is kept in `globalState` and the
-  shims are rewritten on activation when either moved. Shims carry a marker line; the
-  refresh and the uninstall command only touch marked files.
+  needed. Both paths change on updates, and every editor with the extension shares the
+  shims while keeping its own install record in `globalState`. So on activation an
+  editor rewrites the shims whose script or runtime is gone, with or without a record,
+  and the ones that still run its own previous install; a working shim of another editor
+  is left alone (`needsRepair`). A development or test host repairs nothing, so a debug
+  session does not point the real shims at a workspace `dist/`. Shims carry a marker
+  line; the repair and the uninstall command only touch marked files. The shim text and the parsing of existing shims are in
+  `shared/src/node/cliShims.ts` (`@omnetpp/shared/cli-shims`), tested in
+  `shared/src/test/cliShims.test.ts`.
 
 ### Graphical NED preview
 

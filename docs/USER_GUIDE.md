@@ -936,8 +936,12 @@ offers to copy its path: add it to `PATH` and open a new terminal.
 
 - The command asks before it overwrites a file of the same name that it did not create
   (for example one from the npm package).
-- If a launcher reports that VS Code or the extension was updated or removed, run the
-  command again (or open an OMNeT++ project in VS Code, which refreshes the launchers).
+- The launchers are shared by every editor that has the extension (VS Code, Cursor,
+  Windsurf and other VS Code-based editors). When the editor or extension copy a launcher
+  runs is gone, the next editor that starts the extension points it at itself; a working
+  launcher of another editor is left as it is.
+- If a launcher still reports that the extension or its editor was updated or removed,
+  run the command again, or install the npm package instead.
 - **"OMNeT++: Uninstall Command-Line Tools"** removes the launchers.
 - In a remote window (SSH, WSL, containers) the launchers are installed on the remote
   machine.

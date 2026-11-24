@@ -6,6 +6,12 @@
   every mode (directory, single file, `--agent-hook`), and `opp_docgen` treated the
   project's own files as library files. Both compared a path from the user's input with a
   path from the index, whose drive letter is lowercase
+- **Fix:** the command-line tools stopped working once the editor that installed them
+  (for example Cursor or Devin) lost the extension, even with the extension still in VS
+  Code: every launcher printed "the OMNeT++ VS Code extension or VS Code was updated or
+  removed". Now any editor with the extension repairs such launchers when it starts it,
+  and the AI agent setup reinstalls them instead of taking them for working. The hint
+  also names the npm package
 
 ## 1.0.2
 

@@ -13,6 +13,10 @@
       "types": "./out/node/index.d.ts",
       "default": "./out/node/index.js"
     },
+    "./cli-shims": {
+      "types": "./out/node/cliShims.d.ts",
+      "default": "./out/node/cliShims.js"
+    },
     "./protocol": {
       "types": "./out/protocol.d.ts",
       "default": "./out/protocol.js"
