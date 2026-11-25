@@ -92,7 +92,9 @@ try {
     const r = hook(input);
     assert(r.code === 0 && r.err === '' && r.out === '', `hook on ${label}: exit ${r.code}, stderr ${r.err}`);
   }
-  assert(run(['--agent-hook'], 'not json').code === 0, 'hook must ignore malformed input');
+  for (const text of ['not json', 'null', '42']) {
+    assert(run(['--agent-hook'], text).code === 0, `hook must ignore input that is not a JSON object: ${text}`);
+  }
   console.log('agent hook: OK');
 
   console.log('LINT CLI SMOKE PASSED');

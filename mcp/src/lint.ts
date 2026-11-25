@@ -233,6 +233,7 @@ async function runAgentHook(opts: Options): Promise<void> {
   } catch {
     process.exit(0);
   }
+  if (!input || typeof input !== 'object') process.exit(0);
   const cwd = typeof input.cwd === 'string' ? input.cwd : process.cwd();
   const files = unique(editedFiles(input).map((p) => resolve(cwd, p))).filter(
     (p) => HOOK_EXTENSIONS.some((ext) => p.endsWith(ext)) && existsSync(p),
