@@ -820,8 +820,9 @@ What each agent gets:
 - **Claude Code:** everything above. Claude installs a plugin's dependencies by itself.
 - **Codex:** the skills and the hook. Codex starts a plugin's MCP server in the plugin
   folder rather than in your project, so the command registers the `omnetpp` MCP server
-  with Codex separately (`codex mcp add`); then it indexes the directory the session runs
-  in.
+  with Codex separately (`codex mcp add`), which indexes the directory the session runs
+  in. Codex skips a plugin MCP server whose name is already taken, so the plugin's own
+  `omnetpp` server does not run next to it.
 - **Devin:** the skills, the hook and the MCP server.
 - **Copilot in VS Code** (needs VS Code 1.110 or newer, with agent plugins on): the skills
   only. The MCP tools come from the [live MCP bridge](#ai-agents-the-live-mcp-bridge).
@@ -846,7 +847,10 @@ In the project folder it writes, after it shows you the list of files:
 2. If the [command-line tools](#installation) are not installed yet, the command installs
    them first. The plugins start `opp_lint`, `opp_lsp` and `opp_ide_mcp` from your `PATH`,
    and fetch them through `npx` when they are not there; Codex's MCP server needs them on
-   `PATH`.
+   `PATH`. **The plugins need Node.js 18 or newer on `PATH`**: the agents start the hook,
+   the language server and the MCP server with `node`, even when the tools come from the
+   extension (whose own shims run on VS Code's runtime and need no Node.js). Without it,
+   the setup succeeds but the hook and the servers fail to start.
 3. Pick the agents. An agent is listed as *not available*, with the reason, when its CLI
    is not on `PATH` or is too old to install plugins (for Devin: run `devin update`), or,
    for Copilot, when this VS Code has no agent plugins or they are turned off
@@ -862,17 +866,26 @@ The command uses only the agents' own CLIs (`claude plugin marketplace add` /
 `claude plugin install`, `codex plugin marketplace add` / `codex plugin add` /
 `codex mcp add`, `devin plugins install`) and never edits their configuration files
 directly. For Copilot it adds the marketplace to the `chat.plugins.marketplaces` setting
-and opens VS Code's plugin install page. After an extension update, the installed plugins
-are brought up to date on the next start. Claude Code updates a plugin only when the
-marketplace publishes a new version of it.
+and opens VS Code's plugin install page. After an extension update, the plugins installed
+into Claude Code, Codex and Devin are brought up to date on the next start; Claude Code
+updates a plugin only when the marketplace publishes a new version of it. The extension
+does not update the plugins installed into Copilot.
+
+An `omnetpp` MCP server registered with Claude Code (user scope) or Devin whose command is
+`opp_ide_mcp` is removed on every run, because the plugin brings that server under the
+same name; an `omnetpp` server with any other command is left unchanged. For Codex, an
+existing `omnetpp` server is always left unchanged.
 
 **Upgrading from extension 1.0.x.** Older versions generated their own plugin
 (`omnetpp@omnetpp-local`) in `~/.local/share/omnetpp/agent-plugins`, registered the MCP
 server with each agent, and gave Copilot the skills directly. On the first start after the
 update, the extension replaces that plugin with the marketplace plugins in the agents it
 was installed into, deletes the old folder, and removes the `omnetpp` MCP server it had
-registered with Claude Code (only when its command is still `opp_ide_mcp`). Copilot users
-get a one-time notice with a **Set Up** button.
+registered with Claude Code and Devin (only when its command is still `opp_ide_mcp`).
+
+**Copilot notice.** When VS Code has agent plugins and Copilot has not been set up, the
+extension shows a one-time notice with a **Set Up** button, on new installs too. Dismiss
+it if you do not use Copilot.
 
 **The NED path.** Agents and the command-line tools read `omnetpp.nedPath` only from the
 project folder's `.vscode/settings.json`. The command warns when the setting comes from

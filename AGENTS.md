@@ -235,9 +235,12 @@ For the MCP feature (after `bun run dev:build`):
 `mcp-smoke.mjs <projectDir>` drives the standalone `dist/opp_ide_mcp.js` over MCP stdio;
 `mcp-refresh-smoke.mjs` edits a throwaway project between its tool calls (added, changed,
 deleted files, a new `package.ned`, the NED path from `.vscode/settings.json`);
-`agent-setup-smoke.mjs` runs the agent plugin install of "Set Up AI Agents"
-(`client/src/agentPlugin.ts`, with `vscode` mocked) against the real `claude` / `codex` /
-`devin` CLIs, each in a throwaway config dir, skipping missing ones;
+`agent-setup-smoke.mjs` drives the agent half of "Set Up AI Agents"
+(`client/src/agentPlugin.ts`, with `vscode` mocked) against the real `claude` / `codex`
+CLIs, each in a throwaway config dir and HOME: it sets up a 1.0.x-style local plugin, runs
+the startup migration to the marketplace plugins, checks what the agent reports, then runs
+the install a second time and the refresh. Missing or too old CLIs are skipped, and so is
+Devin in practice, because it manages plugins only when logged in;
 `mcp-live-smoke.mjs <projectDir>` drives `dist/opp_lsp.js` and exercises the
 `omnetpp/mcp/*` live-index requests (incl. unsaved-buffer reflection);
 `preview-smoke.mjs` checks the `omnetpp/nedPreview` scene request shape the same way.
