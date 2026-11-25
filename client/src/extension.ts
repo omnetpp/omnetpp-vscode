@@ -103,7 +103,7 @@ export function activate(context: ExtensionContext): void {
   registerNedPreview(context, client);
   registerDocsCommand(context, client);
   registerAgentSetupCommand(context, client);
-  void refreshPluginIfUpdated(context, (state) => copilotNotice(context, state));
+  void refreshPluginIfUpdated(context, (state, upgradedFromLegacy) => copilotNotice(context, state, upgradedFromLegacy));
   registerCounterpartCommand(context, client);
   registerEventLog(context, client);
   registerRevalidationTriggers(context);

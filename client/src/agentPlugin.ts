@@ -16,6 +16,7 @@ import {
   withDependencies,
 } from '@omnetpp/shared/agents';
 import { claimOnce } from '@omnetpp/shared/node';
+import { cliToolsInstalled } from './cliTools';
 
 export type AgentId = 'claude' | 'codex' | 'devin';
 
@@ -249,8 +250,8 @@ export interface PluginState {
   agents: AgentId[];
   /** Copilot in VS Code was set up. */
   copilot?: boolean;
-  /** The one-time notice about Copilot's skills was shown. */
-  copilotNoticeShown?: boolean;
+  /** The one-time notice about Copilot's skills was shown, or is not needed (a new install). */
+  copilotNoticeDone?: boolean;
 }
 
 /** The state written by extension versions up to 1.0.x, which generated the plugin locally. */
@@ -352,18 +353,20 @@ async function updatePlugins(context: vscode.ExtensionContext): Promise<void> {
   await updatePluginState(context, (s) => ({ ...(s ?? state), version }));
 }
 
-/** On startup: update the installed plugins, then point Copilot users to the setup once. */
+/** On startup: update the installed plugins, then point Copilot users of 1.0.x to the setup once. */
 export async function refreshPluginIfUpdated(
   context: vscode.ExtensionContext,
-  copilotNotice: (state: PluginState | undefined) => Promise<void>,
+  copilotNotice: (state: PluginState | undefined, upgradedFromLegacy: boolean) => Promise<void>,
 ): Promise<void> {
+  // Read before the update, which rewrites a 1.0.x state in the current shape.
+  const upgradedFromLegacy = hasLegacyState(context) || cliToolsInstalled(context);
   pendingUpdate = updatePlugins(context).catch((e) =>
     agentLog().error(`could not update the OMNeT++ agent plugins: ${(e as Error).message}`),
   );
   await pendingUpdate;
   // Not part of pendingUpdate: the notice can run the setup command, which waits for it.
   try {
-    await copilotNotice(pluginState(context));
+    await copilotNotice(pluginState(context), upgradedFromLegacy);
   } catch (e) {
     agentLog().error(`could not show the Copilot notice: ${(e as Error).message}`);
   }

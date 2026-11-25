@@ -883,9 +883,10 @@ update, the extension replaces that plugin with the marketplace plugins in the a
 was installed into, deletes the old folder, and removes the `omnetpp` MCP server it had
 registered with Claude Code and Devin (only when its command is still `opp_ide_mcp`).
 
-**Copilot notice.** When VS Code has agent plugins and Copilot has not been set up, the
-extension shows a one-time notice with a **Set Up** button, on new installs too. Dismiss
-it if you do not use Copilot.
+**Copilot notice.** 1.0.x gave Copilot the skills without any setup. After the update,
+users of 1.0.x who ran its agent setup or installed its command-line tools get a one-time
+notice with a **Set Up** button, when VS Code has agent plugins and Copilot has not been
+set up. New installs do not get it.
 
 **The NED path.** Agents and the command-line tools read `omnetpp.nedPath` only from the
 project folder's `.vscode/settings.json`. The command warns when the setting comes from

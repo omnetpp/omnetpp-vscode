@@ -73,14 +73,21 @@ export async function setUpCopilot(plugins: string[], log: vscode.LogOutputChann
 }
 
 /**
- * Shown once: older extension versions gave Copilot the skills without any setup, and new
- * users would not know that Copilot needs one.
+ * Shown once, to users of 1.0.x, which gave Copilot the skills without any setup. Decided on
+ * the first start of this version: 1.0.x left a trace only when its agent setup ran or its
+ * command-line tools were installed, and a new install never needs the notice, because
+ * Copilot is one of the agents of the setup.
  */
-export async function copilotNotice(context: vscode.ExtensionContext, state: PluginState | undefined): Promise<void> {
-  if (state?.copilot || state?.copilotNoticeShown) return;
+export async function copilotNotice(context: vscode.ExtensionContext, state: PluginState | undefined, upgradedFromLegacy: boolean): Promise<void> {
+  if (state?.copilot || state?.copilotNoticeDone) return;
+  const markDone = () => updatePluginState(context, (s) => ({ ...(s ?? { version: '', plugins: [], agents: [] }), copilotNoticeDone: true }));
+  if (!upgradedFromLegacy) {
+    await markDone();
+    return;
+  }
   if (!(await copilotAvailability()).available) return;
   if (!claimOnce(context.globalStorageUri.fsPath, 'copilot-notice')) return;
-  await updatePluginState(context, (s) => ({ ...(s ?? { version: '', plugins: [], agents: [] }), copilotNoticeShown: true }));
+  await markDone();
   const setUp = 'Set Up';
   const answer = await vscode.window.showInformationMessage(
     'OMNeT++: Copilot gets the OMNeT++ skills from the "omnetpp" agent plugin marketplace. Set it up now?',

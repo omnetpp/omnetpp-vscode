@@ -72,6 +72,11 @@ function currentState(context: vscode.ExtensionContext, binDir: string): Install
 
 /** Install the shims unless all of them exist and work. Returns the bin directory and whether
  *  it is on PATH, or undefined when the user declined or the install failed. */
+/** The command-line tools were installed, by this or an earlier extension version. */
+export function cliToolsInstalled(context: vscode.ExtensionContext): boolean {
+  return context.globalState.get<InstalledState>(STATE_KEY) !== undefined;
+}
+
 export async function ensureCliTools(context: vscode.ExtensionContext): Promise<{ binDir: string; onPath: boolean } | undefined> {
   const binDir = context.globalState.get<InstalledState>(STATE_KEY)?.binDir ?? defaultBinDir();
   if (TOOLS.every((t) => isWorking(shimPath(binDir, t)))) return { binDir, onPath: isOnPath(binDir) };
