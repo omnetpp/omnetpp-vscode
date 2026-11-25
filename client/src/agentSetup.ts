@@ -23,6 +23,7 @@ import {
   agentLog,
   extensionVersion,
   marketplaceSource,
+  nodeProblem,
   pluginState,
   pluginUpdateDone,
   probeAgents,
@@ -289,6 +290,9 @@ async function setUpAiAgents(context: vscode.ExtensionContext, client: LanguageC
       `${tools.binDir} is not on PATH: the plugins then fetch the tools through npx, and Codex cannot start opp_ide_mcp. Add it to PATH.`,
     );
   }
+  // First, because the summary shows only the first warning and this one breaks every agent.
+  const node = ok.length ? await nodeProblem() : undefined;
+  if (node) warnings.unshift(node);
   if (ok.includes('codex')) warnings.push('Codex runs the plugin\'s lint hook only after you trust it, and again after each update: run /hooks in Codex.');
   const hints = [
     'Restart running agent sessions so that they load the plugins.',

@@ -184,6 +184,20 @@ export function runCli(exe: string, args: string[], timeoutMs = 120_000): Promis
   });
 }
 
+/**
+ * The plugins start their hook and servers with `node`, unlike the extension's shims, which
+ * run on VS Code's runtime. Checked on the extension host's PATH, which may differ from the
+ * agents' (e.g. Node set up only in a shell profile), so a problem is only a warning.
+ */
+export async function nodeProblem(): Promise<string | undefined> {
+  const r = await runCli('node', ['--version'], 10_000);
+  const version = /^v(\d+)\./.exec(r.output.trim());
+  agentLog().info(`node --version: ${r.missing ? 'not found' : r.output.trim() || `exit code ${r.code}`}`);
+  if (r.code === 0 && version && Number(version[1]) >= 18) return undefined;
+  const found = r.code === 0 && version ? `Node.js ${r.output.trim()} is too old` : 'Node.js was not found on PATH';
+  return `${found}: the agent plugins start their lint hook, language server and MCP server with Node.js 18 or newer.`;
+}
+
 export interface AgentAvailability {
   cli: AgentCli;
   available: boolean;

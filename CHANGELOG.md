@@ -40,7 +40,7 @@
   is deleted, and the `omnetpp` MCP server it registered with Claude Code and Devin is
   removed
 - The agent plugins need **Node.js 18 or newer** on `PATH`: the agents start the hook and
-  the servers with `node`
+  the servers with `node`. **Set Up AI Agents** warns when it finds none
 - **Fix:** Devin's plugin install no longer aborts silently at Devin's trust prompt
 
 ## 1.0.2

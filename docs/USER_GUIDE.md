@@ -850,7 +850,9 @@ In the project folder it writes, after it shows you the list of files:
    `PATH`. **The plugins need Node.js 18 or newer on `PATH`**: the agents start the hook,
    the language server and the MCP server with `node`, even when the tools come from the
    extension (whose own shims run on VS Code's runtime and need no Node.js). Without it,
-   the setup succeeds but the hook and the servers fail to start.
+   the setup succeeds but the hook and the servers fail to start, so the command warns
+   when it finds no Node.js 18+ on VS Code's `PATH`. That `PATH` can differ from your
+   shell's (for example with Node.js set up only in a shell profile).
 3. Pick the agents. An agent is listed as *not available*, with the reason, when its CLI
    is not on `PATH` or is too old to install plugins (for Devin: run `devin update`), or,
    for Copilot, when this VS Code has no agent plugins or they are turned off
